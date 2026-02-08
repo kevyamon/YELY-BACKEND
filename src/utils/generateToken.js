@@ -5,12 +5,11 @@ const generateToken = (res, userId) => {
     expiresIn: '30d',
   });
 
-  // Envoi du token dans un cookie HTTP-Only (Protection XSS)
   res.cookie('jwt', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV !== 'development', // Activé seulement en prod
-    sameSite: 'strict',
-    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
+    secure: true, // Obligatoire sur Render (HTTPS)
+    sameSite: 'none', // Permet au Frontend de lire le cookie depuis un autre domaine
+    maxAge: 30 * 24 * 60 * 60 * 1000, 
   });
 
   return token;
