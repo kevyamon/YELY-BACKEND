@@ -56,7 +56,6 @@ const loginUser = async (req, res) => {
   const { identifier, password } = req.body;
 
   try {
-    // Recherche par email OU téléphone (Insensible à la casse pour l'email)
     const user = await User.findOne({
       $or: [
         { email: { $regex: new RegExp(`^${identifier}$`, 'i') } },
@@ -66,7 +65,6 @@ const loginUser = async (req, res) => {
 
     if (user && (await user.comparePassword(password))) {
 
-      // --- SÉCURITÉ DISCIPLINE : Vérification du ban ---
       if (user.isBanned) {
         return res.status(403).json({
           message: `Accès refusé. Raison : ${user.banReason || "Non spécifiée"}.`
@@ -93,6 +91,8 @@ const loginUser = async (req, res) => {
   }
 };
 
+// @desc    Déconnexion
+// @route   POST /api/auth/logout
 const logoutUser = (req, res) => {
   res.cookie('jwt', '', {
     httpOnly: true,
@@ -101,4 +101,40 @@ const logoutUser = (req, res) => {
   res.status(200).json({ message: "Déconnecté." });
 };
 
-module.exports = { registerUser, loginUser, logoutUser };
+// @desc    Toggle disponibilité chauffeur
+// @route   PUT /api/auth/availability
+const updateAvailability = async (req, res) => {
+  const { isAvailable } = req.body;
+
+  try {
+    // Vérifier que c'est bien un chauffeur
+    if (req.user.role !== 'driver') {
+      return res.status(403).json({
+        message: "Seuls les chauffeurs peuvent modifier leur disponibilité."
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { isAvailable: Boolean(isAvailable) },
+      { new: true }
+    ).select('-password');
+
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable." });
+    }
+
+    res.json({
+      _id: user._id,
+      isAvailable: user.isAvailable,
+      message: user.isAvailable
+        ? "Vous êtes maintenant disponible pour recevoir des courses."
+        : "Vous êtes hors ligne. Aucune course ne vous sera proposée."
+    });
+  } catch (error) {
+    console.error("❌ [AVAILABILITY] Erreur serveur :", error.message, error.stack);
+    res.status(500).json({ message: "Erreur lors de la mise à jour de la disponibilité." });
+  }
+};
+
+module.exports = { registerUser, loginUser, logoutUser, updateAvailability };

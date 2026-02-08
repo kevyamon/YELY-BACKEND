@@ -1,20 +1,44 @@
+// backend/middleware/authMiddleware.js
+
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
 const protect = async (req, res, next) => {
   let token;
-  token = req.cookies.jwt;
 
-  if (token) {
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = await User.findById(decoded.userId).select('-password');
-      next();
-    } catch (error) {
-      res.status(401).json({ message: "Non autorisé, token invalide." });
+  // 1. Chercher le token dans le header Authorization (Bearer)
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+
+  // 2. Fallback : chercher dans les cookies
+  if (!token && req.cookies && req.cookies.jwt) {
+    token = req.cookies.jwt;
+  }
+
+  if (!token) {
+    return res.status(401).json({ message: "Non autorisé, aucun token." });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = await User.findById(decoded.userId).select('-password');
+
+    if (!req.user) {
+      return res.status(401).json({ message: "Utilisateur introuvable." });
     }
-  } else {
-    res.status(401).json({ message: "Non autorisé, aucun token." });
+
+    // Vérifier si l'utilisateur est banni
+    if (req.user.isBanned) {
+      return res.status(403).json({
+        message: `Accès refusé. Raison : ${req.user.banReason || "Non spécifiée"}.`
+      });
+    }
+
+    next();
+  } catch (error) {
+    console.error("❌ [AUTH] Token invalide :", error.message);
+    res.status(401).json({ message: "Non autorisé, token invalide." });
   }
 };
 
@@ -22,8 +46,8 @@ const protect = async (req, res, next) => {
 const authorize = (...roles) => {
   return (req, res, next) => {
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ 
-        message: `Le rôle ${req.user.role} n'est pas autorisé à accéder à cette ressource.` 
+      return res.status(403).json({
+        message: `Le rôle ${req.user.role} n'est pas autorisé à accéder à cette ressource.`
       });
     }
     next();

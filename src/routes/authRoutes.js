@@ -1,7 +1,10 @@
+// backend/routes/authRoutes.js
+
 const express = require('express');
 const router = express.Router();
 const Joi = require('joi');
-const { registerUser, loginUser, logoutUser } = require('../controllers/authController');
+const { registerUser, loginUser, logoutUser, updateAvailability } = require('../controllers/authController');
+const { protect } = require('../middleware/authMiddleware');
 const validate = require('../middleware/validationMiddleware');
 
 // --- SCHÉMA DE VALIDATION (CONTRAT D'ENTRÉE) ---
@@ -27,12 +30,12 @@ const registerSchema = Joi.object({
   })
 });
 
-// --- ROUTES ---
-
-// Applique la validation stricte Joi sur le registre
+// --- ROUTES PUBLIQUES ---
 router.post('/register', validate(registerSchema), registerUser);
-
 router.post('/login', loginUser);
 router.post('/logout', logoutUser);
+
+// --- ROUTES PROTÉGÉES ---
+router.put('/availability', protect, updateAvailability);
 
 module.exports = router;
