@@ -4,7 +4,6 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const mongoSanitize = require('express-mongo-sanitize');
-const xss = require('xss-clean');
 require('dotenv').config();
 
 // Imports des routes
@@ -15,12 +14,10 @@ const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
-// --- SÉCURITÉ FORTERESSE (ORDRE CORRIGÉ) ---
-
-// 1. Headers de sécurité (Helmet en premier toujours)
+// --- 1. SÉCURITÉ RÉSEAU (HELMET & RATE LIMIT) ---
+// Helmet protège tes headers HTTP
 app.use(helmet());
 
-// 2. Limiteur de débit
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -28,27 +25,29 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// 3. ANALYSEURS (On lit les données d'abord)
+// --- 2. ANALYSEURS DE DONNÉES (PARSERS) ---
+// On doit LIRE les données avant de pouvoir les NETTOYER
 app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(cookieParser());
 
-// 4. NETTOYEURS (On lave les données une fois lues)
+// --- 3. NETTOYAGE (ANTI-INJECTION NOSQL) ---
+// Maintenant que les données sont lues, on enlève les caractères '$' et '.' dangereux
 app.use(mongoSanitize());
-app.use(xss());
 
-// 5. Configuration CORS
+// --- 4. CONFIGURATION DES ACCÈS (CORS) ---
 app.use(cors({
   origin: process.env.FRONTEND_URL || '*', 
   credentials: true 
 }));
 
-// --- ROUTES API ---
+// --- 5. BRANCHEMENT DES ROUTES API ---
 app.use('/api/auth', authRoutes);
 app.use('/api/rides', rideRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/admin', adminRoutes);
 
-// --- GESTION DES ERREURS 404 ---
+// --- 6. GESTION DES ERREURS 404 ---
 app.use((req, res) => {
   res.status(404).json({ message: "Route introuvable dans cette forteresse." });
 });
