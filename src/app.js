@@ -4,6 +4,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const mongoSanitize = require('express-mongo-sanitize');
+const { filterXSS } = require('xss'); // Nouveau moteur XSS Pro
 require('dotenv').config();
 
 // Imports des routes
@@ -15,7 +16,6 @@ const adminRoutes = require('./routes/adminRoutes');
 const app = express();
 
 // --- 1. SÉCURITÉ RÉSEAU (HELMET & RATE LIMIT) ---
-// Helmet protège tes headers HTTP
 app.use(helmet());
 
 const limiter = rateLimit({
@@ -26,14 +26,29 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // --- 2. ANALYSEURS DE DONNÉES (PARSERS) ---
-// On doit LIRE les données avant de pouvoir les NETTOYER
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(cookieParser());
 
-// --- 3. NETTOYAGE (ANTI-INJECTION NOSQL) ---
-// Maintenant que les données sont lues, on enlève les caractères '$' et '.' dangereux
-app.use(mongoSanitize());
+// --- 3. NETTOYAGE DES DONNÉES (ANTI-INJECTION NOSQL & XSS) ---
+// Application manuelle pour compatibilité Express 5
+app.use((req, res, next) => {
+  if (req.body) {
+    // Nettoyage NoSQL
+    req.body = mongoSanitize.sanitize(req.body);
+    
+    // Nettoyage XSS Pro (On transforme le JSON en string, on nettoie, on repasse en JSON)
+    let stringifiedBody = JSON.stringify(req.body);
+    stringifiedBody = filterXSS(stringifiedBody);
+    req.body = JSON.parse(stringifiedBody);
+  }
+  
+  if (req.params) {
+    req.params = mongoSanitize.sanitize(req.params);
+  }
+  
+  next();
+});
 
 // --- 4. CONFIGURATION DES ACCÈS (CORS) ---
 app.use(cors({
