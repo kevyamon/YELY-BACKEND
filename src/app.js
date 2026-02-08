@@ -17,13 +17,18 @@ const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
+// --- 0. TRUST PROXY (Obligatoire sur Render, Heroku, Railway, etc.) ---
+app.set('trust proxy', 1);
+
 // --- 1. SÉCURITÉ RÉSEAU (HELMET & RATE LIMIT) ---
 app.use(helmet());
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
-  message: "La forteresse détecte une activité suspecte. Ralentissez."
+  message: "La forteresse détecte une activité suspecte. Ralentissez.",
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use('/api/', limiter);
 

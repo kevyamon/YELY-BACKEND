@@ -1,3 +1,5 @@
+// backend/models/User.js
+
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
@@ -52,10 +54,10 @@ const userSchema = new mongoose.Schema({
 
 userSchema.index({ currentLocation: '2dsphere' });
 
-userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
+// IMPORTANT : async + await = PAS de next(). Mongoose résout la Promise automatiquement.
+userSchema.pre('save', async function() {
+  if (!this.isModified('password')) return;
   this.password = await bcrypt.hash(this.password, 12);
-  next();
 });
 
 userSchema.methods.comparePassword = async function(candidatePassword) {
