@@ -4,7 +4,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const mongoSanitize = require('express-mongo-sanitize');
-const { filterXSS } = require('xss'); // Nouveau moteur XSS Pro
+const { filterXSS } = require('xss'); // Moteur XSS Grade Industriel
 require('dotenv').config();
 
 // Imports des routes
@@ -31,20 +31,24 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(cookieParser());
 
 // --- 3. NETTOYAGE DES DONNÉES (ANTI-INJECTION NOSQL & XSS) ---
-// Application manuelle pour compatibilité Express 5
 app.use((req, res, next) => {
-  if (req.body) {
-    // Nettoyage NoSQL
-    req.body = mongoSanitize.sanitize(req.body);
+  try {
+    if (req.body) {
+      // Nettoyage NoSQL
+      req.body = mongoSanitize.sanitize(req.body);
+      
+      // Nettoyage XSS Pro (Transformation en texte pour filtrer tout le JSON)
+      let stringifiedBody = JSON.stringify(req.body);
+      stringifiedBody = filterXSS(stringifiedBody);
+      req.body = JSON.parse(stringifiedBody);
+    }
     
-    // Nettoyage XSS Pro (On transforme le JSON en string, on nettoie, on repasse en JSON)
-    let stringifiedBody = JSON.stringify(req.body);
-    stringifiedBody = filterXSS(stringifiedBody);
-    req.body = JSON.parse(stringifiedBody);
-  }
-  
-  if (req.params) {
-    req.params = mongoSanitize.sanitize(req.params);
+    if (req.params) {
+      req.params = mongoSanitize.sanitize(req.params);
+    }
+  } catch (error) {
+    console.error("Erreur lors du nettoyage des données :", error);
+    // En cas d'erreur de parsing, on continue pour ne pas bloquer le serveur
   }
   
   next();
