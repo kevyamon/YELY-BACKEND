@@ -1,3 +1,5 @@
+// backend/controllers/authController.js
+
 const User = require('../models/User');
 const generateToken = require('../utils/generateToken');
 
@@ -30,16 +32,20 @@ const registerUser = async (req, res) => {
     if (user) {
       const token = generateToken(res, user._id);
       res.status(201).json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+        },
         token
       });
     } else {
       res.status(400).json({ message: "Données invalides." });
     }
   } catch (error) {
+    console.error("❌ [REGISTER] Erreur serveur :", error.message, error.stack);
     res.status(500).json({ message: "Erreur lors de l'inscription." });
   }
 };
@@ -47,7 +53,7 @@ const registerUser = async (req, res) => {
 // @desc    Connexion flexible avec Check de Bannissement
 // @route   POST /api/auth/login
 const loginUser = async (req, res) => {
-  const { identifier, password } = req.body; // identifier = email ou phone
+  const { identifier, password } = req.body;
 
   try {
     // Recherche par email OU téléphone (Insensible à la casse pour l'email)
@@ -59,25 +65,30 @@ const loginUser = async (req, res) => {
     });
 
     if (user && (await user.comparePassword(password))) {
-      
+
       // --- SÉCURITÉ DISCIPLINE : Vérification du ban ---
       if (user.isBanned) {
-        return res.status(403).json({ 
-          message: `Accès refusé. Raison : ${user.banReason || "Non spécifiée"}.` 
+        return res.status(403).json({
+          message: `Accès refusé. Raison : ${user.banReason || "Non spécifiée"}.`
         });
       }
 
       const token = generateToken(res, user._id);
       res.json({
-        _id: user._id,
-        name: user.name,
-        role: user.role,
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+        },
         token
       });
     } else {
       res.status(401).json({ message: "Identifiants invalides." });
     }
   } catch (error) {
+    console.error("❌ [LOGIN] Erreur serveur :", error.message, error.stack);
     res.status(500).json({ message: "Erreur lors de la connexion." });
   }
 };
