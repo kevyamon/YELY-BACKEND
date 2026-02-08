@@ -27,14 +27,14 @@ const userSchema = new mongoose.Schema({
   // --- ÉTAT DU CHAUFFEUR ---
   isAvailable: { type: Boolean, default: false },
   vehicle: {
-    type: { 
+    category: { 
       type: String, 
       enum: ['ECHO', 'STANDARD', 'VIP'],
-      required: function() { return this.role === 'driver'; }
+      default: null
     },
-    model: String,
-    plate: String,
-    color: String
+    model: { type: String, default: '' },
+    plate: { type: String, default: '' },
+    color: { type: String, default: '' }
   },
 
   // --- ABONNEMENT ---
@@ -46,15 +46,15 @@ const userSchema = new mongoose.Schema({
 
   // --- DOCUMENTS ---
   documents: {
-    idCard: String,
-    license: String,
-    insurance: String
+    idCard: { type: String, default: '' },
+    license: { type: String, default: '' },
+    insurance: { type: String, default: '' }
   }
 }, { timestamps: true });
 
 userSchema.index({ currentLocation: '2dsphere' });
 
-// IMPORTANT : async + await = PAS de next(). Mongoose résout la Promise automatiquement.
+// IMPORTANT : async sans next — Mongoose résout la Promise automatiquement
 userSchema.pre('save', async function() {
   if (!this.isModified('password')) return;
   this.password = await bcrypt.hash(this.password, 12);
