@@ -1,0 +1,28 @@
+# Dépendances (Trop lourd pour Git)
+node_modules/
+dist/
+build/
+
+# SECRETS (NE JAMAIS PARTAGER !)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Fichiers temporaires de Multer (Stockage local avant Cloudinary)
+src/uploads/
+uploads/
+
+# Logs (Fichiers de diagnostic)
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+*.log
+
+# Système et Editeurs
+.DS_Store
+.vscode/
+.idea/
+Thumbs.db
