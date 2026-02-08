@@ -15,23 +15,25 @@ const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
-// --- SÉCURITÉ FORTERESSE (ORDRE CRITIQUE) ---
+// --- SÉCURITÉ FORTERESSE (ORDRE CORRIGÉ) ---
 
-// 1. Headers de sécurité de base
+// 1. Headers de sécurité (Helmet en premier toujours)
 app.use(helmet());
 
-// 2. Limiteur de débit (Anti-DDoS / Brute Force)
+// 2. Limiteur de débit
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 100,
   message: "La forteresse détecte une activité suspecte. Ralentissez."
 });
 app.use('/api/', limiter);
 
-// 3. Nettoyage contre les injections NoSQL
-app.use(mongoSanitize());
+// 3. ANALYSEURS (On lit les données d'abord)
+app.use(express.json({ limit: '10kb' }));
+app.use(cookieParser());
 
-// 4. Nettoyage contre les failles XSS
+// 4. NETTOYEURS (On lave les données une fois lues)
+app.use(mongoSanitize());
 app.use(xss());
 
 // 5. Configuration CORS
@@ -39,10 +41,6 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || '*', 
   credentials: true 
 }));
-
-// 6. Analyseurs de données avec limites
-app.use(express.json({ limit: '10kb' }));
-app.use(cookieParser());
 
 // --- ROUTES API ---
 app.use('/api/auth', authRoutes);
