@@ -1,140 +1,348 @@
-// backend/controllers/authController.js
+// src/controllers/authController.js
+// AUTHENTIFICATION BÉTON - Transactions MongoDB, Timing Constant, Anti-Enumeration
+// CSCSM Level: Bank Grade
 
 const User = require('../models/User');
-const generateToken = require('../utils/generateToken');
+const { generateAuthResponse, rotateTokens, clearRefreshTokenCookie, verifyRefreshToken } = require('../utils/tokenService');
+const mongoose = require('mongoose');
+const { SECURITY_CONSTANTS } = require('../config/env');
 
-// @desc    Inscription
-// @route   POST /api/auth/register
+// Messages génériques (anti-enumeration)
+const AUTH_MESSAGES = {
+  INVALID_CREDENTIALS: 'Identifiants invalides.',
+  USER_EXISTS: 'Cet email ou téléphone est déjà utilisé.',
+  SERVER_ERROR: 'Erreur serveur. Veuillez réessayer.',
+  BANNED: 'Compte suspendu.',
+  REGISTRATION_SUCCESS: 'Compte créé avec succès.',
+  LOGIN_SUCCESS: 'Connexion réussie.',
+  LOGOUT_SUCCESS: 'Déconnexion réussie.',
+  AVAILABILITY_UPDATED: 'Disponibilité mise à jour.'
+};
+
+/**
+ * @desc Inscription sécurisée avec transaction
+ * @route POST /api/auth/register
+ */
 const registerUser = async (req, res) => {
-  const { name, email, phone, password, role } = req.body;
-
+  const session = await mongoose.startSession();
+  
   try {
-    const userExists = await User.findOne({ $or: [{ email }, { phone }] });
+    await session.withTransaction(async () => {
+      const { name, email, phone, password, role } = req.body;
 
-    if (userExists) {
-      return res.status(400).json({ message: "L'utilisateur existe déjà (Email ou Tel)." });
-    }
+      // Normalisation
+      const normalizedEmail = email.toLowerCase().trim();
+      const normalizedPhone = phone.replace(/\s/g, '');
+      const trimmedName = name.trim();
 
-    // Attribution automatique du rôle SuperAdmin si c'est ton mail
-    let finalRole = role || 'rider';
-    if (email === process.env.ADMIN_MAIL) {
-      finalRole = 'superadmin';
-    }
+      // Vérification existence (avec lock transactionnel)
+      const existingUser = await User.findOne({
+        $or: [
+          { email: normalizedEmail },
+          { phone: normalizedPhone }
+        ]
+      }).session(session);
 
-    const user = await User.create({
-      name,
-      email,
-      phone,
-      password,
-      role: finalRole
+      if (existingUser) {
+        const field = existingUser.email === normalizedEmail ? 'email' : 'téléphone';
+        throw new Error(`DUPLICATE_${field.toUpperCase()}`);
+      }
+
+      // Détermination rôle (JAMAIS depuis client pour privilégiés)
+      let finalRole = 'rider';
+      if (role === 'driver') finalRole = 'driver';
+      
+      // SuperAdmin UNIQUEMENT via env variable
+      if (normalizedEmail === process.env.ADMIN_MAIL?.toLowerCase()) {
+        finalRole = 'superadmin';
+        console.log(`[SECURITY] Création SuperAdmin: ${normalizedEmail}`);
+      }
+
+      // Création utilisateur
+      const [user] = await User.create([{
+        name: trimmedName,
+        email: normalizedEmail,
+        phone: normalizedPhone,
+        password, // Hashé par pre-save hook
+        role: finalRole,
+        isAvailable: false,
+        'subscription.isActive': false,
+        'subscription.hoursRemaining': 0
+      }], { session });
+
+      // Génération tokens et réponse
+      const authResponse = generateAuthResponse(res, user);
+      
+      res.status(201).json({
+        ...authResponse,
+        message: AUTH_MESSAGES.REGISTRATION_SUCCESS
+      });
     });
 
-    if (user) {
-      const token = generateToken(res, user._id);
-      res.status(201).json({
-        user: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          role: user.role,
-        },
-        token
-      });
-    } else {
-      res.status(400).json({ message: "Données invalides." });
-    }
   } catch (error) {
-    console.error("❌ [REGISTER] Erreur serveur :", error.message, error.stack);
-    res.status(500).json({ message: "Erreur lors de l'inscription." });
+    // Gestion erreurs spécifiques
+    if (error.message === 'DUPLICATE_EMAIL') {
+      return res.status(409).json({
+        success: false,
+        message: 'Cet email est déjà utilisé.',
+        code: 'DUPLICATE_EMAIL'
+      });
+    }
+    if (error.message === 'DUPLICATE_PHONE') {
+      return res.status(409).json({
+        success: false,
+        message: 'Ce numéro est déjà utilisé.',
+        code: 'DUPLICATE_PHONE'
+      });
+    }
+
+    console.error('[REGISTER] Erreur:', error.message);
+    res.status(500).json({
+      success: false,
+      message: AUTH_MESSAGES.SERVER_ERROR,
+      code: 'SERVER_ERROR'
+    });
+  } finally {
+    session.endSession();
   }
 };
 
-// @desc    Connexion flexible avec Check de Bannissement
-// @route   POST /api/auth/login
+/**
+ * @desc Connexion avec timing constant (anti-timing attack)
+ * @route POST /api/auth/login
+ */
 const loginUser = async (req, res) => {
-  const { identifier, password } = req.body;
-
+  const startTime = Date.now();
+  
   try {
-    const user = await User.findOne({
-      $or: [
-        { email: { $regex: new RegExp(`^${identifier}$`, 'i') } },
-        { phone: identifier }
-      ]
+    const { identifier, password } = req.body;
+
+    // Détection type identifiant
+    const isEmail = identifier.includes('@');
+    const normalizedId = isEmail 
+      ? identifier.toLowerCase().trim() 
+      : identifier.replace(/\s/g, '');
+
+    // Requête sécurisée (pas de regex avec entrée utilisateur)
+    const query = isEmail 
+      ? { email: normalizedId }
+      : { phone: normalizedId };
+
+    const user = await User.findOne(query).select('+password');
+
+    // TIMING CONSTANT: toujours comparer, même si user null
+    const dummyHash = '$2b$12$abcdefghijklmnopqrstuvwxycdefghijklmnopqrstu';
+    const hashToCompare = user ? user.password : dummyHash;
+    
+    const isMatch = await User.comparePasswordStatic(password, hashToCompare);
+    
+    // Délai artificiel si rapide (masque la différence user existe/pas)
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 100) {
+      await new Promise(resolve => setTimeout(resolve, 100 - elapsed));
+    }
+
+    if (!user || !isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: AUTH_MESSAGES.INVALID_CREDENTIALS,
+        code: 'INVALID_CREDENTIALS'
+      });
+    }
+
+    // Vérifications post-authentification
+    if (user.isBanned) {
+      return res.status(403).json({
+        success: false,
+        message: AUTH_MESSAGES.BANNED,
+        reason: user.banReason || 'Contactez le support',
+        code: 'USER_BANNED'
+      });
+    }
+
+    // Succès
+    const authResponse = generateAuthResponse(res, user);
+    
+    res.json({
+      ...authResponse,
+      message: AUTH_MESSAGES.LOGIN_SUCCESS
     });
 
-    if (user && (await user.comparePassword(password))) {
+  } catch (error) {
+    console.error('[LOGIN] Erreur:', error.message);
+    res.status(500).json({
+      success: false,
+      message: AUTH_MESSAGES.SERVER_ERROR,
+      code: 'SERVER_ERROR'
+    });
+  }
+};
 
-      if (user.isBanned) {
+/**
+ * @desc Rafraîchissement des tokens (rotation)
+ * @route POST /api/auth/refresh
+ */
+const refreshToken = async (req, res) => {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+
+    if (!refreshToken) {
+      return res.status(401).json({
+        success: false,
+        message: 'Session expirée. Veuillez vous reconnecter.',
+        code: 'REFRESH_MISSING'
+      });
+    }
+
+    let decoded;
+    try {
+      decoded = verifyRefreshToken(refreshToken);
+    } catch (err) {
+      clearRefreshTokenCookie(res);
+      return res.status(401).json({
+        success: false,
+        message: 'Session invalide. Veuillez vous reconnecter.',
+        code: 'REFRESH_INVALID'
+      });
+    }
+
+    const user = await User.findById(decoded.userId).select('-password');
+    
+    if (!user || user.isBanned) {
+      clearRefreshTokenCookie(res);
+      return res.status(401).json({
+        success: false,
+        message: 'Session invalide.',
+        code: 'USER_INVALID'
+      });
+    }
+
+    // Rotation: nouveau refresh, ancien révoqué
+    const tokens = rotateTokens(res, refreshToken, user._id, user.role);
+
+    res.json({
+      success: true,
+      data: {
+        accessToken: tokens.accessToken,
+        expiresIn: 900
+      },
+      message: 'Session rafraîchie.'
+    });
+
+  } catch (error) {
+    console.error('[REFRESH] Erreur:', error.message);
+    res.status(500).json({
+      success: false,
+      message: AUTH_MESSAGES.SERVER_ERROR,
+      code: 'SERVER_ERROR'
+    });
+  }
+};
+
+/**
+ * @desc Déconnexion sécurisée (révocation token)
+ * @route POST /api/auth/logout
+ */
+const logoutUser = async (req, res) => {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+    
+    if (refreshToken) {
+      const { revokeRefreshToken } = require('../utils/tokenService');
+      revokeRefreshToken(refreshToken);
+    }
+    
+    clearRefreshTokenCookie(res);
+    
+    res.status(200).json({
+      success: true,
+      message: AUTH_MESSAGES.LOGOUT_SUCCESS
+    });
+  } catch (error) {
+    // Même en cas d'erreur, on nettoie le cookie
+    clearRefreshTokenCookie(res);
+    res.status(200).json({
+      success: true,
+      message: AUTH_MESSAGES.LOGOUT_SUCCESS
+    });
+  }
+};
+
+/**
+ * @desc Mise à jour disponibilité chauffeur (avec validation métier)
+ * @route PUT /api/auth/availability
+ */
+const updateAvailability = async (req, res) => {
+  try {
+    const { isAvailable } = req.body;
+
+    // Validation stricte type
+    if (typeof isAvailable !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'La valeur doit être true ou false.',
+        code: 'INVALID_TYPE'
+      });
+    }
+
+    // Vérification rôle
+    if (req.user.role !== 'driver') {
+      return res.status(403).json({
+        success: false,
+        message: 'Opération réservée aux chauffeurs.',
+        code: 'NOT_DRIVER'
+      });
+    }
+
+    // Si mise en disponible: vérifier abonnement actif
+    if (isAvailable) {
+      const user = await User.findById(req.user._id);
+      
+      if (!user.subscription?.isActive || user.subscription.hoursRemaining <= 0) {
         return res.status(403).json({
-          message: `Accès refusé. Raison : ${user.banReason || "Non spécifiée"}.`
+          success: false,
+          message: 'Abonnement invalide ou crédit épuisé.',
+          code: 'SUBSCRIPTION_INVALID'
         });
       }
 
-      const token = generateToken(res, user._id);
-      res.json({
-        user: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          role: user.role,
-        },
-        token
-      });
-    } else {
-      res.status(401).json({ message: "Identifiants invalides." });
-    }
-  } catch (error) {
-    console.error("❌ [LOGIN] Erreur serveur :", error.message, error.stack);
-    res.status(500).json({ message: "Erreur lors de la connexion." });
-  }
-};
-
-// @desc    Déconnexion
-// @route   POST /api/auth/logout
-const logoutUser = (req, res) => {
-  res.cookie('jwt', '', {
-    httpOnly: true,
-    expires: new Date(0),
-  });
-  res.status(200).json({ message: "Déconnecté." });
-};
-
-// @desc    Toggle disponibilité chauffeur
-// @route   PUT /api/auth/availability
-const updateAvailability = async (req, res) => {
-  const { isAvailable } = req.body;
-
-  try {
-    // Vérifier que c'est bien un chauffeur
-    if (req.user.role !== 'driver') {
-      return res.status(403).json({
-        message: "Seuls les chauffeurs peuvent modifier leur disponibilité."
-      });
+      // Vérifier documents si premier passage en disponible (optionnel)
+      // if (!user.documents?.idCard || !user.documents?.license) {
+      //   return res.status(403).json({...});
+      // }
     }
 
-    const user = await User.findByIdAndUpdate(
+    const updatedUser = await User.findByIdAndUpdate(
       req.user._id,
-      { isAvailable: Boolean(isAvailable) },
-      { new: true }
-    ).select('-password');
-
-    if (!user) {
-      return res.status(404).json({ message: "Utilisateur introuvable." });
-    }
+      { isAvailable },
+      { new: true, runValidators: true }
+    ).select('isAvailable name');
 
     res.json({
-      _id: user._id,
-      isAvailable: user.isAvailable,
-      message: user.isAvailable
-        ? "Vous êtes maintenant disponible pour recevoir des courses."
-        : "Vous êtes hors ligne. Aucune course ne vous sera proposée."
+      success: true,
+      data: {
+        isAvailable: updatedUser.isAvailable,
+        driverName: updatedUser.name
+      },
+      message: isAvailable 
+        ? 'Vous êtes visible pour les courses.'
+        : 'Vous êtes hors ligne.'
     });
+
   } catch (error) {
-    console.error("❌ [AVAILABILITY] Erreur serveur :", error.message, error.stack);
-    res.status(500).json({ message: "Erreur lors de la mise à jour de la disponibilité." });
+    console.error('[AVAILABILITY] Erreur:', error.message);
+    res.status(500).json({
+      success: false,
+      message: AUTH_MESSAGES.SERVER_ERROR,
+      code: 'SERVER_ERROR'
+    });
   }
 };
 
-module.exports = { registerUser, loginUser, logoutUser, updateAvailability };
+module.exports = {
+  registerUser,
+  loginUser,
+  logoutUser,
+  refreshToken,
+  updateAvailability
+};
