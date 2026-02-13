@@ -37,9 +37,15 @@ const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
   console.error('❌ CONFIGURATION INVALIDE - Le serveur refuse de démarrer:');
-  parsed.error.errors.forEach((err) => {
-    console.error(`   • ${err.path.join('.')}: ${err.message}`);
+  
+  // Formatage propre des erreurs Zod
+  const formattedErrors = parsed.error.issues.map((issue) => {
+    const path = issue.path.join('.');
+    return `   • ${path}: ${issue.message}`;
   });
+  
+  formattedErrors.forEach((err) => console.error(err));
+  
   process.exit(1);
 }
 
