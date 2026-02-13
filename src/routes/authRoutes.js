@@ -15,10 +15,9 @@ const {
 } = require('../controllers/authController');
 const { protect, optionalAuth } = require('../middleware/authMiddleware');
 const validate = require('../middleware/validationMiddleware');
-const { SECURITY_CONSTANTS } = require('../config/env');
 
 // ═══════════════════════════════════════════════════════════
-// RATE LIMITING ADAPTATIF (Anti-Brute Force Intelligent)
+// RATE LIMITING (Anti-Brute Force) - Version compatible IPv6
 // ═══════════════════════════════════════════════════════════
 
 const createAuthLimiter = (maxAttempts, windowMinutes) => {
@@ -26,11 +25,8 @@ const createAuthLimiter = (maxAttempts, windowMinutes) => {
     windowMs: windowMinutes * 60 * 1000,
     max: maxAttempts,
     skipSuccessfulRequests: true, // Les succès ne comptent pas
-    keyGenerator: (req) => {
-      // Clé composite: IP + identifiant (évite blocage NAT entreprise)
-      const identifier = req.body.identifier || req.body.email || 'unknown';
-      return `${req.ip}_${identifier.toLowerCase().trim()}`;
-    },
+    standardHeaders: true,
+    legacyHeaders: false,
     handler: (req, res) => {
       console.warn(`[SECURITY] Rate limit dépassé - IP: ${req.ip}, Route: ${req.originalUrl}`);
       res.status(429).json({
@@ -39,9 +35,7 @@ const createAuthLimiter = (maxAttempts, windowMinutes) => {
         retryAfter: windowMinutes * 60,
         code: 'RATE_LIMIT_EXCEEDED'
       });
-    },
-    standardHeaders: true,
-    legacyHeaders: false,
+    }
   });
 };
 
@@ -56,7 +50,7 @@ const loginLimiter = createAuthLimiter(5, 15);      // 5 logins/15min/IP
 const joiOptions = {
   abortEarly: false,
   stripUnknown: true,
-  convert: false, // Pas de conversion auto, on contrôle tout
+  convert: false,
   errors: {
     wrap: { label: false }
   }
@@ -66,7 +60,7 @@ const joiOptions = {
 // SCHÉMAS DE VALIDATION FORTERESSE
 // ═══════════════════════════════════════════════════════════
 
-// Liste domaines temporaires (à externaliser en config)
+// Liste domaines temporaires
 const DISPOSABLE_DOMAINS = [
   'tempmail.com', '10minutemail.com', 'guerrillamail.com', 
   'yopmail.com', 'mailinator.com', 'throwaway.com'
@@ -77,7 +71,7 @@ const registerSchema = Joi.object({
     .trim()
     .min(2)
     .max(50)
-    .pattern(/^[a-zA-Z\s'-]+$/) // Caractères autorisés strictement
+    .pattern(/^[a-zA-Z\s'-]+$/)
     .required()
     .messages({
       'string.empty': 'Le nom est obligatoire.',
