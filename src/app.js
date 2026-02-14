@@ -1,5 +1,5 @@
 // src/app.js
-// CONFIGURATION EXPRESS FORTERESSE - CORS strict, Sécurité NoSQL & XSS
+// CONFIGURATION EXPRESS FORTERESSE - Versioning API & Sécurité Flux
 // CSCSM Level: Bank Grade
 
 const express = require('express');
@@ -22,18 +22,18 @@ const userRoutes = require('./routes/userRoutes');
 
 const app = express();
 
-// Trust proxy pour Render/Heroku (Important pour Rate Limit)
+// Trust proxy pour Render/Heroku (Précision pour le Rate Limiting)
 if (env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
 
-// 1. LOGS HTTP
+// 1. LOGS HTTP (Utilise le logger avec masquage PII)
 app.use((req, res, next) => {
   logger.http(`${req.method} ${req.url} - IP: ${req.ip}`);
   next();
 });
 
-// 2. SÉCURITÉ HEADERS (Helmet)
+// 2. SÉCURITÉ HEADERS (Helmet avec CSP stricte)
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -70,8 +70,8 @@ app.use(cors(corsOptions));
 // 4. RATE LIMITING GLOBAL
 app.use('/api/', apiLimiter);
 
-// 5. PARSERS
-app.use(express.json({ limit: '10kb' }));
+// 5. PARSERS & PROTECTION PAYLOAD
+app.use(express.json({ limit: '10kb' })); // Protection contre les payloads massifs
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(cookieParser());
 
@@ -79,21 +79,24 @@ app.use(cookieParser());
 app.use(mongoSanitize({
   replaceWith: '_',
   onSanitize: ({ req, key }) => {
-    logger.warn(`[SANITIZE] Champ nettoyé: ${key} - IP: ${req.ip}`);
+    logger.warn(`[SANITIZE] Champ suspect nettoyé: ${key} - IP: ${req.ip}`);
   }
 }));
 
-// Utilisation du middleware XSS isolé
+// Protection XSS (Middleware isolé)
 app.use(sanitizationMiddleware);
 
-// 7. ROUTES API
-// Health Check Simple (JSON) - Suffisant pour Render/K8s
+// 7. ROUTES API - VERSIONING V1 (Bank Grade)
+const API_V1_PREFIX = '/api/v1';
+
+// Health Check Simple
 app.get('/status', (req, res) => {
   res.status(200).json({ 
     status: 'ok', 
     timestamp: new Date(),
     uptime: process.uptime(),
     env: env.NODE_ENV,
+    version: '1.0.0',
     service: 'Yély API'
   });
 });
@@ -102,22 +105,23 @@ app.get('/', (req, res) => {
   res.status(200).json({ status: 'ok', service: 'Yély API Ready' });
 });
 
-app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/rides', rideRoutes);
-app.use('/api/subscriptions', subscriptionRoutes);
-app.use('/api/admin', adminRoutes);
+// Montage des modules sous le préfixe V1
+app.use(`${API_V1_PREFIX}/auth`, authRoutes);
+app.use(`${API_V1_PREFIX}/users`, userRoutes);
+app.use(`${API_V1_PREFIX}/rides`, rideRoutes);
+app.use(`${API_V1_PREFIX}/subscriptions`, subscriptionRoutes);
+app.use(`${API_V1_PREFIX}/admin`, adminRoutes);
 
-// 8. GESTION ERREURS 404
+// 8. GESTION DES ROUTES INEXISTANTES (404)
 app.use((req, res) => {
-  logger.warn(`[404] Endpoint non trouvé: ${req.method} ${req.url}`);
+  logger.warn(`[404] Endpoint non trouvé ou accès non autorisé: ${req.method} ${req.url}`);
   res.status(404).json({
     success: false,
-    message: "Endpoint non trouvé."
+    message: "La ressource demandée est introuvable."
   });
 });
 
-// 9. GESTION GLOBALE ERREURS
+// 9. GESTIONNAIRE D'ERREURS CENTRALISÉ
 app.use(errorHandler);
 
 module.exports = app;
