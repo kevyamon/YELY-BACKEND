@@ -125,7 +125,7 @@ userSchema.statics.findAvailableDriversNear = function(coordinates, maxDistanceM
     query['vehicle.category'] = forfait;
   }
 
-  return this.find(query).select('name phone vehicle currentLocation rating -password -__v');
+  return this.find(query).select('name phone vehicle currentLocation rating -password -__v').limit(5);
 };
 
 module.exports = mongoose.model('User', userSchema);
