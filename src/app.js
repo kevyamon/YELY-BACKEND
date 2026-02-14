@@ -1,5 +1,5 @@
 // src/app.js
-// CONFIGURATION EXPRESS FORTERESSE - CORS strict, Sécurité NoSQL & XSS
+// CONFIGURATION EXPRESS FORTERESSE - CORS strict, Sécurité NoSQL & XSS & Monitoring
 // CSCSM Level: Bank Grade
 
 const express = require('express');
@@ -11,14 +11,35 @@ const { env } = require('./config/env');
 const { apiLimiter } = require('./middleware/rateLimitMiddleware');
 const { sanitizationMiddleware } = require('./middleware/sanitizationMiddleware');
 const { errorHandler } = require('./middleware/errorMiddleware');
-const logger = require('./config/logger'); // Ajout Logger
+const logger = require('./config/logger');
+
+// 📊 CONFIGURATION MONITORING (Tableau de bord temps réel)
+const statusMonitor = require('express-status-monitor')({
+  title: 'Yély Monitor',
+  path: '/status',
+  socketPath: '/socket.io', // On surveille aussi les WebSockets
+  chartVisibility: {
+    cpu: true,
+    mem: true,
+    load: true,
+    responseTime: true,
+    rps: true,
+    statusCodes: true,
+  },
+  healthChecks: [{
+    protocol: 'http',
+    host: 'localhost',
+    path: '/',
+    port: process.env.PORT || 5000
+  }]
+});
 
 // Routes
 const authRoutes = require('./routes/authRoutes');
 const rideRoutes = require('./routes/rideRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
 const adminRoutes = require('./routes/adminRoutes');
-const userRoutes = require('./routes/userRoutes'); // Ajout route user
+const userRoutes = require('./routes/userRoutes');
 
 const app = express();
 
@@ -27,7 +48,11 @@ if (env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
 
-// 1. LOGS HTTP (Avant tout le reste)
+// 0. MONITORING (DOIT ÊTRE LE PREMIER) 🛑
+// Accessible sur /status
+app.use(statusMonitor);
+
+// 1. LOGS HTTP
 app.use((req, res, next) => {
   logger.http(`${req.method} ${req.url} - IP: ${req.ip}`);
   next();
@@ -38,8 +63,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"], // Nécessaire pour le CSS de status-monitor
+      scriptSrc: ["'self'", "'unsafe-inline'"], // Nécessaire pour les charts de status-monitor
       imgSrc: ["'self'", "data:", "https://res.cloudinary.com"],
       connectSrc: ["'self'", env.FRONTEND_URL],
     },
@@ -76,7 +101,6 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(cookieParser());
 
 // 6. NETTOYAGE ANTI-INJECTION
-// Note: Le hack Express 5 a été SUPPRIMÉ car nous sommes repassés en Express 4 stable
 app.use(mongoSanitize({
   replaceWith: '_',
   onSanitize: ({ req, key }) => {
