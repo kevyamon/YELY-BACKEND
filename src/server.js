@@ -1,5 +1,5 @@
 // src/server.js
-// SERVEUR YÉLY - Socket Sécurisé & Scalable
+// SERVEUR YÉLY - Socket Sécurisé, Anti-Zombie & Scalable
 // CSCSM Level: Bank Grade
 
 const http = require('http');
@@ -14,22 +14,19 @@ const logger = require('./config/logger');
 const server = http.createServer(app);
 
 // -------------------------------------------------------------
-// ABSTRACTION RATE LIMIT (Préparation Redis)
+// ABSTRACTION RATE LIMIT (Prêt pour Redis)
 // -------------------------------------------------------------
-// En production clusterisée, ceci sera remplacé par un client Redis.
-const RateLimitStore = new Map();
-
-const checkSocketRateLimit = (userId) => {
-  const now = Date.now();
-  const lastUpdate = RateLimitStore.get(userId) || 0;
-  
-  // Limite : 1 update toutes les 1000ms (Protection Flood)
-  if (now - lastUpdate < 1000) return false;
-  
-  RateLimitStore.set(userId, now);
-  return true;
+const RateLimitStore = {
+  store: new Map(),
+  check: function(userId, limitMs = 1000) {
+    const now = Date.now();
+    const lastUpdate = this.store.get(userId) || 0;
+    if (now - lastUpdate < limitMs) return false;
+    this.store.set(userId, now);
+    return true;
+  },
+  clear: function(userId) { this.store.delete(userId); }
 };
-// -------------------------------------------------------------
 
 const io = new Server(server, {
   cors: {
@@ -37,14 +34,14 @@ const io = new Server(server, {
     methods: ['GET', 'POST'],
     credentials: true
   },
-  transports: ['websocket'], // Websocket only (Performance)
+  transports: ['websocket'],
   pingTimeout: 60000,
-  maxHttpBufferSize: 1e6 // 1MB Max payload
+  maxHttpBufferSize: 1e6 // 1MB Max
 });
 
 app.set('socketio', io);
 
-// Middleware Auth Socket
+// Middleware Auth Socket - Validation Temps Réel
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth.token;
@@ -52,53 +49,43 @@ io.use(async (socket, next) => {
 
     let decoded;
     try {
-      decoded = jwt.verify(token, env.JWT_SECRET);
+      // Utilisation du secret Access isolé (Phase 1)
+      decoded = jwt.verify(token, env.JWT_ACCESS_SECRET);
     } catch (err) {
-      if (err.name === 'TokenExpiredError') return next(new Error('AUTH_TOKEN_EXPIRED'));
-      return next(new Error('AUTH_TOKEN_INVALID'));
+      return next(new Error(`AUTH_TOKEN_${err.name === 'TokenExpiredError' ? 'EXPIRED' : 'INVALID'}`));
     }
 
     if (decoded.type !== 'access') return next(new Error('AUTH_WRONG_TOKEN_TYPE'));
 
-    // Optimisation: Lean() pour éviter la surcharge mémoire
-    const user = await User.findById(decoded.userId).select('-password -__v').lean();
+    const user = await User.findById(decoded.userId).select('name role isBanned isAvailable').lean();
     if (!user) return next(new Error('AUTH_USER_NOT_FOUND'));
     if (user.isBanned) return next(new Error('AUTH_USER_BANNED'));
 
-    // Anti-Tampering Rôle
-    if (decoded.role && decoded.role !== user.role) {
-      logger.warn(`[SOCKET SECURITY] Rôle mismatch: Token ${decoded.role} vs DB ${user.role}`);
-      return next(new Error('AUTH_ROLE_MISMATCH'));
-    }
-
     socket.user = user;
-    logger.info(`[SOCKET CONNECT] ${user.name} (${user.role}) connected`);
     next();
   } catch (error) {
-    logger.error(`[SOCKET HANDSHAKE] Error: ${error.message}`);
+    logger.error(`[SOCKET AUTH] ${error.message}`);
     next(new Error('AUTH_CONNECTION_FAILED'));
   }
 });
 
 io.on('connection', (socket) => {
   const user = socket.user;
+  const userIdStr = user._id.toString();
 
-  socket.join(user._id.toString());
-  socket.join(`role:${user.role}`);
-
+  // 🛡️ SÉCURITÉ ROOMS : Isolation stricte
+  socket.join(userIdStr);
   if (user.role === 'driver') {
     socket.join('drivers');
+    socket.join(`drivers:${user.forfait || 'standard'}`);
   }
 
-  // UPDATE LOCATION (Avec Rate Limit Externalisé)
+  // UPDATE LOCATION - Anti-Flood & Persistance
   socket.on('update_location', async (coords) => {
     if (!coords?.latitude || !coords?.longitude) return;
-
-    // Utilisation du Store abstrait
-    if (!checkSocketRateLimit(user._id.toString())) return;
+    if (!RateLimitStore.check(userIdStr)) return;
 
     try {
-      // Optimisation: updateOne est plus rapide que findByIdAndUpdate
       await User.updateOne({ _id: user._id }, {
         currentLocation: {
           type: 'Point',
@@ -107,47 +94,49 @@ io.on('connection', (socket) => {
         lastLocationAt: new Date()
       });
     } catch (error) {
-      logger.error(`[SOCKET LOC] ${user._id}: ${error.message}`);
+      logger.error(`[SOCKET LOC] ${userIdStr}: ${error.message}`);
     }
   });
 
-  // Autres événements (Proximité, Pancarte...)
+  // GESTION DES ÉVÉNEMENTS MÉTIER (Proximité / Pancarte)
   socket.on('proximity_reached', (data) => {
     if (!data?.riderId) return;
+    // On n'autorise que les chauffeurs à émettre cet événement
+    if (user.role !== 'driver') return;
+
     io.to(data.riderId).emit('driver_arrived', { 
         message: 'Votre Yély est là !',
         driverName: user.name 
     });
-    logger.info(`[SOCKET EVENT] Proximité: ${user.name} -> ${data.riderId}`);
   });
 
-  socket.on('show_pancarte', (data) => {
-    if (!data?.targetUserId) return;
-    io.to(data.targetUserId).emit('pancarte_active', {
-      senderName: user.name,
-      message: `${user.name} a activé sa pancarte !`
-    });
-    logger.info(`[SOCKET EVENT] Pancarte: ${user.name} -> ${data.targetUserId}`);
-  });
-
-  socket.on('disconnect', (reason) => {
+  // 🛑 GESTION DE LA DÉCONNEXION (Anti-Zombie)
+  socket.on('disconnect', async (reason) => {
     logger.info(`[SOCKET DISCONNECT] ${user.name}: ${reason}`);
+    
+    if (user.role === 'driver') {
+      try {
+        // Libération automatique du statut pour éviter les commandes fantômes
+        await User.updateOne({ _id: user._id }, { $set: { isAvailable: false } });
+        logger.info(`[CLEANUP] Chauffeur ${user.name} marqué indisponible.`);
+      } catch (err) {
+        logger.error(`[CLEANUP ERROR] ${user.name}: ${err.message}`);
+      }
+    }
+    RateLimitStore.clear(userIdStr);
   });
 });
 
-// Démarrage
-const PORT = env.PORT;
+// Démarrage avec protection MongoDB Pool
 const startServer = async () => {
   try {
     await mongoose.connect(env.MONGO_URI, {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
     });
     logger.info('✅ MongoDB connecté');
-    server.listen(PORT, () => {
-      logger.info(`🚀 Serveur Yély actif sur port ${PORT}`);
-      logger.info(`🔒 Mode: ${env.NODE_ENV}`);
+    server.listen(env.PORT, () => {
+      logger.info(`🚀 Serveur Yély actif sur port ${env.PORT} [${env.NODE_ENV}]`);
     });
   } catch (err) {
     logger.error(`❌ Échec démarrage: ${err.message}`);
@@ -155,11 +144,15 @@ const startServer = async () => {
   }
 };
 
+// Arrêt Gracieux (Graceful Shutdown)
 process.on('SIGTERM', async () => {
-  logger.info('SIGTERM reçu, arrêt gracieux...');
-  server.close();
-  await mongoose.connection.close();
-  process.exit(0);
+  logger.info('SIGTERM reçu, fermeture des connexions...');
+  // Marquer tous les chauffeurs connectés comme indisponibles avant de couper ?
+  // Optionnel mais recommandé pour une haute disponibilité
+  server.close(async () => {
+    await mongoose.connection.close();
+    process.exit(0);
+  });
 });
 
 startServer();
