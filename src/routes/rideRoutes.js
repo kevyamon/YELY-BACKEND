@@ -1,10 +1,10 @@
 // src/routes/rideRoutes.js
-// ROUTES COURSES - Validation Joi stricte, Protection injection GPS
+// ROUTES COURSES - Validation Zod Stricte (GPS & Adresses)
 // CSCSM Level: Bank Grade
 
 const express = require('express');
 const router = express.Router();
-const Joi = require('joi');
+const { z } = require('zod');
 const {
   requestRide,
   acceptRide,
@@ -15,83 +15,48 @@ const { protect, authorize } = require('../middleware/authMiddleware');
 const validate = require('../middleware/validationMiddleware');
 
 // ═══════════════════════════════════════════════════════════
-// OPTIONS JOI
+// SCHÉMAS ZOD
 // ═══════════════════════════════════════════════════════════
 
-const joiOptions = {
-  abortEarly: false,
-  stripUnknown: true,
-  convert: true // Conversion numérique pour coordonnées
-};
+// Coordonnées GPS [lng, lat]
+const coordinatesSchema = z.tuple([
+  z.number().min(-180).max(180), // Longitude
+  z.number().min(-90).max(90)    // Latitude
+], {
+  invalid_type_error: "Coordonnées doivent être des nombres",
+  required_error: "Coordonnées requises [lng, lat]"
+});
 
-// ═══════════════════════════════════════════════════════════
-// SCHÉMAS VALIDATION
-// ═══════════════════════════════════════════════════════════
-
-// Coordonnées GPS strictes [longitude, latitude]
-const coordinatesSchema = Joi.array()
-  .length(2)
-  .ordered(
-    Joi.number().min(-180).max(180).required(), // longitude
-    Joi.number().min(-90).max(90).required()    // latitude
-  )
-  .required()
-  .messages({
-    'array.length': 'Coordonnées doivent être [longitude, latitude]',
-    'number.min': 'Coordonnée hors limites',
-    'number.max': 'Coordonnée hors limites'
-  });
-
-// Point géographique (adresse + coordonnées)
-const pointSchema = Joi.object({
-  address: Joi.string()
-    .trim()
-    .min(5)
-    .max(200)
-    .required()
-    .messages({
-      'string.empty': 'Adresse requise',
-      'string.min': 'Adresse trop courte',
-      'string.max': 'Adresse trop longue (200 caractères max)'
-    }),
+// Point géographique
+const pointSchema = z.object({
+  address: z.string()
+    .min(5, 'Adresse trop courte')
+    .max(200, 'Adresse trop longue')
+    .trim(),
   coordinates: coordinatesSchema
-}).required();
+});
 
-const requestRideSchema = Joi.object({
+// Demande de course
+// Note: On ne valide plus 'distance' car elle est calculée par le serveur (Sécurité Phase 2)
+// Mais si le frontend l'envoie pour info, on peut l'ignorer ou le valider sans l'utiliser.
+// Ici, on l'exclut du schéma pour être strict (strip unknown).
+const requestRideSchema = z.object({
   origin: pointSchema,
   destination: pointSchema,
-  forfait: Joi.string()
-    .valid('ECHO', 'STANDARD', 'VIP')
-    .required()
-    .messages({
-      'any.only': 'Forfait invalide (ECHO, STANDARD, VIP)'
-    }),
-  // Distance fournie par client mais recalculée/vérifiée côté serveur
-  distance: Joi.number()
-    .positive()
-    .max(100)
-    .required()
-    .messages({
-      'number.positive': 'Distance invalide',
-      'number.max': 'Distance trop grande (max 100km)'
-    })
-}).options(joiOptions);
+  forfait: z.enum(['ECHO', 'STANDARD', 'VIP'], {
+    errorMap: () => ({ message: 'Forfait invalide (ECHO, STANDARD, VIP)' })
+  })
+});
 
-const rideActionSchema = Joi.object({
-  rideId: Joi.string()
-    .pattern(/^[0-9a-fA-F]{24}$/) // ObjectId strict
-    .required()
-    .messages({
-      'string.pattern.base': 'ID course invalide',
-      'string.empty': 'ID course requis'
-    })
-}).options(joiOptions);
+// Action sur une course (ID MongoDB)
+const rideActionSchema = z.object({
+  rideId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'ID course invalide')
+});
 
 // ═══════════════════════════════════════════════════════════
-// ROUTES PROTECTÉES
+// ROUTES
 // ═══════════════════════════════════════════════════════════
 
-// Passager demande une course
 router.post(
   '/request',
   protect,
@@ -100,7 +65,6 @@ router.post(
   requestRide
 );
 
-// Chauffeur accepte une course
 router.post(
   '/accept',
   protect,
@@ -109,7 +73,6 @@ router.post(
   acceptRide
 );
 
-// Chauffeur démarre la course
 router.post(
   '/start',
   protect,
@@ -118,7 +81,6 @@ router.post(
   startRide
 );
 
-// Chauffeur termine la course
 router.post(
   '/complete',
   protect,
