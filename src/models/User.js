@@ -1,9 +1,9 @@
 // src/models/User.js
 // MODÈLE UTILISATEUR - Bank Grade & GeoSpatial Fix
-//
+// CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt'); // MIGRATION: bcryptjs -> bcrypt
 const { SECURITY_CONSTANTS } = require('../config/env');
 
 const userSchema = new mongoose.Schema({
@@ -120,9 +120,7 @@ userSchema.statics.findAvailableDriversNear = function(coordinates, maxDistanceM
     }
   };
 
-  // Filtrage par catégorie de véhicule si spécifié (optionnel selon règle métier)
-  // Si on veut qu'un VIP puisse faire du STANDARD, on adaptera ici.
-  // Pour l'instant, strict match.
+  // Filtrage par catégorie de véhicule si spécifié
   if (forfait) {
     query['vehicle.category'] = forfait;
   }
