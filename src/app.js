@@ -20,7 +20,7 @@ const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
-// Trust proxy pour Render/Heroku (Important pour le rate limiting et https)
+// Trust proxy pour Render/Heroku
 if (env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
@@ -39,15 +39,11 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-// 2. CORS STRICT - Adapté pour Mobile & Web
+// 2. CORS STRICT
 const corsOptions = {
   origin: (origin, callback) => {
-    // Autoriser les requêtes sans origine (Mobile Apps, Curl, Postman, Render Health Checks)
-    if (!origin) {
-      return callback(null, true);
-    }
+    if (!origin) return callback(null, true);
     
-    // Pour les navigateurs Web, on vérifie strictement la liste blanche
     const allowedOrigins = [env.FRONTEND_URL];
     if (allowedOrigins.includes(origin) || env.NODE_ENV === 'development') {
       callback(null, true);
@@ -66,10 +62,22 @@ app.use(cors(corsOptions));
 // 3. RATE LIMITING GLOBAL
 app.use('/api/', apiLimiter);
 
-// 4. PARSERS (limites strictes)
+// 4. PARSERS
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(cookieParser());
+
+// 4.5 MIDDLEWARE DE COMPATIBILITÉ EXPRESS 5 (Fix Critical Crash)
+// Rend req.query modifiable pour que mongoSanitize ne plante pas
+app.use((req, res, next) => {
+  Object.defineProperty(req, 'query', {
+    value: { ...req.query },
+    writable: true,
+    configurable: true,
+    enumerable: true // Assure que req.query reste visible
+  });
+  next();
+});
 
 // 5. NETTOYAGE ANTI-INJECTION
 app.use(mongoSanitize({
@@ -83,7 +91,7 @@ app.use(mongoSanitize({
 app.use(sanitizationMiddleware);
 
 // 6. ROUTES API
-// Route de santé pour Render (pour éviter les erreurs 404 dans les logs)
+// Route de santé (Health Check)
 app.get('/', (req, res) => {
   res.status(200).json({ status: 'ok', service: 'Yély API' });
 });
