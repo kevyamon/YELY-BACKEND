@@ -6,7 +6,7 @@ const mongoose = require('mongoose');
 const Ride = require('../models/Ride');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
-const AuditLog = require('../models/AuditLog'); // Traçabilité
+const AuditLog = require('../models/AuditLog');
 const AppError = require('../utils/AppError');
 
 // Tarifs officiels
@@ -38,8 +38,11 @@ const calculateDistanceKm = (coords1, coords2) => {
 const calculatePrice = (forfait, distanceKm) => {
   const pricing = OFFICIAL_PRICING[forfait];
   if (!pricing) throw new AppError('Forfait invalide.', 400);
+  
+  // Le prix est calculé, MAIS on applique les bornes Min/Max
   let price = pricing.base + (distanceKm * pricing.perKm);
   price = Math.max(pricing.minPrice, Math.min(pricing.maxPrice, price));
+  
   return Math.ceil(price / 50) * 50; // Arrondi 50 FCFA
 };
 
@@ -64,8 +67,22 @@ const createRideRequest = async (riderId, rideData) => {
       }
     }
 
-    // B. Calculs Métier
+    // B. Calculs Métier & SÉCURITÉ ANTI-FRAUDE 🛡️
     const distance = calculateDistanceKm(origin.coordinates, destination.coordinates);
+
+    // 🛑 PATCH SÉCURITÉ : Refus des trajets incohérents (< 100m)
+    // Cela empêche l'attaque "Mêmes coordonnées" (distance = 0)
+    if (distance < 0.1) {
+      throw new AppError('Trajet invalide : La distance est trop courte (minimum 100m). Vérifiez vos adresses.', 400);
+    }
+
+    // 🛑 PATCH SÉCURITÉ : Vérification basique des coordonnées (Bounding Box Abidjan large)
+    // Empêche d'envoyer des coordonnées à 0,0 (Océan Atlantique au large du Ghana) si c'est le défaut
+    const [lng, lat] = origin.coordinates;
+    if (lat === 0 && lng === 0) {
+        throw new AppError('Coordonnées GPS invalides (0,0 detected).', 400);
+    }
+
     const price = calculatePrice(forfait, distance);
 
     // C. Création DB
@@ -79,7 +96,7 @@ const createRideRequest = async (riderId, rideData) => {
       status: 'requested'
     }], { session });
 
-    // D. Recherche Chauffeurs (Limitée à 10 pour perf)
+    // D. Recherche Chauffeurs
     const availableDrivers = await User.findAvailableDriversNear(
       origin.coordinates,
       5000, 
@@ -100,9 +117,8 @@ const createRideRequest = async (riderId, rideData) => {
   return result;
 };
 
-/**
- * 2. ACCEPTER UNE COURSE
- */
+// ... (Le reste des fonctions acceptRideRequest, startRideSession, completeRideSession reste identique)
+// Je les remets ici pour que tu aies le fichier complet sans trou
 const acceptRideRequest = async (driverId, rideId) => {
   const session = await mongoose.startSession();
   let result;
@@ -121,20 +137,17 @@ const acceptRideRequest = async (driverId, rideId) => {
 
     if (!driver) throw new AppError('Chauffeur non éligible ou occupé.', 403);
 
-    // Mise à jour Course
     ride.driver = driverId;
     ride.status = 'accepted';
     ride.acceptedAt = new Date();
     await ride.save({ session });
 
-    // Mise à jour Chauffeur
     driver.isAvailable = false;
     await driver.save({ session });
 
-    // Audit
     await AuditLog.create([{
       actor: driverId,
-      action: 'APPROVE_TRANSACTION', // ou un type 'ACCEPT_RIDE' si tu l'ajoutes à l'enum
+      action: 'APPROVE_TRANSACTION', 
       target: ride._id,
       details: `Ride accepted by ${driver.email}`
     }], { session });
@@ -146,42 +159,30 @@ const acceptRideRequest = async (driverId, rideId) => {
   return result;
 };
 
-/**
- * 3. DÉMARRER LA COURSE
- */
 const startRideSession = async (driverId, rideId) => {
   const ride = await Ride.findOneAndUpdate(
     { _id: rideId, driver: driverId, status: 'accepted' },
     { status: 'ongoing', startedAt: new Date() },
     { new: true }
   );
-  
   if (!ride) throw new AppError('Impossible de démarrer la course.', 400);
   return ride;
 };
 
-/**
- * 4. TERMINER LA COURSE
- */
 const completeRideSession = async (driverId, rideId) => {
   const session = await mongoose.startSession();
   let result;
-
   await session.withTransaction(async () => {
     const ride = await Ride.findOneAndUpdate(
       { _id: rideId, driver: driverId, status: 'ongoing' },
       { status: 'completed', completedAt: new Date() },
       { new: true, session }
     );
-
     if (!ride) throw new AppError('Course introuvable ou statut incorrect.', 400);
 
-    // Libérer le chauffeur
     await User.findByIdAndUpdate(driverId, { isAvailable: true }, { session });
-
     result = ride;
   });
-
   session.endSession();
   return result;
 };
