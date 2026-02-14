@@ -1,5 +1,5 @@
 // src/app.js
-// CONFIGURATION EXPRESS FORTERESSE - CORS strict, Sécurité NoSQL & XSS & Monitoring
+// CONFIGURATION EXPRESS FORTERESSE - CORS strict, Sécurité NoSQL & XSS
 // CSCSM Level: Bank Grade
 
 const express = require('express');
@@ -12,27 +12,6 @@ const { apiLimiter } = require('./middleware/rateLimitMiddleware');
 const { sanitizationMiddleware } = require('./middleware/sanitizationMiddleware');
 const { errorHandler } = require('./middleware/errorMiddleware');
 const logger = require('./config/logger');
-
-// 📊 CONFIGURATION MONITORING (Tableau de bord temps réel)
-const statusMonitor = require('express-status-monitor')({
-  title: 'Yély Monitor',
-  path: '/status',
-  socketPath: '/socket.io', // On surveille aussi les WebSockets
-  chartVisibility: {
-    cpu: true,
-    mem: true,
-    load: true,
-    responseTime: true,
-    rps: true,
-    statusCodes: true,
-  },
-  healthChecks: [{
-    protocol: 'http',
-    host: 'localhost',
-    path: '/',
-    port: process.env.PORT || 5000
-  }]
-});
 
 // Routes
 const authRoutes = require('./routes/authRoutes');
@@ -48,10 +27,6 @@ if (env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
 
-// 0. MONITORING (DOIT ÊTRE LE PREMIER) 🛑
-// Accessible sur /status
-app.use(statusMonitor);
-
 // 1. LOGS HTTP
 app.use((req, res, next) => {
   logger.http(`${req.method} ${req.url} - IP: ${req.ip}`);
@@ -63,8 +38,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"], // Nécessaire pour le CSS de status-monitor
-      scriptSrc: ["'self'", "'unsafe-inline'"], // Nécessaire pour les charts de status-monitor
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
       imgSrc: ["'self'", "data:", "https://res.cloudinary.com"],
       connectSrc: ["'self'", env.FRONTEND_URL],
     },
@@ -112,8 +87,19 @@ app.use(mongoSanitize({
 app.use(sanitizationMiddleware);
 
 // 7. ROUTES API
+// Health Check Simple (JSON) - Suffisant pour Render/K8s
+app.get('/status', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    timestamp: new Date(),
+    uptime: process.uptime(),
+    env: env.NODE_ENV,
+    service: 'Yély API'
+  });
+});
+
 app.get('/', (req, res) => {
-  res.status(200).json({ status: 'ok', service: 'Yély API' });
+  res.status(200).json({ status: 'ok', service: 'Yély API Ready' });
 });
 
 app.use('/api/auth', authRoutes);
