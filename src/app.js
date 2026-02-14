@@ -1,15 +1,17 @@
-// backend/app.js
+// src/app.js
+// CONFIGURATION EXPRESS FORTERESSE - CORS strict avec credentials, sécurité maximale
+// CSCSM Level: Bank Grade
 
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
-const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const mongoSanitize = require('express-mongo-sanitize');
 const xss = require('xss');
-require('dotenv').config();
+const { env } = require('./config/env');
+const { apiLimiter } = require('./middleware/rateLimitMiddleware');
 
-// Imports des routes
+// Routes
 const authRoutes = require('./routes/authRoutes');
 const rideRoutes = require('./routes/rideRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
@@ -17,32 +19,76 @@ const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
-// --- 0. TRUST PROXY (Obligatoire sur Render, Heroku, Railway, etc.) ---
-app.set('trust proxy', 1);
+// Trust proxy uniquement si nécessaire
+if (env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
 
-// --- 1. SÉCURITÉ RÉSEAU (HELMET & RATE LIMIT) ---
-app.use(helmet());
+// 1. SÉCURITÉ HEADERS (Helmet)
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https://res.cloudinary.com"],
+      connectSrc: ["'self'", env.FRONTEND_URL],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
 
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: "La forteresse détecte une activité suspecte. Ralentissez.",
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use('/api/', limiter);
+// 2. CORS STRICT - Avec credentials pour cookies httpOnly
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Autorise requêtes sans origin (mobile apps, Postman) en dev uniquement
+    if (!origin && env.NODE_ENV === 'development') {
+      return callback(null, true);
+    }
+    
+    // Vérifie l'origine contre la whitelist
+    const allowedOrigins = [
+      env.FRONTEND_URL,
+    ];
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS] Origine rejetée: ${origin}`);
+      callback(new Error('Origine non autorisée'));
+    }
+  },
+  credentials: true, // 🔥 IMPORTANT: Permet les cookies httpOnly
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+};
 
-// --- 2. ANALYSEURS DE DONNÉES (PARSERS) ---
+app.use(cors(corsOptions));
+
+// 3. RATE LIMITING GLOBAL
+app.use('/api/', apiLimiter);
+
+// 4. PARSERS (limites strictes)
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(cookieParser());
 
-// --- 3. NETTOYAGE DES DONNÉES (ANTI-INJECTION NOSQL & XSS) ---
+// 5. NETTOYAGE ANTI-INJECTION
+app.use(mongoSanitize({
+  replaceWith: '_',
+  onSanitize: ({ req, key }) => {
+    console.warn(`[SANITIZE] Champ nettoyé: ${key} - IP: ${req.ip}`);
+  }
+}));
 
-// Fonction récursive pour nettoyer toutes les chaînes d'un objet
+// Sanitize XSS
 const sanitizeXSS = (obj) => {
   if (typeof obj === 'string') {
-    return xss(obj);
+    return xss(obj, {
+      whiteList: {},
+      stripIgnoreTag: true,
+      stripIgnoreTagBody: ['script']
+    });
   }
   if (Array.isArray(obj)) {
     return obj.map(sanitizeXSS);
@@ -50,6 +96,7 @@ const sanitizeXSS = (obj) => {
   if (obj !== null && typeof obj === 'object') {
     const sanitized = {};
     for (const key of Object.keys(obj)) {
+      if (key === '__proto__' || key === 'constructor') continue;
       sanitized[key] = sanitizeXSS(obj[key]);
     }
     return sanitized;
@@ -59,44 +106,44 @@ const sanitizeXSS = (obj) => {
 
 app.use((req, res, next) => {
   try {
-    if (req.body && typeof req.body === 'object') {
-      // Nettoyage NoSQL (anti $gt, $ne, etc.)
-      req.body = mongoSanitize.sanitize(req.body);
-      // Nettoyage XSS propre (champ par champ, sans stringify/parse)
-      req.body = sanitizeXSS(req.body);
-    }
-
-    if (req.params && typeof req.params === 'object') {
-      req.params = mongoSanitize.sanitize(req.params);
-    }
-
-    if (req.query && typeof req.query === 'object') {
-      req.query = mongoSanitize.sanitize(req.query);
-      req.query = sanitizeXSS(req.query);
-    }
+    if (req.body) req.body = sanitizeXSS(req.body);
+    if (req.params) req.params = sanitizeXSS(req.params);
+    if (req.query) req.query = sanitizeXSS(req.query);
+    next();
   } catch (error) {
-    console.error("Erreur lors du nettoyage des données :", error);
-    return res.status(400).json({ message: "Données de requête invalides." });
+    console.error('[XSS SANITIZE] Erreur:', error.message);
+    return res.status(400).json({
+      success: false,
+      message: "Données de requête invalides."
+    });
   }
-
-  next();
 });
 
-// --- 4. CONFIGURATION DES ACCÈS (CORS) ---
-app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
-  credentials: true
-}));
-
-// --- 5. BRANCHEMENT DES ROUTES API ---
+// 6. ROUTES API
 app.use('/api/auth', authRoutes);
 app.use('/api/rides', rideRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/admin', adminRoutes);
 
-// --- 6. GESTION DES ERREURS 404 ---
+// 7. GESTION ERREURS 404
 app.use((req, res) => {
-  res.status(404).json({ message: "Route introuvable dans cette forteresse." });
+  res.status(404).json({
+    success: false,
+    message: "Endpoint non trouvé."
+  });
+});
+
+// 8. GESTION GLOBALE ERREURS
+app.use((err, req, res, next) => {
+  console.error('[GLOBAL ERROR]', err.stack);
+  
+  const isDev = env.NODE_ENV === 'development';
+  
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || "Erreur serveur.",
+    ...(isDev && { stack: err.stack })
+  });
 });
 
 module.exports = app;
