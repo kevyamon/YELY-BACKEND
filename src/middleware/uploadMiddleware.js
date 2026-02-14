@@ -1,64 +1,102 @@
 // src/middleware/uploadMiddleware.js
-// UPLOAD SÉCURISÉ - Magic numbers, Filenames aléatoires, Nettoyage garanti
+// UPLOAD SÉCURISÉ - Inspection Binaire (Magic Bytes), Sandboxing & Nettoyage
 // CSCSM Level: Bank Grade
 
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const FileType = require('file-type'); // Ajouté en Phase 1
+const AppError = require('../utils/AppError');
+const logger = require('../config/logger');
 
-// Dossier temporaire sécurisé
+// Dossier temporaire sécurisé (Sandboxed)
 const TEMP_DIR = path.join(__dirname, '../../temp');
 if (!fs.existsSync(TEMP_DIR)) {
   fs.mkdirSync(TEMP_DIR, { recursive: true, mode: 0o700 });
 }
 
-// Magic numbers des formats autorisés
-const MAGIC_NUMBERS = {
-  'image/jpeg': ['FFD8FF'],
-  'image/png': ['89504E47'],
-  'image/webp': ['52494646']
-};
-
 const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
-// Configuration stockage
+// 1. Configuration du stockage Multer
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, TEMP_DIR);
   },
   filename: (req, file, cb) => {
+    // Nom de fichier totalement aléatoire pour éviter les collisions et l'énumération
     const randomName = crypto.randomBytes(16).toString('hex');
     const ext = path.extname(file.originalname).toLowerCase();
     cb(null, `${randomName}${ext}`);
   }
 });
 
-// Filtre initial
+// 2. Filtre superficiel (Extension & MIME déclaré)
 const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
   
   if (!ALLOWED_EXTENSIONS.includes(ext)) {
-    return cb(new Error(`Extension non autorisée. Autorisé: ${ALLOWED_EXTENSIONS.join(', ')}`), false);
+    return cb(new AppError(`Extension ${ext} non autorisée.`, 400), false);
   }
 
-  if (!Object.keys(MAGIC_NUMBERS).includes(file.mimetype)) {
-    return cb(new Error('Type MIME non autorisé.'), false);
+  if (!ALLOWED_MIMES.includes(file.mimetype)) {
+    return cb(new AppError('Type MIME déclaré invalide.', 400), false);
   }
 
   cb(null, true);
 };
 
-// Middleware Multer configuré
 const upload = multer({
   storage,
   fileFilter,
-  limits: {
-    fileSize: MAX_FILE_SIZE,
-    files: 1
-  }
+  limits: { fileSize: MAX_FILE_SIZE, files: 1 }
 });
 
-// Export direct du middleware .single()
-module.exports = upload;
+/**
+ * 🛡️ MIDDLEWARE DE VALIDATION BINAIRE (Magic Bytes)
+ * Inspecte la signature réelle du fichier sur le disque.
+ */
+const validateFileSignature = async (req, res, next) => {
+  if (!req.file) return next();
+
+  const filePath = req.file.path;
+
+  try {
+    // Lecture des premiers octets pour déterminer le type réel
+    const type = await FileType.fromFile(filePath);
+
+    // Si le type est indéterminé ou non autorisé, on rejette
+    if (!type || !ALLOWED_MIMES.includes(type.mime)) {
+      // Suppression immédiate du fichier suspect
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      
+      logger.warn(`[SECURITY] Tentative d'upload de fichier malveillant bloquée. Type réel: ${type?.mime || 'inconnu'}`);
+      return next(new AppError('Contenu du fichier invalide ou corrompu (Échec Magic Bytes).', 400));
+    }
+
+    // Cohérence : Le type réel doit correspondre à l'extension
+    const extFromType = `.${type.ext}`;
+    const currentExt = path.extname(req.file.filename).toLowerCase();
+    
+    // On autorise .jpg pour image/jpeg
+    const isJpegMatch = (type.ext === 'jpg' || type.ext === 'jpeg') && (currentExt === '.jpg' || currentExt === '.jpeg');
+    
+    if (!isJpegMatch && extFromType !== currentExt) {
+       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+       return next(new AppError('Incohérence entre l\'extension et le contenu réel.', 400));
+    }
+
+    next();
+  } catch (error) {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    logger.error(`[UPLOAD ERROR] Erreur lors de la validation binaire: ${error.message}`);
+    next(new AppError('Erreur lors du traitement de la sécurité du fichier.', 500));
+  }
+};
+
+module.exports = {
+  uploadSingle: upload.single('file'), // 'file' est le champ attendu
+  validateFileSignature
+};
