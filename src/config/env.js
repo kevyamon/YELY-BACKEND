@@ -2,7 +2,11 @@
 // VALIDATION STRICTE ENV - Le projet refuse de démarrer si config invalide
 // CSCSM Level: Bank Grade
 
-const z = require('zod');
+const dotenv = require('dotenv'); // INDISPENSABLE POUR LE LOCAL
+const { z } = require('zod');
+
+// Chargement des variables
+dotenv.config();
 
 const envSchema = z.object({
   // Base
@@ -28,9 +32,17 @@ const envSchema = z.object({
   ADMIN_MAIL: z.string().email().optional(),
   
   // Cloudinary
-  CLOUDINARY_CLOUD_NAME: z.string().min(1),
-  CLOUDINARY_API_KEY: z.string().min(1),
-  CLOUDINARY_API_SECRET: z.string().min(1),
+  CLOUDINARY_CLOUD_NAME: z.string().min(1, 'Cloudinary Cloud Name requis'),
+  CLOUDINARY_API_KEY: z.string().min(1, 'Cloudinary API Key requise'),
+  CLOUDINARY_API_SECRET: z.string().min(1, 'Cloudinary API Secret requis'),
+
+  // Optionnel : Config Bcrypt via Env (sinon défaut en bas)
+  BCRYPT_ROUNDS: z.string().transform(Number).optional(),
+})
+// 🛑 CHECK SÉCURITÉ CRITIQUE (Audit)
+.refine((data) => data.JWT_SECRET !== data.JWT_REFRESH_SECRET, {
+  message: "CRITIQUE : JWT_SECRET et JWT_REFRESH_SECRET doivent être différents !",
+  path: ["JWT_REFRESH_SECRET"],
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -54,7 +66,7 @@ const env = parsed.data;
 
 // Constantes dérivées (pas de calculs dispersés dans le code)
 const SECURITY_CONSTANTS = {
-  BCRYPT_ROUNDS: 12,
+  BCRYPT_ROUNDS: env.BCRYPT_ROUNDS || 12, // Force à 12 si pas défini
   MAX_LOGIN_ATTEMPTS: 5,
   RATE_LIMIT_WINDOW_MS: 15 * 60 * 1000, // 15 minutes
   MAX_FILE_SIZE_MB: 5,
