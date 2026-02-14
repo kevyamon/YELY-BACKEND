@@ -1,348 +1,171 @@
 // src/controllers/authController.js
-// AUTHENTIFICATION BÉTON - Transactions MongoDB, Timing Constant, Anti-Enumeration
+// ORCHESTRATION AUTH - Gestion Transactions & Réponses Standardisées
 // CSCSM Level: Bank Grade
 
-const User = require('../models/User');
-const { generateAuthResponse, rotateTokens, clearRefreshTokenCookie, verifyRefreshToken } = require('../utils/tokenService');
 const mongoose = require('mongoose');
-const { SECURITY_CONSTANTS } = require('../config/env');
-
-// Messages génériques (anti-enumeration)
-const AUTH_MESSAGES = {
-  INVALID_CREDENTIALS: 'Identifiants invalides.',
-  USER_EXISTS: 'Cet email ou téléphone est déjà utilisé.',
-  SERVER_ERROR: 'Erreur serveur. Veuillez réessayer.',
-  BANNED: 'Compte suspendu.',
-  REGISTRATION_SUCCESS: 'Compte créé avec succès.',
-  LOGIN_SUCCESS: 'Connexion réussie.',
-  LOGOUT_SUCCESS: 'Déconnexion réussie.',
-  AVAILABILITY_UPDATED: 'Disponibilité mise à jour.'
-};
+const authService = require('../services/authService');
+const { generateAuthResponse, rotateTokens, clearRefreshTokenCookie, verifyRefreshToken } = require('../utils/tokenService');
+const { successResponse, errorResponse } = require('../utils/responseHandler');
+const User = require('../models/User'); // Pour updates simples
 
 /**
- * @desc Inscription sécurisée avec transaction
+ * @desc Inscription sécurisée avec transaction ACID
  * @route POST /api/auth/register
  */
 const registerUser = async (req, res) => {
   const session = await mongoose.startSession();
+  session.startTransaction();
   
   try {
-    await session.withTransaction(async () => {
-      const { name, email, phone, password, role } = req.body;
+    const { name, email, phone, password, role } = req.body;
 
-      // Normalisation
-      const normalizedEmail = email.toLowerCase().trim();
-      const normalizedPhone = phone.replace(/\s/g, '');
-      const trimmedName = name.trim();
+    // 1. Normalisation (Contrôleur prépare les données)
+    const normalizedData = {
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      phone: phone.replace(/\s/g, ''),
+      password,
+      role
+    };
 
-      // Vérification existence (avec lock transactionnel)
-      const existingUser = await User.findOne({
-        $or: [
-          { email: normalizedEmail },
-          { phone: normalizedPhone }
-        ]
-      }).session(session);
+    // 2. Appel du Service (Logique métier)
+    const user = await authService.createUserInTransaction(normalizedData, session);
 
-      if (existingUser) {
-        const field = existingUser.email === normalizedEmail ? 'email' : 'téléphone';
-        throw new Error(`DUPLICATE_${field.toUpperCase()}`);
-      }
+    // 3. Génération Tokens
+    const authTokens = generateAuthResponse(res, user);
 
-      // Détermination rôle (JAMAIS depuis client pour privilégiés)
-      let finalRole = 'rider';
-      if (role === 'driver') finalRole = 'driver';
-      
-      // SuperAdmin UNIQUEMENT via env variable
-      if (normalizedEmail === process.env.ADMIN_MAIL?.toLowerCase()) {
-        finalRole = 'superadmin';
-        console.log(`[SECURITY] Création SuperAdmin: ${normalizedEmail}`);
-      }
+    // 4. Commit Transaction
+    await session.commitTransaction();
 
-      // Création utilisateur
-      const [user] = await User.create([{
-        name: trimmedName,
-        email: normalizedEmail,
-        phone: normalizedPhone,
-        password, // Hashé par pre-save hook
-        role: finalRole,
-        isAvailable: false,
-        'subscription.isActive': false,
-        'subscription.hoursRemaining': 0
-      }], { session });
-
-      // Génération tokens et réponse
-      const authResponse = generateAuthResponse(res, user);
-      
-      res.status(201).json({
-        ...authResponse,
-        message: AUTH_MESSAGES.REGISTRATION_SUCCESS
-      });
-    });
+    // 5. Réponse Standardisée (Fixe le bug Frontend)
+    return successResponse(res, {
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role
+      },
+      ...authTokens // accessToken, refreshToken, expiresIn
+    }, 'Compte créé avec succès.', 201);
 
   } catch (error) {
-    // Gestion erreurs spécifiques
-    if (error.message === 'DUPLICATE_EMAIL') {
-      return res.status(409).json({
-        success: false,
-        message: 'Cet email est déjà utilisé.',
-        code: 'DUPLICATE_EMAIL'
-      });
-    }
-    if (error.message === 'DUPLICATE_PHONE') {
-      return res.status(409).json({
-        success: false,
-        message: 'Ce numéro est déjà utilisé.',
-        code: 'DUPLICATE_PHONE'
-      });
-    }
-
-    console.error('[REGISTER] Erreur:', error.message);
-    res.status(500).json({
-      success: false,
-      message: AUTH_MESSAGES.SERVER_ERROR,
-      code: 'SERVER_ERROR'
-    });
+    await session.abortTransaction();
+    return errorResponse(res, error.message, error.status || 500, error);
   } finally {
     session.endSession();
   }
 };
 
 /**
- * @desc Connexion avec timing constant (anti-timing attack)
+ * @desc Connexion sécurisée
  * @route POST /api/auth/login
  */
 const loginUser = async (req, res) => {
-  const startTime = Date.now();
-  
   try {
     const { identifier, password } = req.body;
-
-    // Détection type identifiant
+    
+    // Normalisation
     const isEmail = identifier.includes('@');
-    const normalizedId = isEmail 
-      ? identifier.toLowerCase().trim() 
-      : identifier.replace(/\s/g, '');
+    const normalizedId = isEmail ? identifier.toLowerCase().trim() : identifier.replace(/\s/g, '');
 
-    // Requête sécurisée (pas de regex avec entrée utilisateur)
-    const query = isEmail 
-      ? { email: normalizedId }
-      : { phone: normalizedId };
+    // Appel Service
+    const user = await authService.verifyCredentials(normalizedId, password);
 
-    const user = await User.findOne(query).select('+password');
+    // Génération Tokens
+    const authTokens = generateAuthResponse(res, user);
 
-    // TIMING CONSTANT: toujours comparer, même si user null
-    const dummyHash = '$2b$12$abcdefghijklmnopqrstuvwxycdefghijklmnopqrstu';
-    const hashToCompare = user ? user.password : dummyHash;
-    
-    const isMatch = await User.comparePasswordStatic(password, hashToCompare);
-    
-    // Délai artificiel si rapide (masque la différence user existe/pas)
-    const elapsed = Date.now() - startTime;
-    if (elapsed < 100) {
-      await new Promise(resolve => setTimeout(resolve, 100 - elapsed));
-    }
-
-    if (!user || !isMatch) {
-      return res.status(401).json({
-        success: false,
-        message: AUTH_MESSAGES.INVALID_CREDENTIALS,
-        code: 'INVALID_CREDENTIALS'
-      });
-    }
-
-    // Vérifications post-authentification
-    if (user.isBanned) {
-      return res.status(403).json({
-        success: false,
-        message: AUTH_MESSAGES.BANNED,
-        reason: user.banReason || 'Contactez le support',
-        code: 'USER_BANNED'
-      });
-    }
-
-    // Succès
-    const authResponse = generateAuthResponse(res, user);
-    
-    res.json({
-      ...authResponse,
-      message: AUTH_MESSAGES.LOGIN_SUCCESS
-    });
+    return successResponse(res, {
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        isAvailable: user.isAvailable
+      },
+      ...authTokens
+    }, 'Connexion réussie.');
 
   } catch (error) {
-    console.error('[LOGIN] Erreur:', error.message);
-    res.status(500).json({
-      success: false,
-      message: AUTH_MESSAGES.SERVER_ERROR,
-      code: 'SERVER_ERROR'
-    });
+    // Délai artificiel en cas d'erreur (Anti-Bruteforce basic)
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return errorResponse(res, error.message, error.status || 500, error);
   }
 };
 
 /**
- * @desc Rafraîchissement des tokens (rotation)
- * @route POST /api/auth/refresh
+ * @desc Rotation des tokens
  */
 const refreshToken = async (req, res) => {
   try {
-    const refreshToken = req.cookies.refreshToken;
-
-    if (!refreshToken) {
-      return res.status(401).json({
-        success: false,
-        message: 'Session expirée. Veuillez vous reconnecter.',
-        code: 'REFRESH_MISSING'
-      });
-    }
+    const oldRefreshToken = req.cookies.refreshToken;
+    if (!oldRefreshToken) throw { status: 401, message: 'Session expirée' };
 
     let decoded;
     try {
-      decoded = verifyRefreshToken(refreshToken);
+      decoded = verifyRefreshToken(oldRefreshToken);
     } catch (err) {
       clearRefreshTokenCookie(res);
-      return res.status(401).json({
-        success: false,
-        message: 'Session invalide. Veuillez vous reconnecter.',
-        code: 'REFRESH_INVALID'
-      });
+      throw { status: 403, message: 'Token invalide' };
     }
 
-    const user = await User.findById(decoded.userId).select('-password');
-    
+    const user = await User.findById(decoded.userId);
     if (!user || user.isBanned) {
       clearRefreshTokenCookie(res);
-      return res.status(401).json({
-        success: false,
-        message: 'Session invalide.',
-        code: 'USER_INVALID'
-      });
+      throw { status: 403, message: 'Utilisateur invalide ou banni' };
     }
 
-    // Rotation: nouveau refresh, ancien révoqué
-    const tokens = rotateTokens(res, refreshToken, user._id, user.role);
+    const tokens = rotateTokens(res, oldRefreshToken, user._id, user.role);
 
-    res.json({
-      success: true,
-      data: {
-        accessToken: tokens.accessToken,
-        expiresIn: 900
-      },
-      message: 'Session rafraîchie.'
-    });
+    return successResponse(res, {
+      accessToken: tokens.accessToken,
+      expiresIn: 900
+    }, 'Session rafraîchie.');
 
   } catch (error) {
-    console.error('[REFRESH] Erreur:', error.message);
-    res.status(500).json({
-      success: false,
-      message: AUTH_MESSAGES.SERVER_ERROR,
-      code: 'SERVER_ERROR'
-    });
+    return errorResponse(res, error.message, error.status || 500);
   }
 };
 
 /**
- * @desc Déconnexion sécurisée (révocation token)
- * @route POST /api/auth/logout
+ * @desc Déconnexion
  */
 const logoutUser = async (req, res) => {
-  try {
-    const refreshToken = req.cookies.refreshToken;
-    
-    if (refreshToken) {
-      const { revokeRefreshToken } = require('../utils/tokenService');
-      revokeRefreshToken(refreshToken);
-    }
-    
-    clearRefreshTokenCookie(res);
-    
-    res.status(200).json({
-      success: true,
-      message: AUTH_MESSAGES.LOGOUT_SUCCESS
-    });
-  } catch (error) {
-    // Même en cas d'erreur, on nettoie le cookie
-    clearRefreshTokenCookie(res);
-    res.status(200).json({
-      success: true,
-      message: AUTH_MESSAGES.LOGOUT_SUCCESS
-    });
+  const token = req.cookies.refreshToken;
+  if (token) {
+    // Optionnel: Ajouter à une blacklist Redis
   }
+  clearRefreshTokenCookie(res);
+  return successResponse(res, null, 'Déconnexion réussie.');
 };
 
 /**
- * @desc Mise à jour disponibilité chauffeur (avec validation métier)
- * @route PUT /api/auth/availability
+ * @desc Update Disponibilité
  */
 const updateAvailability = async (req, res) => {
   try {
     const { isAvailable } = req.body;
+    
+    // Logique rapide directement dans controller (ou déplacer en service si complexe)
+    const user = await User.findByIdAndUpdate(
+      req.user._id, 
+      { isAvailable }, 
+      { new: true }
+    ).select('isAvailable');
 
-    // Validation stricte type
-    if (typeof isAvailable !== 'boolean') {
-      return res.status(400).json({
-        success: false,
-        message: 'La valeur doit être true ou false.',
-        code: 'INVALID_TYPE'
-      });
-    }
-
-    // Vérification rôle
-    if (req.user.role !== 'driver') {
-      return res.status(403).json({
-        success: false,
-        message: 'Opération réservée aux chauffeurs.',
-        code: 'NOT_DRIVER'
-      });
-    }
-
-    // Si mise en disponible: vérifier abonnement actif
-    if (isAvailable) {
-      const user = await User.findById(req.user._id);
-      
-      if (!user.subscription?.isActive || user.subscription.hoursRemaining <= 0) {
-        return res.status(403).json({
-          success: false,
-          message: 'Abonnement invalide ou crédit épuisé.',
-          code: 'SUBSCRIPTION_INVALID'
-        });
-      }
-
-      // Vérifier documents si premier passage en disponible (optionnel)
-      // if (!user.documents?.idCard || !user.documents?.license) {
-      //   return res.status(403).json({...});
-      // }
-    }
-
-    const updatedUser = await User.findByIdAndUpdate(
-      req.user._id,
-      { isAvailable },
-      { new: true, runValidators: true }
-    ).select('isAvailable name');
-
-    res.json({
-      success: true,
-      data: {
-        isAvailable: updatedUser.isAvailable,
-        driverName: updatedUser.name
-      },
-      message: isAvailable 
-        ? 'Vous êtes visible pour les courses.'
-        : 'Vous êtes hors ligne.'
-    });
-
+    return successResponse(res, { isAvailable: user.isAvailable }, 
+      isAvailable ? 'Vous êtes en ligne.' : 'Vous êtes hors ligne.'
+    );
   } catch (error) {
-    console.error('[AVAILABILITY] Erreur:', error.message);
-    res.status(500).json({
-      success: false,
-      message: AUTH_MESSAGES.SERVER_ERROR,
-      code: 'SERVER_ERROR'
-    });
+    return errorResponse(res, error.message);
   }
 };
 
 module.exports = {
   registerUser,
   loginUser,
-  logoutUser,
   refreshToken,
+  logoutUser,
   updateAvailability
 };

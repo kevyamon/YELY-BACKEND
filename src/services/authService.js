@@ -1,92 +1,80 @@
 // src/services/authService.js
-// LOGIQUE MÉTIER AUTH - Isolation totale de la base de données et des règles
+// LOGIQUE MÉTIER AUTH - Exécution atomique
 // CSCSM Level: Bank Grade
 
 const User = require('../models/User');
-const { 
-  generateAuthResponse, 
-  rotateTokens, 
-  verifyRefreshToken 
-} = require('../utils/tokenService');
 
 /**
- * Service gérant l'inscription d'un nouvel utilisateur
+ * Crée un utilisateur dans la base de données (Au sein d'une transaction)
+ * @param {Object} userData - Données validées et normalisées
+ * @param {Object} session - Session Mongoose pour la transaction (OBLIGATOIRE)
  */
-const register = async (userData) => {
+const createUserInTransaction = async (userData, session) => {
   const { name, email, phone, password, role } = userData;
 
-  // 1. Normalisation (Double sécurité après Joi)
-  const normalizedEmail = email.toLowerCase().trim();
-  const normalizedPhone = phone.replace(/\s/g, '');
-
-  // 2. Vérification d'existence
+  // 1. Vérification ultime d'unicité (Sécurité concurrente)
   const existingUser = await User.findOne({
-    $or: [{ email: normalizedEmail }, { phone: normalizedPhone }]
-  });
+    $or: [{ email }, { phone }]
+  }).session(session);
 
   if (existingUser) {
-    const error = new Error(
-      existingUser.email === normalizedEmail 
-        ? 'Cet email est déjà utilisé.' 
-        : 'Ce numéro est déjà utilisé.'
-    );
-    error.status = 409;
-    error.code = 'USER_ALREADY_EXISTS';
-    throw error;
+    const field = existingUser.email === email ? 'email' : 'téléphone';
+    throw { 
+      status: 409, 
+      message: `Cet ${field} est déjà utilisé par un autre compte.`,
+      code: `DUPLICATE_${field.toUpperCase()}`
+    };
   }
 
-  // 3. Logique de rôle privilégié (Admin)
+  // 2. Détermination sécurisée du rôle
   let finalRole = 'rider';
   if (role === 'driver') finalRole = 'driver';
   
-  if (normalizedEmail === process.env.ADMIN_MAIL?.toLowerCase()) {
+  // SuperAdmin via ENV uniquement
+  if (email === process.env.ADMIN_MAIL?.toLowerCase()) {
     finalRole = 'superadmin';
   }
 
-  // 4. Création en base
-  const user = await User.create({
-    name: name.trim(),
-    email: normalizedEmail,
-    phone: normalizedPhone,
-    password,
-    role: finalRole
-  });
+  // 3. Création atomique
+  const [newUser] = await User.create([{
+    name,
+    email,
+    phone,
+    password, // Le hook pre-save va le hasher
+    role: finalRole,
+    isAvailable: false,
+    subscription: { isActive: false, hoursRemaining: 0 }
+  }], { session });
 
-  return user;
+  return newUser;
 };
 
 /**
- * Service gérant la vérification des identifiants
+ * Vérifie les identifiants utilisateur (Login)
  */
-const login = async (identifier, password) => {
+const verifyCredentials = async (identifier, password) => {
   const isEmail = identifier.includes('@');
-  const normalizedId = isEmail ? identifier.toLowerCase().trim() : identifier.replace(/\s/g, '');
+  const query = isEmail ? { email: identifier } : { phone: identifier };
 
-  const query = isEmail ? { email: normalizedId } : { phone: normalizedId };
   const user = await User.findOne(query).select('+password');
 
-  // Protection timing constant (anti-brute force)
+  // Protection Timing Attack
   const dummyHash = '$2b$12$abcdefghijklmnopqrstuvwxycdefghijklmnopqrstu';
   const hashToCompare = user ? user.password : dummyHash;
   const isMatch = await User.comparePasswordStatic(password, hashToCompare);
 
   if (!user || !isMatch) {
-    const error = new Error('Identifiants invalides.');
-    error.status = 401;
-    throw error;
+    throw { status: 401, message: 'Identifiants invalides.', code: 'INVALID_CREDENTIALS' };
   }
 
   if (user.isBanned) {
-    const error = new Error(user.banReason || 'Compte suspendu.');
-    error.status = 403;
-    error.code = 'USER_BANNED';
-    throw error;
+    throw { status: 403, message: 'Compte suspendu.', code: 'USER_BANNED' };
   }
 
   return user;
 };
 
 module.exports = {
-  register,
-  login
+  createUserInTransaction,
+  verifyCredentials
 };
