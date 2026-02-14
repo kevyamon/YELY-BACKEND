@@ -76,7 +76,7 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(cookieParser());
 
 // 6. NETTOYAGE ANTI-INJECTION
-// Note: Le hack Express 5 a été supprimé car nous sommes repassés en Express 4 stable
+// Note: Le hack Express 5 a été SUPPRIMÉ car nous sommes repassés en Express 4 stable
 app.use(mongoSanitize({
   replaceWith: '_',
   onSanitize: ({ req, key }) => {
@@ -93,7 +93,7 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes); // Nouvelle route sécurisée
+app.use('/api/users', userRoutes);
 app.use('/api/rides', rideRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/admin', adminRoutes);
