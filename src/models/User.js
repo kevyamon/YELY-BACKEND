@@ -1,5 +1,6 @@
 // src/models/User.js
-// MODÈLE UTILISATEUR - Bank Grade & Mongoose Modern Fix
+// MODÈLE UTILISATEUR - Bank Grade & GeoSpatial Fix
+//
 
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -46,22 +47,28 @@ const userSchema = new mongoose.Schema({
   },
   isBanned: { type: Boolean, default: false, index: true },
   banReason: { type: String, default: '', maxlength: 500 },
+  
+  // Géolocalisation (GeoJSON standard)
   currentLocation: {
     type: { type: String, enum: ['Point'], default: 'Point' },
-    coordinates: { type: [Number], default: [0, 0] }
+    coordinates: { type: [Number], default: [0, 0] } // [Longitude, Latitude]
   },
+  
   isAvailable: { type: Boolean, default: false, index: true },
+  
   vehicle: {
     category: { type: String, enum: ['ECHO', 'STANDARD', 'VIP'], default: null },
     model: { type: String, default: '' },
     plate: { type: String, default: '' },
     color: { type: String, default: '' }
   },
+  
   subscription: {
     isActive: { type: Boolean, default: false, index: true },
     hoursRemaining: { type: Number, default: 0 },
     lastCheckTime: { type: Date, default: Date.now }
   },
+  
   documents: {
     idCard: { type: String, default: '' },
     license: { type: String, default: '' },
@@ -73,29 +80,54 @@ const userSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
+// Index Géospatial CRUCIAL pour les requêtes $near
 userSchema.index({ currentLocation: '2dsphere' });
 
-// 🛠️ FIX CRITIQUE : Plus de paramètre 'next' ici. On laisse la promesse (async) gérer le flux.
+// Hook Pre-save (Hashage)
 userSchema.pre('save', async function() {
-  // Si le mot de passe n'est pas modifié, on sort directement
   if (!this.isModified('password')) return;
-  
   try {
-    // Utilisation sécurisée des constantes ou valeur par défaut
     const rounds = SECURITY_CONSTANTS?.BCRYPT_ROUNDS || 10;
     this.password = await bcrypt.hash(this.password, rounds);
   } catch (error) {
-    // En cas d'erreur de hashage, on laisse Mongoose la remonter
     throw new Error('Erreur de sécurisation du mot de passe: ' + error.message);
   }
 });
 
+// Comparaison mot de passe (Instance)
 userSchema.methods.comparePassword = async function(candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
+// Comparaison mot de passe (Statique)
 userSchema.statics.comparePasswordStatic = async function(candidate, hash) {
   return bcrypt.compare(candidate, hash);
+};
+
+// 🛑 FIX CRITIQUE : Méthode manquante pour trouver les chauffeurs
+// + SÉCURITÉ : Exclusion explicite des champs sensibles
+userSchema.statics.findAvailableDriversNear = function(coordinates, maxDistanceMeters, forfait) {
+  const query = {
+    role: 'driver',
+    isAvailable: true,
+    isBanned: false,
+    'subscription.isActive': true, // Doit avoir un abo actif
+    currentLocation: {
+      $near: {
+        $geometry: { type: "Point", coordinates: coordinates },
+        $maxDistance: maxDistanceMeters
+      }
+    }
+  };
+
+  // Filtrage par catégorie de véhicule si spécifié (optionnel selon règle métier)
+  // Si on veut qu'un VIP puisse faire du STANDARD, on adaptera ici.
+  // Pour l'instant, strict match.
+  if (forfait) {
+    query['vehicle.category'] = forfait;
+  }
+
+  return this.find(query).select('name phone vehicle currentLocation rating -password -__v');
 };
 
 module.exports = mongoose.model('User', userSchema);
