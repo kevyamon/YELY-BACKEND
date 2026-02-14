@@ -1,74 +1,63 @@
 // src/services/authService.js
-// LOGIQUE MÉTIER AUTH - Exécution atomique
+// SERVICE AUTH - Logique Création & Vérification (100% DB Driven)
 // CSCSM Level: Bank Grade
 
 const User = require('../models/User');
+const AppError = require('../utils/AppError');
+const { env } = require('../config/env');
 
 /**
- * Crée un utilisateur dans la base de données (Au sein d'une transaction)
- * @param {Object} userData - Données validées et normalisées
- * @param {Object} session - Session Mongoose pour la transaction (OBLIGATOIRE)
+ * Crée un utilisateur dans une transaction
+ * @param {Object} userData - Données validées
+ * @param {Object} session - Session Mongoose
  */
 const createUserInTransaction = async (userData, session) => {
-  const { name, email, phone, password, role } = userData;
+  const { email, phone, role } = userData;
 
-  // 1. Vérification ultime d'unicité (Sécurité concurrente)
-  const existingUser = await User.findOne({
-    $or: [{ email }, { phone }]
+  // 1. Vérification doublons (Double sécurité en plus de l'index unique)
+  const existingUser = await User.findOne({ 
+    $or: [{ email }, { phone }] 
   }).session(session);
 
   if (existingUser) {
-    const field = existingUser.email === email ? 'email' : 'téléphone';
-    throw { 
-      status: 409, 
-      message: `Cet ${field} est déjà utilisé par un autre compte.`,
-      code: `DUPLICATE_${field.toUpperCase()}`
-    };
+    throw new AppError('Cet email ou ce numéro est déjà utilisé.', 409);
   }
 
-  // 2. Détermination sécurisée du rôle
-  let finalRole = 'rider';
-  if (role === 'driver') finalRole = 'driver';
+  // 2. Sécurité Rôle Admin/SuperAdmin
+  // On empêche la création directe d'admin via l'API publique
+  if (['admin', 'superadmin'].includes(role)) {
+    // Seul un superadmin connecté pourrait créer un autre admin (logique à gérer dans un AdminService)
+    // Pour l'inscription publique, on force 'rider' ou 'driver'
+    throw new AppError('Création de compte administrateur non autorisée ici.', 403);
+  }
+
+  // 3. Création
+  const [user] = await User.create([userData], { session });
   
-  // SuperAdmin via ENV uniquement
-  if (email === process.env.ADMIN_MAIL?.toLowerCase()) {
-    finalRole = 'superadmin';
-  }
-
-  // 3. Création atomique
-  const [newUser] = await User.create([{
-    name,
-    email,
-    phone,
-    password, // Le hook pre-save va le hasher
-    role: finalRole,
-    isAvailable: false,
-    subscription: { isActive: false, hoursRemaining: 0 }
-  }], { session });
-
-  return newUser;
+  return user;
 };
 
 /**
- * Vérifie les identifiants utilisateur (Login)
+ * Vérifie les identifiants de connexion
  */
 const verifyCredentials = async (identifier, password) => {
-  const isEmail = identifier.includes('@');
-  const query = isEmail ? { email: identifier } : { phone: identifier };
+  // Recherche par Email ou Téléphone
+  const user = await User.findOne({
+    $or: [{ email: identifier }, { phone: identifier }]
+  }).select('+password'); // On demande explicitement le mot de passe hashé
 
-  const user = await User.findOne(query).select('+password');
+  if (!user) {
+    throw new AppError('Identifiants incorrects.', 401);
+  }
 
-  // Protection Timing Attack
-  const dummyHash = '$2b$12$abcdefghijklmnopqrstuvwxycdefghijklmnopqrstu';
-  const hashToCompare = user ? user.password : dummyHash;
-  const isMatch = await User.comparePasswordStatic(password, hashToCompare);
-
-  if (!user || !isMatch) {
-    throw { status: 401, message: 'Identifiants invalides.', code: 'INVALID_CREDENTIALS' };
+  // Vérification mot de passe (Méthode instance sécurisée)
+  const isMatch = await user.comparePassword(password);
+  if (!isMatch) {
+    throw new AppError('Identifiants incorrects.', 401);
   }
 
   if (user.isBanned) {
-    throw { status: 403, message: 'Compte suspendu.', code: 'USER_BANNED' };
+    throw new AppError(`Compte suspendu: ${user.banReason}`, 403);
   }
 
   return user;

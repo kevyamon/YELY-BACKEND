@@ -1,47 +1,38 @@
 // src/middleware/errorMiddleware.js
-// GESTIONNAIRE D'ERREURS CENTRALISÉ - Standardisation des réponses d'échec
+// MIDDLEWARE ERREURS - Compatible AppError
 // CSCSM Level: Bank Grade
 
 const logger = require('../config/logger');
+const AppError = require('../utils/AppError');
 
-/**
- * Capture toutes les erreurs et renvoie un format JSON uniforme
- */
 const errorHandler = (err, req, res, next) => {
   let error = { ...err };
   error.message = err.message;
 
-  // Log structuré pour l'admin système (avec Stack Trace en debug)
-  logger.error(`${err.status || 500} - ${err.message} - ${req.originalUrl} - ${req.method} - ${req.ip}`);
-  
-  if (process.env.NODE_ENV === 'development') {
-    logger.debug(err.stack);
+  // Si c'est une erreur inconnue, on loggue fort
+  if (!err.isOperational) {
+    logger.error(`[CRASH] ${err.status || 500} - ${err.message} - ${req.originalUrl} - ${req.method} - ${req.ip}`);
+    if (process.env.NODE_ENV === 'development') logger.debug(err.stack);
+  } else {
+    // Erreur métier prévue (ex: Mot de passe faux), log info/warn
+    logger.warn(`[API ERROR] ${err.statusCode} - ${err.message}`);
   }
 
-  // 1. Erreur de validation Mongoose
+  // Transformation des erreurs Mongoose/JWT en AppError
+  if (err.name === 'CastError') error = new AppError('Ressource introuvable (ID invalide)', 400);
+  if (err.code === 11000) error = new AppError('Valeur dupliquée détectée (ex: Email déjà pris)', 409);
   if (err.name === 'ValidationError') {
-    const message = Object.values(err.errors).map(val => val.message);
-    error = new Error(message.join(', '));
-    error.status = 400;
+    const message = Object.values(err.errors).map(val => val.message).join('. ');
+    error = new AppError(message, 400);
   }
+  if (err.name === 'JsonWebTokenError') error = new AppError('Token invalide', 401);
+  if (err.name === 'TokenExpiredError') error = new AppError('Session expirée', 401);
 
-  // 2. Erreur d'ID Mongoose mal formé
-  if (err.name === 'CastError') {
-    error = new Error("Ressource introuvable.");
-    error.status = 404;
-  }
-
-  // 3. Erreur de duplication (Clé unique)
-  if (err.code === 11000) {
-    error = new Error("Cette donnée existe déjà dans notre base.");
-    error.status = 409;
-  }
-
-  // Réponse finale standardisée
-  res.status(error.status || 500).json({
+  res.status(error.statusCode || 500).json({
     success: false,
-    message: error.message || "Une erreur interne est survenue.",
-    code: error.code || 'SERVER_ERROR',
+    status: error.status || 'error',
+    message: error.message || 'Erreur serveur interne',
+    code: error.statusCode ? `ERR_${error.statusCode}` : 'SERVER_ERROR',
     stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
   });
 };
