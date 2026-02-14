@@ -1,17 +1,15 @@
 // src/middleware/authMiddleware.js
-// AUTHENTIFICATION FORTERESSE - Validation ObjectId, cohérence rôles, anti-tampering
+// AUTHENTIFICATION FORTERESSE - Validation ObjectId, RBAC, Anti-tampering
 // CSCSM Level: Bank Grade
 
-const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const { verifyAccessToken } = require('../utils/tokenService');
+const AppError = require('../utils/AppError');
+const logger = require('../config/logger');
 
 /**
  * Valide qu'une chaîne est un ObjectId MongoDB valide
- * Protection contre injection NoSQL via IDs
- * @param {string} id - ID à valider
- * @returns {boolean}
  */
 const isValidObjectId = (id) => {
   return mongoose.Types.ObjectId.isValid(id) && 
@@ -19,184 +17,107 @@ const isValidObjectId = (id) => {
 };
 
 /**
- * Middleware d'authentification principal
- * Vérifie Bearer token, valide ObjectId, vérifie cohérence rôle
+ * Middleware d'authentification principal (Protect)
  */
 const protect = async (req, res, next) => {
   try {
+    // 1. Extraction Token
     let token;
-
-    // Extraction Bearer token uniquement
-    if (req.headers.authorization?.startsWith('Bearer ')) {
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
     }
 
     if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentification requise. Token manquant.',
-        code: 'TOKEN_MISSING'
-      });
+      throw new AppError('Vous n\'êtes pas connecté. Veuillez vous connecter.', 401);
     }
 
-    // Vérification JWT
+    // 2. Vérification Crypto (JWT)
     let decoded;
     try {
       decoded = verifyAccessToken(token);
     } catch (jwtError) {
-      if (jwtError.name === 'TokenExpiredError') {
-        return res.status(401).json({
-          success: false,
-          message: 'Session expirée. Veuillez vous reconnecter.',
-          code: 'TOKEN_EXPIRED'
-        });
-      }
-      return res.status(401).json({
-        success: false,
-        message: 'Token invalide.',
-        code: 'TOKEN_INVALID'
-      });
+      if (jwtError.name === 'TokenExpiredError') throw new AppError('Votre session a expiré. Veuillez vous reconnecter.', 401);
+      throw new AppError('Token invalide.', 401);
     }
 
-    // Validation ObjectId (anti-injection)
+    // 3. Validation ObjectId (Anti-Injection NoSQL)
     if (!isValidObjectId(decoded.userId)) {
-      console.warn(`[AUTH] ObjectId invalide détecté: ${decoded.userId}`);
-      return res.status(401).json({
-        success: false,
-        message: 'Token corrompu.',
-        code: 'TOKEN_CORRUPTED'
-      });
+      logger.warn(`[AUTH SECURITY] ObjectId malformé détecté: ${decoded.userId} - IP: ${req.ip}`);
+      throw new AppError('Token corrompu.', 401);
     }
 
-    // Récupération utilisateur (lean pour perf)
+    // 4. Récupération Utilisateur (Data Scrubbing .lean())
     const user = await User.findById(decoded.userId)
       .select('-password -__v')
       .lean();
 
     if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Utilisateur introuvable ou désactivé.',
-        code: 'USER_NOT_FOUND'
-      });
+      throw new AppError('L\'utilisateur appartenant à ce token n\'existe plus.', 401);
     }
 
-    // Vérification ban
+    // 5. Vérification Ban
     if (user.isBanned) {
-      return res.status(403).json({
-        success: false,
-        message: 'Compte suspendu.',
-        reason: user.banReason || 'Violation des conditions d\'utilisation',
-        code: 'USER_BANNED'
-      });
+      logger.warn(`[AUTH BAN] Tentative accès par utilisateur banni: ${user.email}`);
+      throw new AppError(`Compte suspendu: ${user.banReason || 'Raison non spécifiée'}`, 403);
     }
 
-    // Vérification anti-tampering: rôle token vs DB
+    // 6. Anti-Tampering (Rôle Token vs DB)
+    // Si le rôle dans le token ne matche plus la DB (ex: admin rétrogradé), on rejette.
     if (decoded.role && decoded.role !== user.role) {
-      console.warn(`[SECURITY] Rôle mismatch - Token: ${decoded.role}, DB: ${user.role}, User: ${user.email}`);
-      return res.status(403).json({
-        success: false,
-        message: 'Session invalide. Veuillez vous reconnecter.',
-        code: 'ROLE_MISMATCH'
-      });
+      logger.error(`[AUTH MISMATCH] Rôle Token (${decoded.role}) != DB (${user.role}) pour ${user.email}`);
+      throw new AppError('Vos permissions ont changé. Veuillez vous reconnecter.', 403);
     }
 
-    // Attache données sécurisées à la requête
-    req.user = {
-      _id: user._id.toString(),
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      role: user.role,
-      isAvailable: user.isAvailable,
-      subscription: user.subscription,
-      currentLocation: user.currentLocation
-    };
-
-    // Log pour audit (en prod: logger structuré)
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`[AUTH] ${user.email} (${user.role}) - ${req.method} ${req.originalUrl}`);
-    }
-
+    // 7. Attachement User Sécurisé (Seulement les champs nécessaires)
+    req.user = user;
     next();
+
   } catch (error) {
-    console.error('[AUTH MIDDLEWARE] Erreur:', error.message);
-    return res.status(500).json({
-      success: false,
-      message: 'Erreur d\'authentification.',
-      code: 'AUTH_ERROR'
-    });
+    next(error); // On passe l'erreur au errorHandler centralisé
   }
 };
 
 /**
- * Middleware de contrôle d'accès par rôle
- * @param  {...string} allowedRoles - Rôles autorisés
+ * Middleware de contrôle d'accès par rôle (RBAC)
  */
-const authorize = (...allowedRoles) => {
+const authorize = (...roles) => {
   return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentification requise.',
-        code: 'AUTH_REQUIRED'
-      });
+    if (!roles.includes(req.user.role)) {
+      logger.warn(`[AUTH FORBIDDEN] ${req.user.email} (${req.user.role}) a tenté d'accéder à une route ${roles.join('/')}`);
+      return next(new AppError('Vous n\'avez pas la permission d\'effectuer cette action.', 403));
     }
-
-    if (!allowedRoles.includes(req.user.role)) {
-      // Log sécurité
-      console.warn(`[SECURITY] Accès refusé: ${req.user.email} (${req.user.role}) tenté ${req.originalUrl}`);
-      
-      return res.status(403).json({
-        success: false,
-        message: 'Accès interdit. Privilèges insuffisants.',
-        code: 'FORBIDDEN'
-      });
-    }
-
     next();
   };
 };
 
 /**
- * Middleware optionnel: authentifie si token présent, ne bloque pas si absent
- * Utile pour logout, endpoints publics avec données utilisateur si dispo
+ * Middleware authentification optionnelle
+ * (Ne bloque pas, mais hydrate req.user si token valide)
  */
 const optionalAuth = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      return next();
+    let token;
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      token = req.headers.authorization.split(' ')[1];
     }
 
-    const token = authHeader.split(' ')[1];
+    if (!token) return next();
+
     const decoded = verifyAccessToken(token);
-    
-    if (isValidObjectId(decoded.userId)) {
-      const user = await User.findById(decoded.userId)
-        .select('name email role isBanned')
-        .lean();
-      
-      if (user && !user.isBanned) {
-        req.user = {
-          _id: user._id.toString(),
-          name: user.name,
-          email: user.email,
-          role: user.role
-        };
-      }
+    const user = await User.findById(decoded.userId).select('name email role isBanned').lean();
+
+    if (user && !user.isBanned) {
+      req.user = user;
     }
-    
     next();
   } catch (error) {
-    // En mode optionnel, on ignore les erreurs d'auth
-    next();
+    next(); // On continue en tant qu'invité
   }
 };
 
 module.exports = { 
   protect, 
   authorize, 
-  optionalAuth, 
+  optionalAuth,
   isValidObjectId 
 };

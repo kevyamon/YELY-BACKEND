@@ -38,9 +38,11 @@ const updateAdminStatus = async (req, res) => {
 const toggleUserBan = async (req, res) => {
   try {
     const { userId, reason } = req.body;
-    const user = await adminService.toggleUserBan(userId, reason);
+    // On passe req.user._id comme 3ème argument pour l'audit
+    const user = await adminService.toggleUserBan(userId, reason, req.user._id);
     
-    logger.warn(`[AUDIT BAN] ${req.user.email} toggled ban on ${user.email}. Status: ${user.isBanned}`);
+    // Le log Winston reste en complément (redondance utile)
+    logger.warn(`[AUDIT BAN] ${req.user.email} toggled ban on ${user.email}.`);
     return successResponse(res, { isBanned: user.isBanned }, user.isBanned ? 'Utilisateur banni.' : 'Bannissement levé.');
 
   } catch (error) {
