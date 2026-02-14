@@ -1,8 +1,9 @@
 // src/services/rideService.js
-// LOGIQUE MÉTIER COURSES - Sécurité GPS, Calculs Financiers & Atomicité
+// LOGIQUE MÉTIER COURSES - Sécurité GPS, Précision Décimale & Atomicité
 // CSCSM Level: Bank Grade (Forteresse)
 
 const mongoose = require('mongoose');
+const Decimal = require('decimal.js');
 const Ride = require('../models/Ride');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
@@ -11,7 +12,7 @@ const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
 
 /**
- * Calcul de distance (Haversine - Vol d'oiseau)
+ * Calcul de distance (Haversine) - Recalculé côté serveur pour éviter le spoofing
  * @private
  */
 const _calculateAirDistanceKm = (coords1, coords2) => {
@@ -24,27 +25,38 @@ const _calculateAirDistanceKm = (coords1, coords2) => {
             Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
             Math.sin(dLng/2) * Math.sin(dLng/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return parseFloat((R * c).toFixed(3));
+  
+  // Utilisation de Decimal pour la précision de retour
+  return new Decimal(R).mul(c).toDecimalPlaces(3).toNumber();
 };
 
 /**
- * Calcule le prix final avec précision financière
+ * Calcule le prix final avec précision financière Decimal.js
  * @private
  */
 const _computeFinalPrice = (config, distanceKm) => {
-  // Calcul en virgule fixe pour éviter les erreurs d'arrondi JS
-  let total = config.base + (distanceKm * config.perKm);
+  // Calcul : Base + (Distance * Prix/Km)
+  const base = new Decimal(config.base);
+  const perKm = new Decimal(config.perKm);
+  const dist = new Decimal(distanceKm);
   
-  // Application des bornes de sécurité
-  total = Math.max(config.minPrice, Math.min(config.maxPrice, total));
+  let total = base.plus(dist.times(perKm));
+  
+  // Bornes de sécurité
+  const min = new Decimal(config.minPrice);
+  const max = new Decimal(config.maxPrice);
+  
+  if (total.lt(min)) total = min;
+  if (total.gt(max)) total = max;
   
   // Arrondi commercial à 50 FCFA supérieur (Standard Afrique de l'Ouest)
-  return Math.ceil(total / 50) * 50;
+  // Formule : ceil(total / 50) * 50
+  return total.div(50).ceil().times(50).toNumber();
 };
 
 /**
  * 1. CRÉATION D'UNE DEMANDE DE COURSE
- * 🛡️ PROTECTION : Zero-Trust Client GPS
+ * 🛡️ PROTECTION : Anti-fraude GPS & Précision Décimale
  */
 const createRideRequest = async (riderId, rideData) => {
   const session = await mongoose.startSession();
@@ -54,34 +66,32 @@ const createRideRequest = async (riderId, rideData) => {
     await session.withTransaction(async () => {
       const { origin, destination, forfait } = rideData;
 
-      // A. Récupération de la configuration dynamique (Prix & Géo)
+      // A. Récupération dynamique de la configuration (Zero-Hardcoding)
       const settings = await Settings.findOne().lean().session(session);
-      if (!settings) throw new AppError('Configuration système introuvable.', 500);
+      if (!settings) throw new AppError('Système non configuré.', 500);
 
       const pricing = settings.pricing?.[forfait];
-      if (!pricing) throw new AppError(`Le forfait ${forfait} n'est pas configuré.`, 400);
+      if (!pricing) throw new AppError(`Forfait ${forfait} invalide.`, 400);
 
-      // B. Validation Géo-clôture (Geofencing)
+      // B. Validation Géo-clôture Server-Side
       if (settings.isMapLocked && settings.allowedCenter?.coordinates) {
         const distFromCenter = _calculateAirDistanceKm(settings.allowedCenter.coordinates, origin.coordinates);
         if (distFromCenter > settings.allowedRadiusKm) {
-          throw new AppError('Désolé, cette zone n\'est pas encore desservie.', 403);
+          throw new AppError('Zone non desservie par Yély.', 403);
         }
       }
 
-      // C. Calcul de distance avec vérification de cohérence
+      // C. Calcul de distance (Recalculé ici, on ne fait pas confiance au client)
       const distance = _calculateAirDistanceKm(origin.coordinates, destination.coordinates);
 
-      // 🛑 SÉCURITÉ : Anti-fraude trajet micro/identique
-      if (distance < 0.15) { // Minimum 150m pour éviter les abus de prix min
-        throw new AppError('Distance trop courte pour une course.', 400);
+      // 🛑 SÉCURITÉ : Seuil minimal anti-abus
+      if (distance < 0.15) { 
+        throw new AppError('Trajet trop court (minimum 150m).', 400);
       }
 
-      // 💡 NOTE : Pour un niveau "NASA", ici on appellerait une API comme Google Maps Distance Matrix
-      // pour obtenir la distance ROUTIÈRE réelle et non "à vol d'oiseau".
       const finalPrice = _computeFinalPrice(pricing, distance);
 
-      // D. Création de la course (Requested)
+      // D. Création atomique de la course
       const [ride] = await Ride.create([{
         rider: riderId,
         origin,
@@ -90,10 +100,10 @@ const createRideRequest = async (riderId, rideData) => {
         price: finalPrice,
         distance,
         status: 'requested',
-        metadata: { airDistance: distance } // Trace pour audit
+        metadata: { serverSideDistance: distance }
       }], { session });
 
-      // E. Recherche de chauffeurs (Rayon 5km par défaut)
+      // E. Recherche de chauffeurs éligibles (Géo-matching)
       const availableDrivers = await User.findAvailableDriversNear(
         origin.coordinates,
         5000, 
@@ -104,15 +114,13 @@ const createRideRequest = async (riderId, rideData) => {
         ride.status = 'cancelled';
         ride.cancellationReason = 'NO_DRIVERS_AVAILABLE';
         await ride.save({ session });
-        throw new AppError('Aucun chauffeur n\'est disponible pour le moment.', 404);
+        throw new AppError('Aucun chauffeur disponible dans votre zone.', 404);
       }
 
       result = { ride, availableDrivers };
     });
     
     return result;
-  } catch (error) {
-    throw error; 
   } finally {
     session.endSession();
   }
@@ -120,7 +128,7 @@ const createRideRequest = async (riderId, rideData) => {
 
 /**
  * 2. ACCEPTATION D'UNE COURSE
- * 🛡️ PROTECTION : Mise à jour atomique (Anti-Double Acceptation)
+ * 🛡️ PROTECTION : Atomicité stricte (Anti-Race Condition)
  */
 const acceptRideRequest = async (driverId, rideId) => {
   const session = await mongoose.startSession();
@@ -128,21 +136,20 @@ const acceptRideRequest = async (driverId, rideId) => {
   try {
     let result;
     await session.withTransaction(async () => {
-      // A. Validation éligibilité chauffeur
+      // A. Vérification de l'éligibilité temps-réel du chauffeur
       const driver = await User.findOne({
         _id: driverId,
         role: 'driver',
         isAvailable: true,
-        'subscription.isActive': true,
-        'subscription.hoursRemaining': { $gt: 0 }
+        'subscription.isActive': true
       }).session(session);
 
-      if (!driver) throw new AppError('Vous n\'êtes pas éligible pour cette course.', 403);
+      if (!driver) throw new AppError('Éligibilité chauffeur invalide.', 403);
 
-      // B. Acquisition ATOMIQUE de la course
-      // On utilise status: 'requested' dans le filtre pour être sûr qu'un autre n'a pas pris la course
+      // B. VERROU ATOMIQUE MONGODB
+      // On cherche une course 'requested' ET on la passe en 'accepted' en une seule opération
       const ride = await Ride.findOneAndUpdate(
-        { _id: rideId, status: 'requested' },
+        { _id: rideId, status: 'requested' }, // Filtre : Doit encore être libre
         { 
           $set: { 
             driver: driverId, 
@@ -153,20 +160,21 @@ const acceptRideRequest = async (driverId, rideId) => {
         { new: true, session }
       );
 
+      // Si 'ride' est null, c'est qu'un autre chauffeur a validé l'update 1ms avant
       if (!ride) {
-        throw new AppError('Cette course a déjà été acceptée par un autre chauffeur.', 410);
+        throw new AppError('Cette course a déjà été prise par un collègue.', 410);
       }
 
-      // C. Verrouillage du statut chauffeur
+      // C. Mise à jour du statut chauffeur
       driver.isAvailable = false;
       await driver.save({ session });
 
-      // D. Audit Log
+      // D. Journalisation immuable
       await AuditLog.create([{
         actor: driverId,
         action: 'ACCEPT_RIDE',
         target: ride._id,
-        details: `Course ${rideId} acceptée par ${driver.email}`
+        details: `Course ${rideId} sécurisée par ${driver.email}`
       }], { session });
 
       result = { ride, driver };
@@ -188,7 +196,7 @@ const startRideSession = async (driverId, rideId) => {
     { new: true }
   );
   
-  if (!ride) throw new AppError('Impossible de démarrer la course. Vérifiez le statut.', 400);
+  if (!ride) throw new AppError('Statut de course incompatible pour le démarrage.', 400);
   return ride;
 };
 
@@ -207,9 +215,9 @@ const completeRideSession = async (driverId, rideId) => {
         { new: true, session }
       );
 
-      if (!ride) throw new AppError('Erreur lors de la clôture de la course.', 400);
+      if (!ride) throw new AppError('Erreur de clôture : course introuvable ou déjà finie.', 400);
 
-      // Libération du chauffeur
+      // Libération immédiate du chauffeur
       await User.findByIdAndUpdate(driverId, { $set: { isAvailable: true } }, { session });
       
       result = ride;
@@ -225,5 +233,5 @@ module.exports = {
   acceptRideRequest,
   startRideSession,
   completeRideSession,
-  calculateDistanceKm: _calculateAirDistanceKm // Export pour tests
+  calculateDistanceKm: _calculateAirDistanceKm 
 };
