@@ -4,9 +4,15 @@
 
 const mongoose = require('mongoose');
 const authService = require('../services/authService');
-const { generateAuthResponse, rotateTokens, clearRefreshTokenCookie, verifyRefreshToken } = require('../utils/tokenService');
+const { 
+  generateAuthResponse, 
+  rotateTokens, 
+  clearRefreshTokenCookie, 
+  verifyRefreshToken,
+  revokeRefreshToken 
+} = require('../utils/tokenService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
-const User = require('../models/User'); // Pour updates simples
+const User = require('../models/User');
 
 /**
  * @desc Inscription sécurisée avec transaction ACID
@@ -19,7 +25,6 @@ const registerUser = async (req, res) => {
   try {
     const { name, email, phone, password, role } = req.body;
 
-    // 1. Normalisation (Contrôleur prépare les données)
     const normalizedData = {
       name: name.trim(),
       email: email.toLowerCase().trim(),
@@ -28,16 +33,11 @@ const registerUser = async (req, res) => {
       role
     };
 
-    // 2. Appel du Service (Logique métier)
     const user = await authService.createUserInTransaction(normalizedData, session);
-
-    // 3. Génération Tokens
     const authTokens = generateAuthResponse(res, user);
 
-    // 4. Commit Transaction
     await session.commitTransaction();
 
-    // 5. Réponse Standardisée (Fixe le bug Frontend)
     return successResponse(res, {
       user: {
         _id: user._id,
@@ -46,7 +46,7 @@ const registerUser = async (req, res) => {
         phone: user.phone,
         role: user.role
       },
-      ...authTokens // accessToken, refreshToken, expiresIn
+      ...authTokens
     }, 'Compte créé avec succès.', 201);
 
   } catch (error) {
@@ -65,14 +65,10 @@ const loginUser = async (req, res) => {
   try {
     const { identifier, password } = req.body;
     
-    // Normalisation
     const isEmail = identifier.includes('@');
     const normalizedId = isEmail ? identifier.toLowerCase().trim() : identifier.replace(/\s/g, '');
 
-    // Appel Service
     const user = await authService.verifyCredentials(normalizedId, password);
-
-    // Génération Tokens
     const authTokens = generateAuthResponse(res, user);
 
     return successResponse(res, {
@@ -88,14 +84,13 @@ const loginUser = async (req, res) => {
     }, 'Connexion réussie.');
 
   } catch (error) {
-    // Délai artificiel en cas d'erreur (Anti-Bruteforce basic)
     await new Promise(resolve => setTimeout(resolve, 500));
     return errorResponse(res, error.message, error.status || 500, error);
   }
 };
 
 /**
- * @desc Rotation des tokens
+ * @desc Rotation des tokens (Refresh)
  */
 const refreshToken = async (req, res) => {
   try {
@@ -104,10 +99,11 @@ const refreshToken = async (req, res) => {
 
     let decoded;
     try {
-      decoded = verifyRefreshToken(oldRefreshToken);
+      // ⚠️ ASYNC : Vérifie DB + Crypto
+      decoded = await verifyRefreshToken(oldRefreshToken);
     } catch (err) {
       clearRefreshTokenCookie(res);
-      throw { status: 403, message: 'Token invalide' };
+      throw { status: 403, message: 'Token invalide ou révoqué' };
     }
 
     const user = await User.findById(decoded.userId);
@@ -116,7 +112,8 @@ const refreshToken = async (req, res) => {
       throw { status: 403, message: 'Utilisateur invalide ou banni' };
     }
 
-    const tokens = rotateTokens(res, oldRefreshToken, user._id, user.role);
+    // ⚠️ ASYNC : Révoque l'ancien et crée le nouveau
+    const tokens = await rotateTokens(res, oldRefreshToken, user._id, user.role);
 
     return successResponse(res, {
       accessToken: tokens.accessToken,
@@ -133,9 +130,12 @@ const refreshToken = async (req, res) => {
  */
 const logoutUser = async (req, res) => {
   const token = req.cookies.refreshToken;
+  
   if (token) {
-    // Optionnel: Ajouter à une blacklist Redis
+    // ⚠️ ASYNC : On bannit le token pour empêcher sa réutilisation
+    await revokeRefreshToken(token);
   }
+  
   clearRefreshTokenCookie(res);
   return successResponse(res, null, 'Déconnexion réussie.');
 };
@@ -147,7 +147,6 @@ const updateAvailability = async (req, res) => {
   try {
     const { isAvailable } = req.body;
     
-    // Logique rapide directement dans controller (ou déplacer en service si complexe)
     const user = await User.findByIdAndUpdate(
       req.user._id, 
       { isAvailable }, 
