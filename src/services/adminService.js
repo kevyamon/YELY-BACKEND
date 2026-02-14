@@ -1,10 +1,11 @@
 // src/services/adminService.js
-// LOGIQUE MÉTIER ADMIN - Gestion Rôles, Bans, Transactions
+// LOGIQUE MÉTIER ADMIN - Gestion Rôles, Bans, Transactions & Lectures
 // CSCSM Level: Bank Grade
 
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const Settings = require('../models/Settings');
+const Ride = require('../models/Ride');
 const cloudinary = require('../config/cloudinary');
 const AppError = require('../utils/AppError');
 
@@ -52,7 +53,6 @@ const toggleUserBan = async (userId, reason) => {
 
   user.isBanned = !user.isBanned;
   user.banReason = user.isBanned ? (reason || 'Non spécifiée') : '';
-  // Si banni, on coupe la disponibilité
   if (user.isBanned) user.isAvailable = false;
   
   await user.save();
@@ -92,7 +92,6 @@ const approveTransaction = async (transactionId, validatorId, session) => {
   const driver = await User.findById(transaction.driver).session(session);
   if (!driver) throw new AppError('Chauffeur introuvable.', 404);
 
-  // 1 semaine (168h) ou 1 mois (720h)
   const hoursToAdd = transaction.type === 'WEEKLY' ? 168 : 720;
 
   driver.subscription.isActive = true;
@@ -105,8 +104,6 @@ const approveTransaction = async (transactionId, validatorId, session) => {
   transaction.validatedAt = new Date();
   await transaction.save({ session });
 
-  // Nettoyage Cloudinary (Fire & Forget, géré par le contrôleur ou background job idéalement)
-  // Ici on retourne l'ID public pour que le contrôleur s'en charge
   return { transaction, driver, hoursToAdd, proofPublicId: transaction.proofPublicId };
 };
 
@@ -126,10 +123,88 @@ const rejectTransaction = async (transactionId, reason, validatorId) => {
   return { transaction, proofPublicId: transaction.proofPublicId };
 };
 
+// ---------------------------------------------------------
+// NOUVEAUX AJOUTS (POUR CORRIGER L'ERREUR DE MODULE MANQUANT)
+// ---------------------------------------------------------
+
+/**
+ * Statistiques Dashboard
+ */
+const getDashboardStats = async () => {
+  const totalUsers = await User.countDocuments();
+  const totalDrivers = await User.countDocuments({ role: 'driver' });
+  const activeDrivers = await User.countDocuments({ role: 'driver', isAvailable: true });
+  const pendingTransactions = await Transaction.countDocuments({ status: 'PENDING' });
+
+  const todayStart = new Date();
+  todayStart.setHours(0,0,0,0);
+  const ridesToday = await Ride.countDocuments({ createdAt: { $gte: todayStart } });
+
+  return {
+    users: { total: totalUsers, drivers: totalDrivers, active: activeDrivers },
+    business: { pendingTransactions, ridesToday }
+  };
+};
+
+/**
+ * Liste de tous les utilisateurs (Filtres & Pagination)
+ */
+const getAllUsers = async (query, userRole) => {
+  const page = Math.max(1, parseInt(query.page) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(query.limit) || 20));
+  const skip = (page - 1) * limit;
+
+  const filter = {};
+  
+  // Admin ne voit pas superadmin
+  if (userRole === 'admin') {
+    filter.role = { $ne: 'superadmin' };
+  }
+  
+  if (query.role && ['rider', 'driver', 'admin'].includes(query.role)) {
+    filter.role = query.role;
+  }
+  
+  if (query.isBanned === 'true') {
+    filter.isBanned = true;
+  }
+
+  if (query.search) {
+    const searchRegex = new RegExp(query.search.trim(), 'i');
+    filter.$or = [
+      { name: searchRegex },
+      { email: searchRegex },
+      { phone: searchRegex }
+    ];
+  }
+
+  const [users, total] = await Promise.all([
+    User.find(filter)
+      .select('-password -__v')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    User.countDocuments(filter)
+  ]);
+
+  return {
+    users,
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit)
+    }
+  };
+};
+
 module.exports = {
   updateUserRole,
   toggleUserBan,
   updateMapSettings,
   approveTransaction,
-  rejectTransaction
+  rejectTransaction,
+  getDashboardStats, // ✅ Ajouté
+  getAllUsers       // ✅ Ajouté
 };
