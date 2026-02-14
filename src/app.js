@@ -20,7 +20,7 @@ const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
-// Trust proxy pour Render/Heroku
+// Trust proxy pour Render/Heroku (Important pour le rate limiting et https)
 if (env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
@@ -39,23 +39,26 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-// 2. CORS STRICT - Avec credentials
+// 2. CORS STRICT - Adapté pour Mobile & Web
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin && env.NODE_ENV === 'development') {
+    // Autoriser les requêtes sans origine (Mobile Apps, Curl, Postman, Render Health Checks)
+    if (!origin) {
       return callback(null, true);
     }
+    
+    // Pour les navigateurs Web, on vérifie strictement la liste blanche
     const allowedOrigins = [env.FRONTEND_URL];
-    if (allowedOrigins.includes(origin)) {
+    if (allowedOrigins.includes(origin) || env.NODE_ENV === 'development') {
       callback(null, true);
     } else {
       console.warn(`[CORS] Origine rejetée: ${origin}`);
-      callback(new Error('Origine non autorisée'));
+      callback(new Error('Origine non autorisée par la politique CORS'));
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
 };
 
 app.use(cors(corsOptions));
@@ -80,6 +83,11 @@ app.use(mongoSanitize({
 app.use(sanitizationMiddleware);
 
 // 6. ROUTES API
+// Route de santé pour Render (pour éviter les erreurs 404 dans les logs)
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'ok', service: 'Yély API' });
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/rides', rideRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
