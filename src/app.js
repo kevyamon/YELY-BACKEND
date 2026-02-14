@@ -1,5 +1,5 @@
 // src/app.js
-// CONFIGURATION EXPRESS FORTERESSE - CORS strict avec credentials, sécurité maximale
+// CONFIGURATION EXPRESS FORTERESSE - CORS strict, Sécurité NoSQL & XSS
 // CSCSM Level: Bank Grade
 
 const express = require('express');
@@ -7,9 +7,10 @@ const helmet = require('helmet');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const mongoSanitize = require('express-mongo-sanitize');
-const xss = require('xss');
 const { env } = require('./config/env');
 const { apiLimiter } = require('./middleware/rateLimitMiddleware');
+const { sanitizationMiddleware } = require('./middleware/sanitizationMiddleware');
+const { errorHandler } = require('./middleware/errorMiddleware');
 
 // Routes
 const authRoutes = require('./routes/authRoutes');
@@ -19,7 +20,7 @@ const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
-// Trust proxy uniquement si nécessaire
+// Trust proxy pour Render/Heroku
 if (env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
@@ -38,19 +39,13 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-// 2. CORS STRICT - Avec credentials pour cookies httpOnly
+// 2. CORS STRICT - Avec credentials
 const corsOptions = {
   origin: (origin, callback) => {
-    // Autorise requêtes sans origin (mobile apps, Postman) en dev uniquement
     if (!origin && env.NODE_ENV === 'development') {
       return callback(null, true);
     }
-    
-    // Vérifie l'origine contre la whitelist
-    const allowedOrigins = [
-      env.FRONTEND_URL,
-    ];
-    
+    const allowedOrigins = [env.FRONTEND_URL];
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -58,7 +53,7 @@ const corsOptions = {
       callback(new Error('Origine non autorisée'));
     }
   },
-  credentials: true, // 🔥 IMPORTANT: Permet les cookies httpOnly
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
 };
@@ -81,43 +76,8 @@ app.use(mongoSanitize({
   }
 }));
 
-// Sanitize XSS
-const sanitizeXSS = (obj) => {
-  if (typeof obj === 'string') {
-    return xss(obj, {
-      whiteList: {},
-      stripIgnoreTag: true,
-      stripIgnoreTagBody: ['script']
-    });
-  }
-  if (Array.isArray(obj)) {
-    return obj.map(sanitizeXSS);
-  }
-  if (obj !== null && typeof obj === 'object') {
-    const sanitized = {};
-    for (const key of Object.keys(obj)) {
-      if (key === '__proto__' || key === 'constructor') continue;
-      sanitized[key] = sanitizeXSS(obj[key]);
-    }
-    return sanitized;
-  }
-  return obj;
-};
-
-app.use((req, res, next) => {
-  try {
-    if (req.body) req.body = sanitizeXSS(req.body);
-    if (req.params) req.params = sanitizeXSS(req.params);
-    if (req.query) req.query = sanitizeXSS(req.query);
-    next();
-  } catch (error) {
-    console.error('[XSS SANITIZE] Erreur:', error.message);
-    return res.status(400).json({
-      success: false,
-      message: "Données de requête invalides."
-    });
-  }
-});
+// Utilisation du middleware XSS isolé
+app.use(sanitizationMiddleware);
 
 // 6. ROUTES API
 app.use('/api/auth', authRoutes);
@@ -134,16 +94,6 @@ app.use((req, res) => {
 });
 
 // 8. GESTION GLOBALE ERREURS
-app.use((err, req, res, next) => {
-  console.error('[GLOBAL ERROR]', err.stack);
-  
-  const isDev = env.NODE_ENV === 'development';
-  
-  res.status(err.status || 500).json({
-    success: false,
-    message: err.message || "Erreur serveur.",
-    ...(isDev && { stack: err.stack })
-  });
-});
+app.use(errorHandler);
 
 module.exports = app;
