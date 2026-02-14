@@ -1,5 +1,5 @@
 // src/controllers/adminController.js
-// CONTRÔLEUR ADMIN - "Skinny Controller" (Délègue au Service)
+// CONTRÔLEUR ADMIN - Corrigé et Complet
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
@@ -7,8 +7,7 @@ const adminService = require('../services/adminService');
 const cloudinary = require('../config/cloudinary');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const logger = require('../config/logger');
-const User = require('../models/User'); // Pour le listage simple
-const Transaction = require('../models/Transaction'); // Pour la queue simple
+const Transaction = require('../models/Transaction');
 
 /**
  * @desc Promouvoir/Rétrograder (SuperAdmin)
@@ -20,7 +19,6 @@ const updateAdminStatus = async (req, res) => {
     
     const result = await session.withTransaction(async () => {
       const res = await adminService.updateUserRole(userId, action, req.user._id, session);
-      // Audit dans la transaction ? Non, l'audit est un side-effect
       return res;
     });
 
@@ -73,14 +71,12 @@ const approveTransaction = async (req, res) => {
       return await adminService.approveTransaction(req.params.id, req.user._id, session);
     });
 
-    // Nettoyage Cloudinary Async
     if (result.proofPublicId) {
       cloudinary.uploader.destroy(result.proofPublicId).catch(err => 
         logger.warn(`[CLOUDINARY] Clean fail: ${err.message}`)
       );
     }
 
-    // Notification Socket
     const io = req.app.get('socketio');
     io.to(result.driver._id.toString()).emit('subscription_validated', {
       hoursAdded: result.hoursToAdd,
@@ -123,7 +119,7 @@ const rejectTransaction = async (req, res) => {
 };
 
 /**
- * @desc Get Validation Queue (Lecture seule, pas besoin de service complexe)
+ * @desc Get Validation Queue
  */
 const getValidationQueue = async (req, res) => {
   try {
@@ -145,7 +141,31 @@ const getValidationQueue = async (req, res) => {
   }
 };
 
-// ... (Pour getAllUsers et getDashboardStats, tu peux garder la logique simple actuelle ou la déplacer aussi)
+/**
+ * @desc Dashboard Stats (CORRIGÉ: Appel Service)
+ */
+const getDashboardStats = async (req, res) => {
+  try {
+    const stats = await adminService.getDashboardStats();
+    return successResponse(res, stats, "Statistiques récupérées.");
+  } catch (error) {
+    logger.error(`[ADMIN STATS] Erreur: ${error.message}`);
+    return errorResponse(res, "Impossible de récupérer les statistiques.", 500);
+  }
+};
+
+/**
+ * @desc Get All Users (CORRIGÉ: Appel Service)
+ */
+const getAllUsers = async (req, res) => {
+  try {
+    const result = await adminService.getAllUsers(req.query, req.user.role);
+    return successResponse(res, { users: result.users, pagination: result.pagination }, "Utilisateurs récupérés.");
+  } catch (error) {
+    logger.error(`[ADMIN USERS] Erreur: ${error.message}`);
+    return errorResponse(res, "Impossible de récupérer les utilisateurs.", 500);
+  }
+};
 
 module.exports = {
   updateAdminStatus,
@@ -154,7 +174,6 @@ module.exports = {
   approveTransaction,
   rejectTransaction,
   getValidationQueue,
-  // ... exporte aussi les autres méthodes de lecture si tu les gardes ici
-  getDashboardStats: require('./adminController_read').getDashboardStats, // Optionnel: séparer lecture/écriture
-  getAllUsers: require('./adminController_read').getAllUsers 
+  getDashboardStats, // ✅ Plus de require()
+  getAllUsers        // ✅ Plus de require()
 };
