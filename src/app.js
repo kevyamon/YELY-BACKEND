@@ -24,9 +24,9 @@ const userRoutes = require('./routes/userRoutes');
 const app = express();
 
 // 0. DURCISSEMENT SERVEUR
-app.disable('x-powered-by'); // Cache la techno utilisée (même si helmet le fait, la redondance est reine)
+app.disable('x-powered-by');
 
-// Trust proxy pour Render/Heroku
+// Trust proxy pour Render/Heroku (Indispensable pour le Rate Limit)
 if (env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
@@ -78,7 +78,7 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(cookieParser());
 
 // 6. NETTOYAGE & PROTECTION PARAMÈTRES
-app.use(hpp()); // Bloque les attaques de type ?id=1&id=2
+app.use(hpp()); 
 app.use(mongoSanitize({
   replaceWith: '_',
   onSanitize: ({ req, key }) => {
@@ -87,8 +87,11 @@ app.use(mongoSanitize({
 }));
 app.use(sanitizationMiddleware);
 
-// 7. ROUTES API - VERSIONING V1
-const API_V1_PREFIX = '/api/v1';
+// 7. ROUTES DE BASE (Health Checks & Monitoring)
+// ✅ LE FIX EST ICI : Route racine pour Render/Heroku
+app.get('/', (req, res) => {
+  res.status(200).send('Yély API (Iron Dome) is running 🚀');
+});
 
 app.get('/status', (req, res) => {
   res.status(200).json({ 
@@ -101,17 +104,22 @@ app.get('/status', (req, res) => {
   });
 });
 
+// 8. ROUTES API - VERSIONING V1
+const API_V1_PREFIX = '/api/v1';
+
 app.use(`${API_V1_PREFIX}/auth`, authRoutes);
 app.use(`${API_V1_PREFIX}/users`, userRoutes);
 app.use(`${API_V1_PREFIX}/rides`, rideRoutes);
 app.use(`${API_V1_PREFIX}/subscriptions`, subscriptionRoutes);
 app.use(`${API_V1_PREFIX}/admin`, adminRoutes);
 
+// 9. GESTION 404
 app.use((req, res) => {
   logger.warn(`[404] Endpoint non trouvé: ${req.method} ${req.url}`);
   res.status(404).json({ success: false, message: "La ressource demandée est introuvable." });
 });
 
+// 10. GESTION D'ERREURS GLOBALE
 app.use(errorHandler);
 
 module.exports = app;
