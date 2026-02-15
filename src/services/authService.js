@@ -1,58 +1,68 @@
 // src/services/authService.js
-// SERVICE AUTH - Logique Création & Vérification (100% DB Driven)
+// SERVICE AUTH - Logique Métier & Transactions ACID
 // CSCSM Level: Bank Grade
 
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const AppError = require('../utils/AppError');
-const { env } = require('../config/env');
+const { verifyRefreshToken } = require('../utils/tokenService');
 
 /**
- * Crée un utilisateur dans une transaction
- * @param {Object} userData - Données validées
- * @param {Object} session - Session Mongoose
+ * Normalisation interne des données utilisateur
  */
-const createUserInTransaction = async (userData, session) => {
-  const { email, phone, role } = userData;
+const normalizeUserData = (data) => ({
+  name: data.name?.trim(),
+  email: data.email?.toLowerCase().trim(),
+  phone: data.phone?.replace(/\s/g, ''),
+  password: data.password,
+  role: data.role
+});
 
-  // 1. Vérification doublons (Double sécurité en plus de l'index unique)
-  const existingUser = await User.findOne({ 
-    $or: [{ email }, { phone }] 
-  }).session(session);
+/**
+ * Inscription avec transaction isolée
+ */
+const register = async (rawUserData) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  if (existingUser) {
-    throw new AppError('Cet email ou ce numéro est déjà utilisé.', 409);
+  try {
+    const userData = normalizeUserData(rawUserData);
+
+    // Vérification existence
+    const existing = await User.findOne({
+      $or: [{ email: userData.email }, { phone: userData.phone }]
+    }).session(session);
+
+    if (existing) throw new AppError('Cet email ou ce numéro est déjà utilisé.', 409);
+
+    // Sécurité Rôles
+    if (['admin', 'superadmin'].includes(userData.role)) {
+      throw new AppError('Action non autorisée.', 403);
+    }
+
+    const [user] = await User.create([userData], { session });
+    await session.commitTransaction();
+    return user;
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
   }
-
-  // 2. Sécurité Rôle Admin/SuperAdmin
-  // On empêche la création directe d'admin via l'API publique
-  if (['admin', 'superadmin'].includes(role)) {
-    // Seul un superadmin connecté pourrait créer un autre admin (logique à gérer dans un AdminService)
-    // Pour l'inscription publique, on force 'rider' ou 'driver'
-    throw new AppError('Création de compte administrateur non autorisée ici.', 403);
-  }
-
-  // 3. Création
-  const [user] = await User.create([userData], { session });
-  
-  return user;
 };
 
 /**
- * Vérifie les identifiants de connexion
+ * Authentification et vérification de compte
  */
-const verifyCredentials = async (identifier, password) => {
-  // Recherche par Email ou Téléphone
+const login = async (identifier, password) => {
+  const isEmail = identifier.includes('@');
+  const normalizedId = isEmail ? identifier.toLowerCase().trim() : identifier.replace(/\s/g, '');
+
   const user = await User.findOne({
-    $or: [{ email: identifier }, { phone: identifier }]
-  }).select('+password'); // On demande explicitement le mot de passe hashé
+    $or: [{ email: normalizedId }, { phone: normalizedId }]
+  }).select('+password');
 
-  if (!user) {
-    throw new AppError('Identifiants incorrects.', 401);
-  }
-
-  // Vérification mot de passe (Méthode instance sécurisée)
-  const isMatch = await user.comparePassword(password);
-  if (!isMatch) {
+  if (!user || !(await user.comparePassword(password))) {
     throw new AppError('Identifiants incorrects.', 401);
   }
 
@@ -63,7 +73,37 @@ const verifyCredentials = async (identifier, password) => {
   return user;
 };
 
+/**
+ * Logique de validation de session pour rafraîchissement
+ */
+const validateSessionForRefresh = async (token) => {
+  const decoded = await verifyRefreshToken(token);
+  
+  const user = await User.findById(decoded.userId);
+  if (!user || user.isBanned) {
+    throw new AppError('Session invalide ou utilisateur banni.', 403);
+  }
+
+  return user;
+};
+
+/**
+ * Mise à jour de disponibilité
+ */
+const updateAvailability = async (userId, isAvailable) => {
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { isAvailable },
+    { new: true, runValidators: true }
+  ).select('isAvailable');
+
+  if (!user) throw new AppError('Utilisateur introuvable.', 404);
+  return user;
+};
+
 module.exports = {
-  createUserInTransaction,
-  verifyCredentials
+  register,
+  login,
+  validateSessionForRefresh,
+  updateAvailability
 };
