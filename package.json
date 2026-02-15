@@ -17,6 +17,7 @@
   "author": "Yély Tech Team",
   "license": "ISC",
   "dependencies": {
+    "axios": "^1.13.5",
     "bcrypt": "^6.0.0",
     "cloudinary": "^2.0.1",
     "cookie-parser": "^1.4.6",
