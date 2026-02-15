@@ -11,6 +11,7 @@ const pricingService = require('./pricingService');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
 const { env } = require('../config/env');
+const { sendPushNotification } = require('./notificationService'); // ✅ IMPORT DU MOTEUR PUSH
 
 // 1. Initialisation de la file d'attente Redis pour le nettoyage
 const cleanupQueue = new Queue('ride-cleanup', { 
@@ -33,7 +34,6 @@ const calculateHaversineDistance = (coords1, coords2) => {
 
 /**
  * 🗺️ CALCUL DISTANCE RÉELLE (LocationIQ - 5000 req/jour)
- * Remplace l'ancien serveur OSRM public.
  */
 const getRouteDistance = async (originCoords, destCoords) => {
   try {
@@ -102,8 +102,22 @@ const createRideRequest = async (riderId, rideData, redis) => {
     role: 'driver',
     isAvailable: true,
     isBanned: false,
-    'subscription.isActive': true // ✅ LE VIDEUR EST ICI : Refuse les abonnements inactifs
+    'subscription.isActive': true
   }).limit(5);
+
+  // 🚨 BOSS FINAL : ENVOI DES NOTIFICATIONS PUSH AUX CHAUFFEURS TROUVÉS
+  // On utilise un .forEach sans await pour ne pas bloquer la réponse de l'API au client
+  drivers.forEach(driver => {
+    sendPushNotification(
+      driver._id,
+      '🚨 Nouvelle course à proximité !',
+      `Une course de ${distance} km est disponible. Ouvrez vite l'application !`,
+      { 
+        rideId: ride._id.toString(), 
+        type: 'NEW_RIDE_REQUEST' 
+      }
+    ).catch(err => logger.error(`[PUSH ASYNC ERROR] ${err.message}`));
+  });
 
   return { ride, drivers };
 };

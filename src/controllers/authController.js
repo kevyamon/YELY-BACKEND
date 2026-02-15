@@ -115,10 +115,26 @@ const updateAvailability = async (req, res) => {
   }
 };
 
+/**
+ * @desc Update FCM Token (Pour les notifications Push)
+ */
+const updateFcmToken = async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+    
+    await require('../models/User').findByIdAndUpdate(req.user._id, { fcmToken });
+
+    return successResponse(res, null, 'Token de notification mis à jour avec succès.');
+  } catch (error) {
+    return errorResponse(res, error.message, error.status || 500);
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
   refreshToken,
   logoutUser,
-  updateAvailability
+  updateAvailability,
+  updateFcmToken // ✅ AJOUT
 };

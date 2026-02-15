@@ -27,6 +27,10 @@ const envSchema = z.object({
   CLOUDINARY_API_KEY: z.string().min(1, 'Cloudinary API Key requise'),
   CLOUDINARY_API_SECRET: z.string().min(1, 'Cloudinary API Secret requis'),
   LOCATION_IQ_TOKEN: z.string().min(1, 'Token LocationIQ requis').optional(),
+  // ✅ AJOUT POUR FIREBASE (Push Notifications)
+  FIREBASE_PROJECT_ID: z.string().optional(),
+  FIREBASE_CLIENT_EMAIL: z.string().optional(),
+  FIREBASE_PRIVATE_KEY: z.string().optional(),
 
   BCRYPT_ROUNDS: z.string().transform(Number).optional(),
 })

@@ -53,6 +53,9 @@ const userSchema = new mongoose.Schema({
     type: { type: String, enum: ['Point'], default: 'Point' },
     coordinates: { type: [Number], default: [0, 0] } // [Longitude, Latitude]
   },
+
+  // ✅ AJOUT : Stockage du Token Firebase pour réveiller le téléphone
+  fcmToken: { type: String, default: null },
   
   isAvailable: { type: Boolean, default: false, index: true },
   
@@ -125,7 +128,8 @@ userSchema.statics.findAvailableDriversNear = function(coordinates, maxDistanceM
     query['vehicle.category'] = forfait;
   }
 
-  return this.find(query).select('name phone vehicle currentLocation rating -password -__v').limit(5);
+  // ✅ AJOUT : On inclut fcmToken dans le select pour pouvoir l'utiliser
+  return this.find(query).select('name phone vehicle currentLocation rating fcmToken -password -__v').limit(5);
 };
 
 module.exports = mongoose.model('User', userSchema);

@@ -10,7 +10,8 @@ const {
   loginUser, 
   logoutUser, 
   refreshToken,
-  updateAvailability 
+  updateAvailability,
+  updateFcmToken // ✅ AJOUT DE L'IMPORT
 } = require('../controllers/authController');
 const { protect, optionalAuth } = require('../middleware/authMiddleware');
 const validate = require('../middleware/validationMiddleware');
@@ -58,5 +59,6 @@ router.post('/logout', optionalAuth, logoutUser);
 
 // Privé
 router.put('/availability', protect, validate(availabilitySchema), updateAvailability);
+router.put('/fcm-token', protect, updateFcmToken); // ✅ AJOUT DE LA ROUTE PRIVÉE
 
 module.exports = router;
