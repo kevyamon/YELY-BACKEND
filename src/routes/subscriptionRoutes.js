@@ -1,19 +1,27 @@
 // src/routes/subscriptionRoutes.js
+// ROUTES SOUSCRIPTION - Blindage & Validation
+// CSCSM Level: Bank Grade
+
 const express = require('express');
 const router = express.Router();
 const { submitProof } = require('../controllers/subscriptionController');
 const { protect, authorize } = require('../middleware/authMiddleware');
-// Déstructuration pour récupérer les nouveaux exports de la Phase 4.1
 const { uploadSingle, validateFileSignature } = require('../middleware/uploadMiddleware');
+const validate = require('../middleware/validationMiddleware');
+const { submitProofSchema } = require('../validations/subscriptionValidation');
 
-// Seuls les chauffeurs (ou superadmin) peuvent envoyer une preuve
-// 🛡️ Blindage : uploadSingle (Multer) + validateFileSignature (Magic Bytes)
+/**
+ * @route   POST /api/v1/subscriptions/submit-proof
+ * @desc    Soumission d'une preuve de paiement avec validation multicouche
+ * 🛡️ Pipeline : Auth -> Autorisation -> Upload -> Signature File -> Validation Body -> Controller
+ */
 router.post(
   '/submit-proof', 
   protect, 
   authorize('driver', 'superadmin'), 
   uploadSingle, 
   validateFileSignature, 
+  validate(submitProofSchema), 
   submitProof
 );
 
