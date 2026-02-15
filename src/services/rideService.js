@@ -4,7 +4,7 @@
 
 const mongoose = require('mongoose');
 const axios = require('axios');
-const { Queue } = require('bullmq'); // npm install bullmq
+const { Queue } = require('bullmq');
 const Ride = require('../models/Ride');
 const User = require('../models/User');
 const pricingService = require('./pricingService');
@@ -13,7 +13,6 @@ const logger = require('../config/logger');
 const { env } = require('../config/env');
 
 // 1. Initialisation de la file d'attente Redis pour le nettoyage
-// Cette file gère les "rappels" pour libérer les chauffeurs après 60s
 const cleanupQueue = new Queue('ride-cleanup', { 
   connection: { url: env.REDIS_URL } 
 });
@@ -33,20 +32,29 @@ const calculateHaversineDistance = (coords1, coords2) => {
 };
 
 /**
- * 🗺️ CALCUL DISTANCE RÉELLE (ROUTING)
+ * 🗺️ CALCUL DISTANCE RÉELLE (LocationIQ - 5000 req/jour)
+ * Remplace l'ancien serveur OSRM public.
  */
 const getRouteDistance = async (originCoords, destCoords) => {
   try {
-    const url = `http://router.project-osrm.org/route/v1/driving/${originCoords[0]},${originCoords[1]};${destCoords[0]},${destCoords[1]}?overview=false`;
-    const response = await axios.get(url, { timeout: 1500 });
+    const token = env.LOCATION_IQ_TOKEN;
+    
+    if (!token) {
+      throw new Error("Token LocationIQ introuvable dans les variables d'environnement.");
+    }
+
+    const url = `https://us1.locationiq.com/v1/directions/driving/${originCoords[0]},${originCoords[1]};${destCoords[0]},${destCoords[1]}?key=${token}&overview=false`;
+    const response = await axios.get(url, { timeout: 3000 });
 
     if (response.data && response.data.routes && response.data.routes.length > 0) {
       const distanceMeters = response.data.routes[0].distance;
       return parseFloat((distanceMeters / 1000).toFixed(2));
     }
-    throw new Error('No route found');
+    
+    throw new Error('Aucun itinéraire routier trouvé par LocationIQ');
+
   } catch (error) {
-    logger.warn(`[ROUTING FAIL] OSRM error, fallback to Haversine: ${error.message}`);
+    logger.warn(`[ROUTING FAIL] API LocationIQ HS ou erreur, passage au plan B (Haversine) : ${error.message}`);
     const directDist = calculateHaversineDistance(originCoords, destCoords);
     return parseFloat((directDist * 1.3).toFixed(2));
   }
@@ -54,9 +62,6 @@ const getRouteDistance = async (originCoords, destCoords) => {
 
 /**
  * 1. CRÉER LA DEMANDE (Rider)
- * @param {string} riderId - ID du client
- * @param {object} rideData - Coordonnées
- * @param {object} redis - Instance Redis passée depuis le contrôleur/socket
  */
 const createRideRequest = async (riderId, rideData, redis) => {
   // 🛡️ SÉCURITÉ : Anti-Spam
@@ -84,7 +89,6 @@ const createRideRequest = async (riderId, rideData, redis) => {
   });
 
   // 🚀 OPTIMISATION REDIS GEO : Trouver les IDs des chauffeurs proches (5km)
-  // C'est beaucoup plus rapide que de scanner MongoDB sous forte charge
   const nearbyDriverIds = await redis.georadius(
     'active_drivers', 
     origin.coordinates[0], 
@@ -92,12 +96,13 @@ const createRideRequest = async (riderId, rideData, redis) => {
     5, 'km'
   );
 
-  // Puis on filtre les détails dans MongoDB
+  // 🚪 PORTE 1 DU VIDEUR : On filtre les détails dans MongoDB
   const drivers = await User.find({
     _id: { $in: nearbyDriverIds, $nin: ride.rejectedDrivers },
     role: 'driver',
     isAvailable: true,
-    isBanned: false
+    isBanned: false,
+    'subscription.isActive': true // ✅ LE VIDEUR EST ICI : Refuse les abonnements inactifs
   }).limit(5);
 
   return { ride, drivers };
@@ -119,8 +124,6 @@ const lockRideForNegotiation = async (rideId, driverId) => {
 
   if (!ride) throw new AppError('Course déjà prise par un autre chauffeur.', 409);
 
-  // ⏱️ FILE D'ATTENTE : On programme un job de vérification dans 60 secondes
-  // Si la négociation n'est pas finie d'ici là, le worker la tuera
   await cleanupQueue.add(
     'check-stuck-negotiation', 
     { rideId: ride._id }, 
@@ -202,7 +205,6 @@ const completeRideSession = async (driverId, rideId) => {
 
 /**
  * 🛡️ CRON / WORKER LOGIC : Libérer les chauffeurs bloqués
- * Cette fonction peut maintenant être appelée par le Worker BullMQ
  */
 const releaseStuckNegotiations = async (io, specificRideId = null) => {
   const query = specificRideId 
@@ -212,7 +214,6 @@ const releaseStuckNegotiations = async (io, specificRideId = null) => {
   const stuckRides = await Ride.find(query);
 
   for (const ride of stuckRides) {
-    // Si on vérifie une course précise et qu'elle a été mise à jour entre-temps, on ignore
     if (specificRideId && ride.negotiationStartedAt > new Date(Date.now() - 55000)) continue;
 
     const blockedDriverId = ride.driver;

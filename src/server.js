@@ -7,7 +7,7 @@ const app = require('./app');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
-const Redis = require('ioredis'); // npm install ioredis
+const Redis = require('ioredis');
 const User = require('./models/User');
 const startRideWorker = require('./workers/rideWorker');
 const { env } = require('./config/env');
@@ -22,10 +22,6 @@ const redis = new Redis(env.REDIS_URL);
 redis.on('error', (err) => logger.error('Redis Error:', err));
 redis.on('connect', () => logger.info('✅ Redis connecté (Rate Limit & GEO)'));
 
-/**
- * RATE LIMIT VIA REDIS
- * Remplace le Map() local pour survivre aux redémarrages.
- */
 const checkSocketRateLimit = async (userId) => {
   const key = `ratelimit:socket:${userId}`;
   const now = Date.now();
@@ -33,7 +29,6 @@ const checkSocketRateLimit = async (userId) => {
   
   if (lastUpdate && now - parseInt(lastUpdate) < 1000) return false;
   
-  // TTL de 60s pour ne pas encombrer Redis
   await redis.set(key, now, 'EX', 60);
   return true;
 };
@@ -50,12 +45,10 @@ const io = new Server(server, {
   maxHttpBufferSize: 1e6
 });
 
-// Injection des instances pour accès dans les contrôleurs si besoin
 app.set('socketio', io);
 app.set('redis', redis);
 
 // 🛡️ DÉMARRAGE DU WORKER BULLMQ
-// Remplace le setInterval global par une gestion par job beaucoup plus fine
 startRideWorker(io);
 
 // Helper Distance (Haversine)
@@ -89,13 +82,27 @@ io.use(async (socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  const user = socket.user;
+  // On récupère le user qui a passé le middleware
+  const user = socket.user; 
+  
   socket.join(user._id.toString());
   if (user.role === 'driver') socket.join('drivers');
 
   // UPDATE LOCATION (Avec Anti-Spoofing & Redis GEO)
   socket.on('update_location', async (coords) => {
     if (!coords?.latitude || !coords?.longitude) return;
+
+    // 🚪 PORTE 2 DU VIDEUR : Vérification de l'abonnement
+    if (user.role === 'driver' && (!user.subscription || !user.subscription.isActive)) {
+      // 1. On le supprime de Redis au cas où il y était
+      await redis.zrem('active_drivers', user._id.toString());
+      
+      // 2. On prévient le Front-end qu'il est bloqué (pratique pour afficher un popup)
+      socket.emit('subscription_expired', { message: 'Abonnement inactif. Position non partagée.' });
+      
+      // 3. ⛔ ON COUPE ICI, la position n'est pas sauvegardée
+      return; 
+    }
     
     // Rate limit basé sur Redis
     const isAllowed = await checkSocketRateLimit(user._id.toString());
@@ -129,11 +136,8 @@ io.on('connection', (socket) => {
       });
 
       // 2. Indexation Temps Réel Redis (GEO)
-      // Uniquement pour les chauffeurs disponibles
       if (user.role === 'driver') {
-        // On ajoute/met à jour la position dans l'index 'active_drivers'
         await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());
-        // Expire après 2 minutes sans update (sécurité si crash app chauffeur)
         await redis.expire('active_drivers', 120);
       }
     } catch (error) {
@@ -142,7 +146,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', async () => {
-    // Nettoyage Redis si le chauffeur se déconnecte proprement
     if (user.role === 'driver') {
       await redis.zrem('active_drivers', user._id.toString());
     }

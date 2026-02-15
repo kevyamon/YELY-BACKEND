@@ -26,6 +26,7 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().min(1, 'Cloudinary Cloud Name requis'),
   CLOUDINARY_API_KEY: z.string().min(1, 'Cloudinary API Key requise'),
   CLOUDINARY_API_SECRET: z.string().min(1, 'Cloudinary API Secret requis'),
+  LOCATION_IQ_TOKEN: z.string().min(1, 'Token LocationIQ requis').optional(),
 
   BCRYPT_ROUNDS: z.string().transform(Number).optional(),
 })

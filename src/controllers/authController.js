@@ -25,7 +25,9 @@ const registerUser = async (req, res) => {
         name: user.name,
         email: user.email,
         phone: user.phone,
-        role: user.role
+        role: user.role,
+        // 🚪 PORTE 3 DU VIDEUR : On inclut l'abonnement même à la création
+        subscription: user.subscription 
       },
       ...authTokens
     }, 'Compte créé avec succès.', 201);
@@ -50,7 +52,9 @@ const loginUser = async (req, res) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
-        isAvailable: user.isAvailable
+        isAvailable: user.isAvailable,
+        // 🚪 PORTE 3 DU VIDEUR : Le Frontend a besoin de ça pour bloquer l'accès à la carte
+        subscription: user.subscription 
       },
       ...authTokens
     }, 'Connexion réussie.');
