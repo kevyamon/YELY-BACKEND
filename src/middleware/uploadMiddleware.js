@@ -6,7 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const FileType = require('file-type'); // Ajouté en Phase 1
+const FileType = require('file-type');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
 
@@ -18,7 +18,9 @@ if (!fs.existsSync(TEMP_DIR)) {
 
 const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+
+// 🔒 SÉCURITÉ : On limite strictement à 2 Mo pour économiser le stockage et la bande passante
+const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 
 // 1. Configuration du stockage Multer
 const storage = multer.diskStorage({
