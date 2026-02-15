@@ -1,14 +1,22 @@
 // src/services/rideService.js
-// FLUX COURSE - Cartographie Réelle, Négociation & Anti-Spam
+// FLUX COURSE - Cartographie Réelle, Négociation & Anti-Spam (Version Redis & BullMQ)
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
-const axios = require('axios'); // Pour OSRM
+const axios = require('axios');
+const { Queue } = require('bullmq'); // npm install bullmq
 const Ride = require('../models/Ride');
 const User = require('../models/User');
 const pricingService = require('./pricingService');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
+const { env } = require('../config/env');
+
+// 1. Initialisation de la file d'attente Redis pour le nettoyage
+// Cette file gère les "rappels" pour libérer les chauffeurs après 60s
+const cleanupQueue = new Queue('ride-cleanup', { 
+  connection: { url: env.REDIS_URL } 
+});
 
 // Géométrie (Haversine) - Sert de Fallback (Secours)
 const calculateHaversineDistance = (coords1, coords2) => {
@@ -26,33 +34,32 @@ const calculateHaversineDistance = (coords1, coords2) => {
 
 /**
  * 🗺️ CALCUL DISTANCE RÉELLE (ROUTING)
- * Appelle OSRM pour avoir la distance par la route.
  */
 const getRouteDistance = async (originCoords, destCoords) => {
   try {
-    // URL OSRM public (Pour la prod, héberger son propre OSRM est recommandé)
     const url = `http://router.project-osrm.org/route/v1/driving/${originCoords[0]},${originCoords[1]};${destCoords[0]},${destCoords[1]}?overview=false`;
-    
-    // Timeout court (1.5s) pour ne pas bloquer le serveur
     const response = await axios.get(url, { timeout: 1500 });
 
     if (response.data && response.data.routes && response.data.routes.length > 0) {
       const distanceMeters = response.data.routes[0].distance;
-      return parseFloat((distanceMeters / 1000).toFixed(2)); // Retourne en Km
+      return parseFloat((distanceMeters / 1000).toFixed(2));
     }
     throw new Error('No route found');
   } catch (error) {
     logger.warn(`[ROUTING FAIL] OSRM error, fallback to Haversine: ${error.message}`);
     const directDist = calculateHaversineDistance(originCoords, destCoords);
-    return parseFloat((directDist * 1.3).toFixed(2)); // x1.3 pour estimer la route
+    return parseFloat((directDist * 1.3).toFixed(2));
   }
 };
 
 /**
  * 1. CRÉER LA DEMANDE (Rider)
+ * @param {string} riderId - ID du client
+ * @param {object} rideData - Coordonnées
+ * @param {object} redis - Instance Redis passée depuis le contrôleur/socket
  */
-const createRideRequest = async (riderId, rideData) => {
-  // 🛡️ SÉCURITÉ : Anti-Spam (Une seule course active)
+const createRideRequest = async (riderId, rideData, redis) => {
+  // 🛡️ SÉCURITÉ : Anti-Spam
   const existingRide = await Ride.findOne({
     rider: riderId,
     status: { $in: ['searching', 'negotiating', 'accepted', 'ongoing'] }
@@ -60,8 +67,6 @@ const createRideRequest = async (riderId, rideData) => {
   if (existingRide) throw new AppError('Vous avez déjà une course active.', 409);
 
   const { origin, destination } = rideData;
-  
-  // ✅ APPEL SERVICE CARTOGRAPHIE (Ou Fallback)
   const distance = await getRouteDistance(origin.coordinates, destination.coordinates);
 
   if (distance < 0.1) throw new AppError('Distance invalide (<100m).', 400);
@@ -78,18 +83,21 @@ const createRideRequest = async (riderId, rideData) => {
     rejectedDrivers: []
   });
 
-  // Dispatch : Trouver les chauffeurs (Exclure ceux occupés ou rejetés)
+  // 🚀 OPTIMISATION REDIS GEO : Trouver les IDs des chauffeurs proches (5km)
+  // C'est beaucoup plus rapide que de scanner MongoDB sous forte charge
+  const nearbyDriverIds = await redis.georadius(
+    'active_drivers', 
+    origin.coordinates[0], 
+    origin.coordinates[1], 
+    5, 'km'
+  );
+
+  // Puis on filtre les détails dans MongoDB
   const drivers = await User.find({
+    _id: { $in: nearbyDriverIds, $nin: ride.rejectedDrivers },
     role: 'driver',
     isAvailable: true,
-    isBanned: false,
-    _id: { $nin: ride.rejectedDrivers },
-    currentLocation: {
-      $near: {
-        $geometry: { type: 'Point', coordinates: origin.coordinates },
-        $maxDistance: 5000 
-      }
-    }
+    isBanned: false
   }).limit(5);
 
   return { ride, drivers };
@@ -104,12 +112,21 @@ const lockRideForNegotiation = async (rideId, driverId) => {
     { 
       status: 'negotiating', 
       driver: driverId,
-      negotiationStartedAt: new Date() // ⏱️ Top départ chrono
+      negotiationStartedAt: new Date()
     },
     { new: true }
   );
 
   if (!ride) throw new AppError('Course déjà prise par un autre chauffeur.', 409);
+
+  // ⏱️ FILE D'ATTENTE : On programme un job de vérification dans 60 secondes
+  // Si la négociation n'est pas finie d'ici là, le worker la tuera
+  await cleanupQueue.add(
+    'check-stuck-negotiation', 
+    { rideId: ride._id }, 
+    { delay: 60000, removeOnComplete: true }
+  );
+
   return ride;
 };
 
@@ -120,7 +137,6 @@ const submitPriceProposal = async (rideId, driverId, selectedAmount) => {
   const ride = await Ride.findOne({ _id: rideId, driver: driverId, status: 'negotiating' });
   if (!ride) throw new AppError('Course expirée ou invalide.', 404);
 
-  // Vérification stricte que le prix est dans les options
   const isValidOption = ride.priceOptions.some(opt => opt.amount === selectedAmount);
   if (!isValidOption) throw new AppError('Prix invalide (Tentative de fraude).', 400);
 
@@ -137,7 +153,6 @@ const finalizeProposal = async (rideId, riderId, decision) => {
   let result;
 
   await session.withTransaction(async () => {
-    // 🛡️ SÉCURITÉ : Vérification ID Rider
     const ride = await Ride.findOne({ _id: rideId, rider: riderId, status: 'negotiating' }).session(session);
     if (!ride) throw new AppError('Demande invalide.', 404);
 
@@ -151,9 +166,7 @@ const finalizeProposal = async (rideId, riderId, decision) => {
       result = { status: 'ACCEPTED', ride };
 
     } else {
-      // SOFT REJECT : On libère la course, on bloque ce chauffeur
       const rejectedDriverId = ride.driver;
-      
       ride.status = 'searching';
       ride.driver = null;
       ride.proposedPrice = null;
@@ -188,31 +201,32 @@ const completeRideSession = async (driverId, rideId) => {
 };
 
 /**
- * 🛡️ CRON : Libérer les chauffeurs bloqués (> 60s)
+ * 🛡️ CRON / WORKER LOGIC : Libérer les chauffeurs bloqués
+ * Cette fonction peut maintenant être appelée par le Worker BullMQ
  */
-const releaseStuckNegotiations = async (io) => {
-  const timeoutThreshold = new Date(Date.now() - 60000); 
-  const stuckRides = await Ride.find({
-    status: 'negotiating',
-    negotiationStartedAt: { $lt: timeoutThreshold }
-  });
+const releaseStuckNegotiations = async (io, specificRideId = null) => {
+  const query = specificRideId 
+    ? { _id: specificRideId, status: 'negotiating' }
+    : { status: 'negotiating', negotiationStartedAt: { $lt: new Date(Date.now() - 60000) } };
 
-  if (stuckRides.length > 0) {
-    console.log(`[CLEANUP] Libération de ${stuckRides.length} courses bloquées.`);
-    for (const ride of stuckRides) {
-      const blockedDriverId = ride.driver;
-      ride.status = 'searching';
-      ride.driver = null;
-      ride.proposedPrice = null;
-      ride.negotiationStartedAt = null;
-      if (blockedDriverId) ride.rejectedDrivers.push(blockedDriverId);
-      await ride.save();
+  const stuckRides = await Ride.find(query);
 
-      if (io) {
-        io.to(ride.rider.toString()).emit('negotiation_timeout', { message: "Délai dépassé. Recherche d'un autre chauffeur..." });
-        if (blockedDriverId) {
-          io.to(blockedDriverId.toString()).emit('negotiation_cancelled', { message: "Temps de réponse écoulé." });
-        }
+  for (const ride of stuckRides) {
+    // Si on vérifie une course précise et qu'elle a été mise à jour entre-temps, on ignore
+    if (specificRideId && ride.negotiationStartedAt > new Date(Date.now() - 55000)) continue;
+
+    const blockedDriverId = ride.driver;
+    ride.status = 'searching';
+    ride.driver = null;
+    ride.proposedPrice = null;
+    ride.negotiationStartedAt = null;
+    if (blockedDriverId) ride.rejectedDrivers.push(blockedDriverId);
+    await ride.save();
+
+    if (io) {
+      io.to(ride.rider.toString()).emit('negotiation_timeout', { message: "Délai dépassé." });
+      if (blockedDriverId) {
+        io.to(blockedDriverId.toString()).emit('negotiation_cancelled', { message: "Temps écoulé." });
       }
     }
   }

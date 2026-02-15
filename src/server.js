@@ -1,5 +1,5 @@
 // src/server.js
-// SERVEUR YÉLY - Anti-Spoofing GPS & Auto-Cleanup
+// SERVEUR YÉLY - Anti-Spoofing GPS, Redis GEO & BullMQ Worker
 // CSCSM Level: Bank Grade
 
 const http = require('http');
@@ -7,34 +7,34 @@ const app = require('./app');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
+const Redis = require('ioredis'); // npm install ioredis
 const User = require('./models/User');
-const rideService = require('./services/rideService'); // Pour le Cron
+const startRideWorker = require('./workers/rideWorker');
 const { env } = require('./config/env');
 const logger = require('./config/logger');
 
 const server = http.createServer(app);
 
 // -------------------------------------------------------------
-// GESTION MÉMOIRE & RATE LIMIT (Anti-DoS)
+// 🚀 CONFIGURATION REDIS (Moteur de performance)
 // -------------------------------------------------------------
-const RateLimitStore = new Map();
+const redis = new Redis(env.REDIS_URL);
+redis.on('error', (err) => logger.error('Redis Error:', err));
+redis.on('connect', () => logger.info('✅ Redis connecté (Rate Limit & GEO)'));
 
-// Nettoyage automatique du Map toutes les 5 minutes (Garbage Collection)
-// Empêche la fuite de mémoire signalée par l'audit
-setInterval(() => {
+/**
+ * RATE LIMIT VIA REDIS
+ * Remplace le Map() local pour survivre aux redémarrages.
+ */
+const checkSocketRateLimit = async (userId) => {
+  const key = `ratelimit:socket:${userId}`;
   const now = Date.now();
-  for (const [key, timestamp] of RateLimitStore.entries()) {
-    if (now - timestamp > 60000) { // Si inactif depuis 1 min
-      RateLimitStore.delete(key);
-    }
-  }
-}, 5 * 60 * 1000);
-
-const checkSocketRateLimit = (userId) => {
-  const now = Date.now();
-  const lastUpdate = RateLimitStore.get(userId) || 0;
-  if (now - lastUpdate < 1000) return false; // Max 1 update / sec
-  RateLimitStore.set(userId, now);
+  const lastUpdate = await redis.get(key);
+  
+  if (lastUpdate && now - parseInt(lastUpdate) < 1000) return false;
+  
+  // TTL de 60s pour ne pas encombrer Redis
+  await redis.set(key, now, 'EX', 60);
   return true;
 };
 // -------------------------------------------------------------
@@ -50,14 +50,15 @@ const io = new Server(server, {
   maxHttpBufferSize: 1e6
 });
 
+// Injection des instances pour accès dans les contrôleurs si besoin
 app.set('socketio', io);
+app.set('redis', redis);
 
-// 🛡️ CRON "MAISON" : Vérification des Négociations Bloquées (Toutes les 30s)
-setInterval(() => {
-  rideService.releaseStuckNegotiations(io).catch(err => console.error('Cron Error:', err));
-}, 30000);
+// 🛡️ DÉMARRAGE DU WORKER BULLMQ
+// Remplace le setInterval global par une gestion par job beaucoup plus fine
+startRideWorker(io);
 
-// Helper Distance (Haversine) pour l'Anti-Spoofing
+// Helper Distance (Haversine)
 const getDistKm = (lat1, lon1, lat2, lon2) => {
   const R = 6371; 
   const dLat = (lat2-lat1) * Math.PI/180;
@@ -78,7 +79,6 @@ io.use(async (socket, next) => {
     if (!user || user.isBanned) return next(new Error('AUTH_REJECTED'));
     
     socket.user = user;
-    // Initialisation pour Anti-Spoofing
     socket.lastLocTime = Date.now();
     socket.lastCoords = user.currentLocation?.coordinates || [0,0]; 
     
@@ -91,39 +91,35 @@ io.use(async (socket, next) => {
 io.on('connection', (socket) => {
   const user = socket.user;
   socket.join(user._id.toString());
-  socket.join(`role:${user.role}`);
   if (user.role === 'driver') socket.join('drivers');
 
-  // UPDATE LOCATION (Avec Anti-Spoofing GPS)
+  // UPDATE LOCATION (Avec Anti-Spoofing & Redis GEO)
   socket.on('update_location', async (coords) => {
     if (!coords?.latitude || !coords?.longitude) return;
-    if (!checkSocketRateLimit(user._id.toString())) return;
+    
+    // Rate limit basé sur Redis
+    const isAllowed = await checkSocketRateLimit(user._id.toString());
+    if (!isAllowed) return;
 
-    // 🛡️ ANTI-SPOOFING : Calcul de Vitesse
     const now = Date.now();
     const timeDiffSeconds = (now - socket.lastLocTime) / 1000;
     
-    // On ignore le tout premier point ou si temps trop court (< 1s déjà géré par RateLimit)
     if (timeDiffSeconds > 1) {
       const [prevLng, prevLat] = socket.lastCoords;
       const distanceKm = getDistKm(prevLat, prevLng, coords.latitude, coords.longitude);
-      
-      // Vitesse = Distance / Temps (en Heures)
       const speedKmH = distanceKm / (timeDiffSeconds / 3600);
 
-      // Limite physique : 200 km/h (Marge pour erreurs GPS légitimes)
-      // Si > 200 km/h, c'est de la téléportation -> On rejette
       if (speedKmH > 200) {
-        logger.warn(`[ANTI-SPOOFING] Rejet update ${user.name}: ${speedKmH.toFixed(0)} km/h détecté.`);
+        logger.warn(`[ANTI-SPOOFING] ${user.name}: ${speedKmH.toFixed(0)} km/h détecté.`);
         return; 
       }
     }
 
-    // Mise à jour valide
     socket.lastLocTime = now;
     socket.lastCoords = [coords.longitude, coords.latitude];
 
     try {
+      // 1. Persistance MongoDB
       await User.updateOne({ _id: user._id }, {
         currentLocation: {
           type: 'Point',
@@ -131,25 +127,39 @@ io.on('connection', (socket) => {
         },
         lastLocationAt: new Date()
       });
+
+      // 2. Indexation Temps Réel Redis (GEO)
+      // Uniquement pour les chauffeurs disponibles
+      if (user.role === 'driver') {
+        // On ajoute/met à jour la position dans l'index 'active_drivers'
+        await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());
+        // Expire après 2 minutes sans update (sécurité si crash app chauffeur)
+        await redis.expire('active_drivers', 120);
+      }
     } catch (error) {
       logger.error(`[SOCKET LOC] ${user._id}: ${error.message}`);
     }
   });
 
-  // Autres événements...
-  socket.on('disconnect', () => {});
+  socket.on('disconnect', async () => {
+    // Nettoyage Redis si le chauffeur se déconnecte proprement
+    if (user.role === 'driver') {
+      await redis.zrem('active_drivers', user._id.toString());
+    }
+  });
 });
 
 // Démarrage
-const PORT = env.PORT;
 const startServer = async () => {
   try {
     await mongoose.connect(env.MONGO_URI);
     logger.info('✅ MongoDB connecté');
-    server.listen(PORT, () => {
-      logger.info(`🚀 Serveur Yély (Iron Dome) actif sur port ${PORT}`);
+    
+    server.listen(env.PORT, () => {
+      logger.info(`🚀 Serveur Yély (Redis Ready) actif sur port ${env.PORT}`);
     });
   } catch (err) {
+    logger.error('CRITICAL STARTUP ERROR:', err);
     process.exit(1);
   }
 };
