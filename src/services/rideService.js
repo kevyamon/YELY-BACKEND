@@ -1,6 +1,6 @@
 // src/services/rideService.js
 // LOGIQUE MÉTIER COURSES - Sécurité GPS, Précision Décimale & Atomicité
-// CSCSM Level: Bank Grade (Forteresse)
+// CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
 const Decimal = require('decimal.js');
@@ -9,11 +9,9 @@ const User = require('../models/User');
 const Settings = require('../models/Settings');
 const AuditLog = require('../models/AuditLog');
 const AppError = require('../utils/AppError');
-const logger = require('../config/logger');
 
 /**
- * Calcul de distance (Haversine) - Recalculé côté serveur pour éviter le spoofing
- * @private
+ * Calcul de distance (Haversine) - Protection Spoofing
  */
 const _calculateAirDistanceKm = (coords1, coords2) => {
   const [lng1, lat1] = coords1;
@@ -25,38 +23,29 @@ const _calculateAirDistanceKm = (coords1, coords2) => {
             Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
             Math.sin(dLng/2) * Math.sin(dLng/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  
-  // Utilisation de Decimal pour la précision de retour
   return new Decimal(R).mul(c).toDecimalPlaces(3).toNumber();
 };
 
 /**
- * Calcule le prix final avec précision financière Decimal.js
- * @private
+ * Calcul de prix précis (FCFA)
  */
 const _computeFinalPrice = (config, distanceKm) => {
-  // Calcul : Base + (Distance * Prix/Km)
   const base = new Decimal(config.base);
   const perKm = new Decimal(config.perKm);
   const dist = new Decimal(distanceKm);
-  
   let total = base.plus(dist.times(perKm));
   
-  // Bornes de sécurité
   const min = new Decimal(config.minPrice);
   const max = new Decimal(config.maxPrice);
-  
   if (total.lt(min)) total = min;
   if (total.gt(max)) total = max;
   
-  // Arrondi commercial à 50 FCFA supérieur (Standard Afrique de l'Ouest)
-  // Formule : ceil(total / 50) * 50
+  // Arrondi commercial 50 FCFA
   return total.div(50).ceil().times(50).toNumber();
 };
 
 /**
- * 1. CRÉATION D'UNE DEMANDE DE COURSE
- * 🛡️ PROTECTION : Anti-fraude GPS & Précision Décimale
+ * 1. CRÉATION D'UNE DEMANDE
  */
 const createRideRequest = async (riderId, rideData) => {
   const session = await mongoose.startSession();
@@ -66,14 +55,13 @@ const createRideRequest = async (riderId, rideData) => {
     await session.withTransaction(async () => {
       const { origin, destination, forfait } = rideData;
 
-      // A. Récupération dynamique de la configuration (Zero-Hardcoding)
       const settings = await Settings.findOne().lean().session(session);
       if (!settings) throw new AppError('Système non configuré.', 500);
 
       const pricing = settings.pricing?.[forfait];
       if (!pricing) throw new AppError(`Forfait ${forfait} invalide.`, 400);
 
-      // B. Validation Géo-clôture Server-Side
+      // Validation Géo-clôture
       if (settings.isMapLocked && settings.allowedCenter?.coordinates) {
         const distFromCenter = _calculateAirDistanceKm(settings.allowedCenter.coordinates, origin.coordinates);
         if (distFromCenter > settings.allowedRadiusKm) {
@@ -81,17 +69,11 @@ const createRideRequest = async (riderId, rideData) => {
         }
       }
 
-      // C. Calcul de distance (Recalculé ici, on ne fait pas confiance au client)
       const distance = _calculateAirDistanceKm(origin.coordinates, destination.coordinates);
-
-      // 🛑 SÉCURITÉ : Seuil minimal anti-abus
-      if (distance < 0.15) { 
-        throw new AppError('Trajet trop court (minimum 150m).', 400);
-      }
+      if (distance < 0.15) throw new AppError('Trajet trop court (minimum 150m).', 400);
 
       const finalPrice = _computeFinalPrice(pricing, distance);
 
-      // D. Création atomique de la course
       const [ride] = await Ride.create([{
         rider: riderId,
         origin,
@@ -99,27 +81,41 @@ const createRideRequest = async (riderId, rideData) => {
         forfait,
         price: finalPrice,
         distance,
-        status: 'requested',
-        metadata: { serverSideDistance: distance }
+        status: 'requested'
       }], { session });
 
-      // E. Recherche de chauffeurs éligibles (Géo-matching)
-      const availableDrivers = await User.findAvailableDriversNear(
-        origin.coordinates,
-        5000, 
-        forfait
-      ).session(session);
+      const availableDrivers = await User.findAvailableDriversNear(origin.coordinates, 5000, forfait).session(session);
 
       if (availableDrivers.length === 0) {
+        // 🛑 On marque comme annulé mais on garde la transaction pour historiser la demande
         ride.status = 'cancelled';
         ride.cancellationReason = 'NO_DRIVERS_AVAILABLE';
         await ride.save({ session });
-        throw new AppError('Aucun chauffeur disponible dans votre zone.', 404);
+        
+        // Log d'échec
+        await AuditLog.create([{
+          actor: riderId,
+          action: 'RIDE_REQUEST_FAILED',
+          target: ride._id,
+          details: 'Aucun chauffeur disponible.'
+        }], { session });
+        
+        result = { ride, availableDrivers: [], error: 'Aucun chauffeur disponible.' };
+        return;
       }
+
+      await AuditLog.create([{
+        actor: riderId,
+        action: 'CREATE_RIDE',
+        target: ride._id,
+        details: `Course demandée: ${finalPrice} FCFA`
+      }], { session });
 
       result = { ride, availableDrivers };
     });
     
+    // Si on a retourné un résultat avec erreur, on gère la réponse
+    if (result.error) throw new AppError(result.error, 404);
     return result;
   } finally {
     session.endSession();
@@ -127,85 +123,54 @@ const createRideRequest = async (riderId, rideData) => {
 };
 
 /**
- * 2. ACCEPTATION D'UNE COURSE
- * 🛡️ PROTECTION : Atomicité stricte (Anti-Race Condition)
+ * 2. ACCEPTATION (Verrou Atomique)
  */
 const acceptRideRequest = async (driverId, rideId) => {
   const session = await mongoose.startSession();
-  
   try {
     let result;
     await session.withTransaction(async () => {
-      // A. Vérification de l'éligibilité temps-réel du chauffeur
-      const driver = await User.findOne({
-        _id: driverId,
-        role: 'driver',
-        isAvailable: true,
-        'subscription.isActive': true
-      }).session(session);
-
+      const driver = await User.findOne({ _id: driverId, role: 'driver', isAvailable: true, 'subscription.isActive': true }).session(session);
       if (!driver) throw new AppError('Éligibilité chauffeur invalide.', 403);
 
-      // B. VERROU ATOMIQUE MONGODB
-      // On cherche une course 'requested' ET on la passe en 'accepted' en une seule opération
       const ride = await Ride.findOneAndUpdate(
-        { _id: rideId, status: 'requested' }, // Filtre : Doit encore être libre
-        { 
-          $set: { 
-            driver: driverId, 
-            status: 'accepted', 
-            acceptedAt: new Date() 
-          } 
-        },
+        { _id: rideId, status: 'requested' },
+        { $set: { driver: driverId, status: 'accepted', acceptedAt: new Date() } },
         { new: true, session }
       );
 
-      // Si 'ride' est null, c'est qu'un autre chauffeur a validé l'update 1ms avant
-      if (!ride) {
-        throw new AppError('Cette course a déjà été prise par un collègue.', 410);
-      }
+      if (!ride) throw new AppError('Cette course a déjà été prise.', 410);
 
-      // C. Mise à jour du statut chauffeur
       driver.isAvailable = false;
       await driver.save({ session });
 
-      // D. Journalisation immuable
       await AuditLog.create([{
         actor: driverId,
         action: 'ACCEPT_RIDE',
         target: ride._id,
-        details: `Course ${rideId} sécurisée par ${driver.email}`
+        details: `Course sécurisée par chauffeur ID: ${driverId}`
       }], { session });
 
       result = { ride, driver };
     });
-
     return result;
   } finally {
     session.endSession();
   }
 };
 
-/**
- * 3. DÉMARRAGE DE LA COURSE
- */
 const startRideSession = async (driverId, rideId) => {
   const ride = await Ride.findOneAndUpdate(
     { _id: rideId, driver: driverId, status: 'accepted' },
     { $set: { status: 'ongoing', startedAt: new Date() } },
     { new: true }
   );
-  
-  if (!ride) throw new AppError('Statut de course incompatible pour le démarrage.', 400);
+  if (!ride) throw new AppError('Action impossible : vérifiez le statut de la course.', 400);
   return ride;
 };
 
-/**
- * 4. FINALISATION DE LA COURSE
- */
 const completeRideSession = async (driverId, rideId) => {
   const session = await mongoose.startSession();
-  
   try {
     let result;
     await session.withTransaction(async () => {
@@ -214,12 +179,9 @@ const completeRideSession = async (driverId, rideId) => {
         { $set: { status: 'completed', completedAt: new Date() } },
         { new: true, session }
       );
+      if (!ride) throw new AppError('Erreur de clôture.', 400);
 
-      if (!ride) throw new AppError('Erreur de clôture : course introuvable ou déjà finie.', 400);
-
-      // Libération immédiate du chauffeur
       await User.findByIdAndUpdate(driverId, { $set: { isAvailable: true } }, { session });
-      
       result = ride;
     });
     return result;
