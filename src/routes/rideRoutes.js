@@ -1,5 +1,5 @@
 // src/routes/rideRoutes.js
-// ROUTES COURSES - Blindage & Autorisations
+// ROUTES COURSES - Flux de Négociation & Sécurité
 // CSCSM Level: Bank Grade
 
 const express = require('express');
@@ -7,15 +7,14 @@ const router = express.Router();
 const rideController = require('../controllers/rideController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const validate = require('../middleware/validationMiddleware');
+const { 
+  requestRideSchema, 
+  rideActionSchema, 
+  submitPriceSchema, 
+  finalizeRideSchema 
+} = require('../validations/rideValidation');
 
-// Import des schémas centralisés
-const { requestRideSchema, rideActionSchema } = require('../validations/rideValidation');
-
-// ═══════════════════════════════════════════════════════════
-// ROUTES SÉCURISÉES
-// ═══════════════════════════════════════════════════════════
-
-// Demander une course (Réservé aux Riders et Admin)
+// 1. DEMANDE (Rider)
 router.post(
   '/request',
   protect,
@@ -24,31 +23,38 @@ router.post(
   rideController.requestRide
 );
 
-// Accepter une course (Réservé aux Drivers et Admin)
+// 2. VERROUILLER / PRENDRE LA COURSE (Driver)
+// "Je suis intéressé, je bloque la course"
 router.post(
-  '/accept',
+  '/lock',
   protect,
   authorize('driver', 'superadmin'),
   validate(rideActionSchema),
-  rideController.acceptRide
+  rideController.lockRide
 );
 
-// Démarrer la course
+// 3. PROPOSER UN PRIX (Driver)
+// "Voici mon prix parmi les 3 options"
 router.post(
-  '/start',
+  '/propose',
   protect,
   authorize('driver', 'superadmin'),
-  validate(rideActionSchema),
-  rideController.startRide
+  validate(submitPriceSchema),
+  rideController.submitPrice
 );
 
-// Terminer la course
+// 4. FINALISER / DÉCISION (Rider)
+// "J'accepte ou Je refuse ce prix"
 router.post(
-  '/complete',
+  '/finalize',
   protect,
-  authorize('driver', 'superadmin'),
-  validate(rideActionSchema),
-  rideController.completeRide
+  authorize('rider', 'superadmin'),
+  validate(finalizeRideSchema),
+  rideController.finalizeRide
 );
+
+// 5. ACTIONS DE FLUX (Start/Complete)
+router.post('/start', protect, authorize('driver', 'superadmin'), validate(rideActionSchema), rideController.startRide);
+router.post('/complete', protect, authorize('driver', 'superadmin'), validate(rideActionSchema), rideController.completeRide);
 
 module.exports = router;
