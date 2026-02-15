@@ -1,12 +1,11 @@
 // src/services/rideService.js
-// FLUX DE NÉGOCIATION & TRANSACTION - Atomicité MongoDB
+// FLUX COURSE - Anti-Spam & Nettoyage Automatique
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
 const Ride = require('../models/Ride');
 const User = require('../models/User');
-const Settings = require('../models/Settings');
-const pricingService = require('./pricingService');
+const pricingService = require('./pricingService'); // Assure-toi que ce fichier existe (Phase 3 Vague 1)
 const AppError = require('../utils/AppError');
 
 // Géométrie (Haversine)
@@ -19,21 +18,29 @@ const calculateDistanceKm = (coords1, coords2) => {
   const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
             Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
             Math.sin(dLng/2) * Math.sin(dLng/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   return parseFloat((R * c).toFixed(2));
 };
 
 /**
- * 1. CRÉER LA DEMANDE (Rider)
- * Calcule les options mais ne les montre pas encore.
+ * 1. CRÉER LA DEMANDE (Blindage Anti-Spam)
  */
 const createRideRequest = async (riderId, rideData) => {
+  // 🛡️ SÉCURITÉ : Vérifier si le Rider a déjà une course active
+  const existingRide = await Ride.findOne({
+    rider: riderId,
+    status: { $in: ['searching', 'negotiating', 'accepted', 'ongoing'] }
+  });
+
+  if (existingRide) {
+    throw new AppError('Vous avez déjà une course en cours. Terminez-la avant d\'en lancer une nouvelle.', 409);
+  }
+
   const { origin, destination } = rideData;
   const distance = calculateDistanceKm(origin.coordinates, destination.coordinates);
 
-  // Sécurité Anti-Fraude Distance
   if (distance < 0.1) throw new AppError('Distance invalide (<100m).', 400);
 
-  // Génération des 3 prix sécurisés
   const priceOptions = await pricingService.generatePriceOptions(distance);
 
   const ride = await Ride.create({
@@ -41,13 +48,12 @@ const createRideRequest = async (riderId, rideData) => {
     origin,
     destination,
     distance,
-    priceOptions, // On stocke les choix possibles
+    priceOptions,
     status: 'searching',
     rejectedDrivers: []
   });
 
-  // Recherche des chauffeurs (Logic Dispatch)
-  // On exclut ceux qui sont déjà dans rejectedDrivers (vide au début)
+  // Dispatch : Trouver les chauffeurs (Exclure ceux occupés)
   const drivers = await User.find({
     role: 'driver',
     isAvailable: true,
@@ -56,31 +62,29 @@ const createRideRequest = async (riderId, rideData) => {
     currentLocation: {
       $near: {
         $geometry: { type: 'Point', coordinates: origin.coordinates },
-        $maxDistance: 5000 // 5km
+        $maxDistance: 5000 
       }
     }
-  }).limit(5); // Les 5 plus proches
+  }).limit(5);
 
   return { ride, drivers };
 };
 
 /**
- * 2. LOCKER LA COURSE (Chauffeur clique "Prendre")
- * C'est ici l'atomicité critique : Premier arrivé, premier servi.
+ * 2. LOCKER LA COURSE (Timer lancé)
  */
 const lockRideForNegotiation = async (rideId, driverId) => {
-  // On cherche une course "searching". Si elle est déjà "negotiating", ça échoue.
   const ride = await Ride.findOneAndUpdate(
     { _id: rideId, status: 'searching' },
     { 
       status: 'negotiating', 
-      driver: driverId 
+      driver: driverId,
+      negotiationStartedAt: new Date() // ⏱️ Top départ chrono
     },
-    { new: true } // Retourne la version modifiée
+    { new: true }
   );
 
   if (!ride) {
-    // Si null, c'est qu'un autre chauffeur a été plus rapide
     throw new AppError('Cette course a déjà été saisie par un autre chauffeur.', 409);
   }
 
@@ -88,61 +92,53 @@ const lockRideForNegotiation = async (rideId, driverId) => {
 };
 
 /**
- * 3. PROPOSER UN PRIX (Chauffeur choisit 1 des 3 options)
+ * 3. PROPOSER PRIX (Vérification Stricte)
  */
 const submitPriceProposal = async (rideId, driverId, selectedAmount) => {
   const ride = await Ride.findOne({ _id: rideId, driver: driverId, status: 'negotiating' });
   if (!ride) throw new AppError('Course non trouvée ou session expirée.', 404);
 
-  // SÉCURITÉ : On vérifie que le prix soumis est bien L'UN des 3 calculés
-  // Un hacker ne peut pas envoyer "1000000" via Postman
   const isValidOption = ride.priceOptions.some(opt => opt.amount === selectedAmount);
-  if (!isValidOption) {
-    throw new AppError('Prix invalide (Fraude détectée).', 400);
-  }
+  if (!isValidOption) throw new AppError('Prix invalide (Fraude détectée).', 400);
 
   ride.proposedPrice = selectedAmount;
-  // On reste en statut "negotiating", on attend la validation client
   await ride.save();
 
   return ride;
 };
 
 /**
- * 4. ACCEPTER OU REFUSER (Client)
+ * 4. FINALISER (Anti-Usurpation ID)
  */
 const finalizeProposal = async (rideId, riderId, decision) => {
   const session = await mongoose.startSession();
   let result;
 
   await session.withTransaction(async () => {
+    // 🛡️ SÉCURITÉ : La clause `rider: riderId` empêche un hacker de valider la course d'un autre
     const ride = await Ride.findOne({ _id: rideId, rider: riderId, status: 'negotiating' }).session(session);
-    if (!ride) throw new AppError('Demande invalide.', 404);
+    
+    if (!ride) throw new AppError('Demande invalide ou accès refusé.', 404);
 
     if (decision === 'ACCEPTED') {
-      // Le client valide -> On verrouille tout
       ride.status = 'accepted';
       ride.price = ride.proposedPrice;
       ride.acceptedAt = new Date();
       await ride.save({ session });
       
-      // Chauffeur n'est plus dispo
       await User.findByIdAndUpdate(ride.driver, { isAvailable: false }, { session });
-      
       result = { status: 'ACCEPTED', ride };
 
     } else {
-      // Le client refuse -> SOFT REJECT (Amélioration)
-      // On libère la course pour les autres, on rejette ce chauffeur
       const rejectedDriverId = ride.driver;
       
-      ride.status = 'searching'; // Retour au pool !
-      ride.driver = null; // Plus de chauffeur attitré
-      ride.proposedPrice = null; // Reset prix
-      ride.rejectedDrivers.push(rejectedDriverId); // Blacklist temporaire pour cette course
+      ride.status = 'searching';
+      ride.driver = null;
+      ride.proposedPrice = null;
+      ride.negotiationStartedAt = null; // Reset chrono
+      ride.rejectedDrivers.push(rejectedDriverId);
       
       await ride.save({ session });
-      
       result = { status: 'SEARCHING_AGAIN', ride, rejectedDriverId };
     }
   });
@@ -151,34 +147,67 @@ const finalizeProposal = async (rideId, riderId, decision) => {
   return result;
 };
 
-// ... startRideSession et completeRideSession restent inchangés
+// ... startRideSession et completeRideSession (inchangés) ...
 const startRideSession = async (driverId, rideId) => {
-    const ride = await Ride.findOneAndUpdate(
-      { _id: rideId, driver: driverId, status: 'accepted' },
-      { status: 'ongoing', startedAt: new Date() },
-      { new: true }
-    );
-    if (!ride) throw new AppError('Impossible de démarrer la course.', 400);
-    return ride;
-  };
-  
-  const completeRideSession = async (driverId, rideId) => {
-    const session = await mongoose.startSession();
-    let result;
-    await session.withTransaction(async () => {
-      const ride = await Ride.findOneAndUpdate(
-        { _id: rideId, driver: driverId, status: 'ongoing' },
-        { status: 'completed', completedAt: new Date() },
-        { new: true, session }
-      );
-      if (!ride) throw new AppError('Course introuvable ou statut incorrect.', 400);
-  
-      await User.findByIdAndUpdate(driverId, { isAvailable: true }, { session });
-      result = ride;
-    });
-    session.endSession();
-    return result;
-  };
+  const ride = await Ride.findOneAndUpdate({ _id: rideId, driver: driverId, status: 'accepted' }, { status: 'ongoing', startedAt: new Date() }, { new: true });
+  if (!ride) throw new AppError('Action impossible.', 400);
+  return ride;
+};
+
+const completeRideSession = async (driverId, rideId) => {
+  const session = await mongoose.startSession();
+  let result;
+  await session.withTransaction(async () => {
+    const ride = await Ride.findOneAndUpdate({ _id: rideId, driver: driverId, status: 'ongoing' }, { status: 'completed', completedAt: new Date() }, { new: true, session });
+    if (!ride) throw new AppError('Action impossible.', 400);
+    await User.findByIdAndUpdate(driverId, { isAvailable: true }, { session });
+    result = ride;
+  });
+  session.endSession();
+  return result;
+};
+
+
+/**
+ * 🛡️ CRON JOB : Libérer les chauffeurs bloqués
+ * Appelé par le serveur toutes les minutes
+ */
+const releaseStuckNegotiations = async (io) => {
+  const timeoutThreshold = new Date(Date.now() - 60000); // 60 secondes
+
+  // Trouver les courses bloquées en négo depuis > 60s
+  const stuckRides = await Ride.find({
+    status: 'negotiating',
+    negotiationStartedAt: { $lt: timeoutThreshold }
+  });
+
+  if (stuckRides.length > 0) {
+    console.log(`[CLEANUP] Libération de ${stuckRides.length} courses bloquées.`);
+    
+    for (const ride of stuckRides) {
+      const blockedDriverId = ride.driver;
+      
+      // Reset de la course
+      ride.status = 'searching';
+      ride.driver = null;
+      ride.proposedPrice = null;
+      ride.negotiationStartedAt = null;
+      if (blockedDriverId) ride.rejectedDrivers.push(blockedDriverId); // On punit le silence par un skip
+      await ride.save();
+
+      // Notifications Socket
+      if (io) {
+        // Au Rider : "Le chauffeur ne répond pas"
+        io.to(ride.rider.toString()).emit('negotiation_timeout', { message: "Délai dépassé. Recherche d'un autre chauffeur..." });
+        
+        // Au Chauffeur bloqué : "Temps écoulé"
+        if (blockedDriverId) {
+          io.to(blockedDriverId.toString()).emit('negotiation_cancelled', { message: "Temps de réponse écoulé." });
+        }
+      }
+    }
+  }
+};
 
 module.exports = {
   createRideRequest,
@@ -186,5 +215,6 @@ module.exports = {
   submitPriceProposal,
   finalizeProposal,
   startRideSession,
-  completeRideSession
+  completeRideSession,
+  releaseStuckNegotiations // Exporté pour être utilisé dans server.js
 };
