@@ -1,19 +1,16 @@
 // src/services/rideService.js
-// LOGIQUE MÉTIER COURSES - Sécurité GPS, Précision Décimale & Atomicité
+// FLUX DE NÉGOCIATION & TRANSACTION - Atomicité MongoDB
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
-const Decimal = require('decimal.js');
 const Ride = require('../models/Ride');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
-const AuditLog = require('../models/AuditLog');
+const pricingService = require('./pricingService');
 const AppError = require('../utils/AppError');
 
-/**
- * Calcul de distance (Haversine) - Protection Spoofing
- */
-const _calculateAirDistanceKm = (coords1, coords2) => {
+// Géométrie (Haversine)
+const calculateDistanceKm = (coords1, coords2) => {
   const [lng1, lat1] = coords1;
   const [lng2, lat2] = coords2;
   const R = 6371; 
@@ -22,178 +19,172 @@ const _calculateAirDistanceKm = (coords1, coords2) => {
   const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
             Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
             Math.sin(dLng/2) * Math.sin(dLng/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return new Decimal(R).mul(c).toDecimalPlaces(3).toNumber();
+  return parseFloat((R * c).toFixed(2));
 };
 
 /**
- * Calcul de prix précis (FCFA)
- */
-const _computeFinalPrice = (config, distanceKm) => {
-  const base = new Decimal(config.base);
-  const perKm = new Decimal(config.perKm);
-  const dist = new Decimal(distanceKm);
-  let total = base.plus(dist.times(perKm));
-  
-  const min = new Decimal(config.minPrice);
-  const max = new Decimal(config.maxPrice);
-  if (total.lt(min)) total = min;
-  if (total.gt(max)) total = max;
-  
-  // Arrondi commercial 50 FCFA
-  return total.div(50).ceil().times(50).toNumber();
-};
-
-/**
- * 1. CRÉATION D'UNE DEMANDE
+ * 1. CRÉER LA DEMANDE (Rider)
+ * Calcule les options mais ne les montre pas encore.
  */
 const createRideRequest = async (riderId, rideData) => {
-  const session = await mongoose.startSession();
-  let result;
+  const { origin, destination } = rideData;
+  const distance = calculateDistanceKm(origin.coordinates, destination.coordinates);
 
-  try {
-    await session.withTransaction(async () => {
-      const { origin, destination, forfait } = rideData;
+  // Sécurité Anti-Fraude Distance
+  if (distance < 0.1) throw new AppError('Distance invalide (<100m).', 400);
 
-      const settings = await Settings.findOne().lean().session(session);
-      if (!settings) throw new AppError('Système non configuré.', 500);
+  // Génération des 3 prix sécurisés
+  const priceOptions = await pricingService.generatePriceOptions(distance);
 
-      const pricing = settings.pricing?.[forfait];
-      if (!pricing) throw new AppError(`Forfait ${forfait} invalide.`, 400);
+  const ride = await Ride.create({
+    rider: riderId,
+    origin,
+    destination,
+    distance,
+    priceOptions, // On stocke les choix possibles
+    status: 'searching',
+    rejectedDrivers: []
+  });
 
-      // Validation Géo-clôture
-      if (settings.isMapLocked && settings.allowedCenter?.coordinates) {
-        const distFromCenter = _calculateAirDistanceKm(settings.allowedCenter.coordinates, origin.coordinates);
-        if (distFromCenter > settings.allowedRadiusKm) {
-          throw new AppError('Zone non desservie par Yély.', 403);
-        }
+  // Recherche des chauffeurs (Logic Dispatch)
+  // On exclut ceux qui sont déjà dans rejectedDrivers (vide au début)
+  const drivers = await User.find({
+    role: 'driver',
+    isAvailable: true,
+    isBanned: false,
+    _id: { $nin: ride.rejectedDrivers },
+    currentLocation: {
+      $near: {
+        $geometry: { type: 'Point', coordinates: origin.coordinates },
+        $maxDistance: 5000 // 5km
       }
+    }
+  }).limit(5); // Les 5 plus proches
 
-      const distance = _calculateAirDistanceKm(origin.coordinates, destination.coordinates);
-      if (distance < 0.15) throw new AppError('Trajet trop court (minimum 150m).', 400);
-
-      const finalPrice = _computeFinalPrice(pricing, distance);
-
-      const [ride] = await Ride.create([{
-        rider: riderId,
-        origin,
-        destination,
-        forfait,
-        price: finalPrice,
-        distance,
-        status: 'requested'
-      }], { session });
-
-      const availableDrivers = await User.findAvailableDriversNear(origin.coordinates, 5000, forfait).session(session);
-
-      if (availableDrivers.length === 0) {
-        // 🛑 On marque comme annulé mais on garde la transaction pour historiser la demande
-        ride.status = 'cancelled';
-        ride.cancellationReason = 'NO_DRIVERS_AVAILABLE';
-        await ride.save({ session });
-        
-        // Log d'échec
-        await AuditLog.create([{
-          actor: riderId,
-          action: 'RIDE_REQUEST_FAILED',
-          target: ride._id,
-          details: 'Aucun chauffeur disponible.'
-        }], { session });
-        
-        result = { ride, availableDrivers: [], error: 'Aucun chauffeur disponible.' };
-        return;
-      }
-
-      await AuditLog.create([{
-        actor: riderId,
-        action: 'CREATE_RIDE',
-        target: ride._id,
-        details: `Course demandée: ${finalPrice} FCFA`
-      }], { session });
-
-      result = { ride, availableDrivers };
-    });
-    
-    // Si on a retourné un résultat avec erreur, on gère la réponse
-    if (result.error) throw new AppError(result.error, 404);
-    return result;
-  } finally {
-    session.endSession();
-  }
+  return { ride, drivers };
 };
 
 /**
- * 2. ACCEPTATION (Verrou Atomique)
+ * 2. LOCKER LA COURSE (Chauffeur clique "Prendre")
+ * C'est ici l'atomicité critique : Premier arrivé, premier servi.
  */
-const acceptRideRequest = async (driverId, rideId) => {
-  const session = await mongoose.startSession();
-  try {
-    let result;
-    await session.withTransaction(async () => {
-      const driver = await User.findOne({ _id: driverId, role: 'driver', isAvailable: true, 'subscription.isActive': true }).session(session);
-      if (!driver) throw new AppError('Éligibilité chauffeur invalide.', 403);
-
-      const ride = await Ride.findOneAndUpdate(
-        { _id: rideId, status: 'requested' },
-        { $set: { driver: driverId, status: 'accepted', acceptedAt: new Date() } },
-        { new: true, session }
-      );
-
-      if (!ride) throw new AppError('Cette course a déjà été prise.', 410);
-
-      driver.isAvailable = false;
-      await driver.save({ session });
-
-      await AuditLog.create([{
-        actor: driverId,
-        action: 'ACCEPT_RIDE',
-        target: ride._id,
-        details: `Course sécurisée par chauffeur ID: ${driverId}`
-      }], { session });
-
-      result = { ride, driver };
-    });
-    return result;
-  } finally {
-    session.endSession();
-  }
-};
-
-const startRideSession = async (driverId, rideId) => {
+const lockRideForNegotiation = async (rideId, driverId) => {
+  // On cherche une course "searching". Si elle est déjà "negotiating", ça échoue.
   const ride = await Ride.findOneAndUpdate(
-    { _id: rideId, driver: driverId, status: 'accepted' },
-    { $set: { status: 'ongoing', startedAt: new Date() } },
-    { new: true }
+    { _id: rideId, status: 'searching' },
+    { 
+      status: 'negotiating', 
+      driver: driverId 
+    },
+    { new: true } // Retourne la version modifiée
   );
-  if (!ride) throw new AppError('Action impossible : vérifiez le statut de la course.', 400);
+
+  if (!ride) {
+    // Si null, c'est qu'un autre chauffeur a été plus rapide
+    throw new AppError('Cette course a déjà été saisie par un autre chauffeur.', 409);
+  }
+
   return ride;
 };
 
-const completeRideSession = async (driverId, rideId) => {
+/**
+ * 3. PROPOSER UN PRIX (Chauffeur choisit 1 des 3 options)
+ */
+const submitPriceProposal = async (rideId, driverId, selectedAmount) => {
+  const ride = await Ride.findOne({ _id: rideId, driver: driverId, status: 'negotiating' });
+  if (!ride) throw new AppError('Course non trouvée ou session expirée.', 404);
+
+  // SÉCURITÉ : On vérifie que le prix soumis est bien L'UN des 3 calculés
+  // Un hacker ne peut pas envoyer "1000000" via Postman
+  const isValidOption = ride.priceOptions.some(opt => opt.amount === selectedAmount);
+  if (!isValidOption) {
+    throw new AppError('Prix invalide (Fraude détectée).', 400);
+  }
+
+  ride.proposedPrice = selectedAmount;
+  // On reste en statut "negotiating", on attend la validation client
+  await ride.save();
+
+  return ride;
+};
+
+/**
+ * 4. ACCEPTER OU REFUSER (Client)
+ */
+const finalizeProposal = async (rideId, riderId, decision) => {
   const session = await mongoose.startSession();
-  try {
+  let result;
+
+  await session.withTransaction(async () => {
+    const ride = await Ride.findOne({ _id: rideId, rider: riderId, status: 'negotiating' }).session(session);
+    if (!ride) throw new AppError('Demande invalide.', 404);
+
+    if (decision === 'ACCEPTED') {
+      // Le client valide -> On verrouille tout
+      ride.status = 'accepted';
+      ride.price = ride.proposedPrice;
+      ride.acceptedAt = new Date();
+      await ride.save({ session });
+      
+      // Chauffeur n'est plus dispo
+      await User.findByIdAndUpdate(ride.driver, { isAvailable: false }, { session });
+      
+      result = { status: 'ACCEPTED', ride };
+
+    } else {
+      // Le client refuse -> SOFT REJECT (Amélioration)
+      // On libère la course pour les autres, on rejette ce chauffeur
+      const rejectedDriverId = ride.driver;
+      
+      ride.status = 'searching'; // Retour au pool !
+      ride.driver = null; // Plus de chauffeur attitré
+      ride.proposedPrice = null; // Reset prix
+      ride.rejectedDrivers.push(rejectedDriverId); // Blacklist temporaire pour cette course
+      
+      await ride.save({ session });
+      
+      result = { status: 'SEARCHING_AGAIN', ride, rejectedDriverId };
+    }
+  });
+
+  session.endSession();
+  return result;
+};
+
+// ... startRideSession et completeRideSession restent inchangés
+const startRideSession = async (driverId, rideId) => {
+    const ride = await Ride.findOneAndUpdate(
+      { _id: rideId, driver: driverId, status: 'accepted' },
+      { status: 'ongoing', startedAt: new Date() },
+      { new: true }
+    );
+    if (!ride) throw new AppError('Impossible de démarrer la course.', 400);
+    return ride;
+  };
+  
+  const completeRideSession = async (driverId, rideId) => {
+    const session = await mongoose.startSession();
     let result;
     await session.withTransaction(async () => {
       const ride = await Ride.findOneAndUpdate(
         { _id: rideId, driver: driverId, status: 'ongoing' },
-        { $set: { status: 'completed', completedAt: new Date() } },
+        { status: 'completed', completedAt: new Date() },
         { new: true, session }
       );
-      if (!ride) throw new AppError('Erreur de clôture.', 400);
-
-      await User.findByIdAndUpdate(driverId, { $set: { isAvailable: true } }, { session });
+      if (!ride) throw new AppError('Course introuvable ou statut incorrect.', 400);
+  
+      await User.findByIdAndUpdate(driverId, { isAvailable: true }, { session });
       result = ride;
     });
-    return result;
-  } finally {
     session.endSession();
-  }
-};
+    return result;
+  };
 
 module.exports = {
   createRideRequest,
-  acceptRideRequest,
+  lockRideForNegotiation,
+  submitPriceProposal,
+  finalizeProposal,
   startRideSession,
-  completeRideSession,
-  calculateDistanceKm: _calculateAirDistanceKm 
+  completeRideSession
 };
