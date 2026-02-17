@@ -1,123 +1,86 @@
-// src/middleware/authMiddleware.js
-// AUTHENTIFICATION FORTERESSE - Validation ObjectId, RBAC, Anti-tampering
+// src/validations/authValidation.js
+// CONTRATS DE DONNÉES AUTH - Zod Strict
 // CSCSM Level: Bank Grade
 
-const mongoose = require('mongoose');
-const User = require('../models/User');
-const { verifyAccessToken } = require('../utils/tokenService');
-const AppError = require('../utils/AppError');
-const logger = require('../config/logger');
+const { z } = require('zod');
 
 /**
- * Valide qu'une chaîne est un ObjectId MongoDB valide
+ * Liste noire des domaines d'emails jetables pour prévenir le spam et les faux comptes.
  */
-const isValidObjectId = (id) => {
-  return mongoose.Types.ObjectId.isValid(id) && 
-         new mongoose.Types.ObjectId(id).toString() === id;
-};
+const DISPOSABLE_DOMAINS = [
+  'tempmail.com', '10minutemail.com', 'guerrillamail.com', 
+  'yopmail.com', 'mailinator.com', 'throwaway.com'
+];
 
 /**
- * Middleware d'authentification principal (Protect)
+ * Schéma d'inscription (Register)
+ * ✅ CORRECTIF : Ajout de la plage \u00C0-\u00FF pour autoriser les accents (é, à, è, etc.)
  */
-const protect = async (req, res, next) => {
-  try {
-    // 1. Extraction Token
-    let token;
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    }
+const registerSchema = z.object({
+  name: z.string()
+    .min(2, 'Le nom doit contenir au moins 2 caractères')
+    .max(50, 'Le nom ne peut dépasser 50 caractères')
+    // Plage \u00C0-\u00FF ajoutée pour supporter les noms accentués francophones
+    .regex(/^[a-zA-Z\u00C0-\u00FF\s'-]+$/, 'Caractères autorisés: lettres (accents inclus), espaces, - et \' uniquement')
+    .trim(),
+    
+  email: z.string()
+    .email('Email invalide')
+    .toLowerCase()
+    .trim()
+    .refine((email) => {
+      const domain = email.split('@')[1];
+      return !DISPOSABLE_DOMAINS.includes(domain);
+    }, 'Les emails temporaires ne sont pas autorisés'),
 
-    if (!token) {
-      throw new AppError('Vous n\'êtes pas connecté. Veuillez vous connecter.', 401);
-    }
+  phone: z.string()
+    .regex(/^\+?[0-9\s]{8,20}$/, 'Format invalide (+225 XX XX XX XX)')
+    .trim(),
 
-    // 2. Vérification Crypto (JWT)
-    let decoded;
-    try {
-      decoded = verifyAccessToken(token);
-    } catch (jwtError) {
-      if (jwtError.name === 'TokenExpiredError') throw new AppError('Votre session a expiré. Veuillez vous reconnecter.', 401);
-      throw new AppError('Token invalide.', 401);
-    }
+  password: z.string()
+    .min(8, 'Mot de passe: 8 caractères minimum')
+    .max(128, 'Mot de passe trop long')
+    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/, 
+      '1 majuscule, 1 minuscule, 1 chiffre, 1 symbole requis'),
 
-    // 3. Validation ObjectId (Anti-Injection NoSQL)
-    if (!isValidObjectId(decoded.userId)) {
-      logger.warn(`[AUTH SECURITY] ObjectId malformé détecté: ${decoded.userId} - IP: ${req.ip}`);
-      throw new AppError('Token corrompu.', 401);
-    }
-
-    // 4. Récupération Utilisateur (Data Scrubbing .lean())
-    const user = await User.findById(decoded.userId)
-      .select('-password -__v')
-      .lean();
-
-    if (!user) {
-      throw new AppError('L\'utilisateur appartenant à ce token n\'existe plus.', 401);
-    }
-
-    // 5. Vérification Ban
-    if (user.isBanned) {
-      logger.warn(`[AUTH BAN] Tentative accès par utilisateur banni: ${user.email}`);
-      throw new AppError(`Compte suspendu: ${user.banReason || 'Raison non spécifiée'}`, 403);
-    }
-
-    // 6. Anti-Tampering (Rôle Token vs DB)
-    // Si le rôle dans le token ne matche plus la DB (ex: admin rétrogradé), on rejette.
-    if (decoded.role && decoded.role !== user.role) {
-      logger.error(`[AUTH MISMATCH] Rôle Token (${decoded.role}) != DB (${user.role}) pour ${user.email}`);
-      throw new AppError('Vos permissions ont changé. Veuillez vous reconnecter.', 403);
-    }
-
-    // 7. Attachement User Sécurisé (Seulement les champs nécessaires)
-    req.user = user;
-    next();
-
-  } catch (error) {
-    next(error); // On passe l'erreur au errorHandler centralisé
-  }
-};
+  role: z.enum(['rider', 'driver']).default('rider')
+}).strict(); // Protection contre le Mass Assignment
 
 /**
- * Middleware de contrôle d'accès par rôle (RBAC)
+ * Schéma de connexion (Login)
  */
-const authorize = (...roles) => {
-  return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      logger.warn(`[AUTH FORBIDDEN] ${req.user.email} (${req.user.role}) a tenté d'accéder à une route ${roles.join('/')}`);
-      return next(new AppError('Vous n\'avez pas la permission d\'effectuer cette action.', 403));
-    }
-    next();
-  };
-};
+const loginSchema = z.object({
+  identifier: z.string()
+    .min(3, 'Identifiant trop court')
+    .max(254, 'Identifiant trop long')
+    .trim(),
+    
+  password: z.string()
+    .min(1, 'Le mot de passe est requis')
+}).strict();
 
 /**
- * Middleware authentification optionnelle
- * (Ne bloque pas, mais hydrate req.user si token valide)
+ * Schéma de mise à jour de la disponibilité (Chauffeurs)
  */
-const optionalAuth = async (req, res, next) => {
-  try {
-    let token;
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    }
+const availabilitySchema = z.object({
+  isAvailable: z.boolean({
+    required_error: 'Statut de disponibilité requis',
+    invalid_type_error: 'La valeur doit être true ou false'
+  })
+}).strict();
 
-    if (!token) return next();
+/**
+ * Schéma de mise à jour du FCM Token (Notifications Push)
+ */
+const fcmTokenSchema = z.object({
+  fcmToken: z.string()
+    .min(10, 'Token FCM invalide ou trop court')
+    .trim()
+}).strict();
 
-    const decoded = verifyAccessToken(token);
-    const user = await User.findById(decoded.userId).select('name email role isBanned').lean();
-
-    if (user && !user.isBanned) {
-      req.user = user;
-    }
-    next();
-  } catch (error) {
-    next(); // On continue en tant qu'invité
-  }
-};
-
-module.exports = { 
-  protect, 
-  authorize, 
-  optionalAuth,
-  isValidObjectId 
+module.exports = {
+  registerSchema,
+  loginSchema,
+  availabilitySchema,
+  fcmTokenSchema
 };
