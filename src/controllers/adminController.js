@@ -1,13 +1,12 @@
 // src/controllers/adminController.js
-// CONTRÔLEUR ADMIN - Corrigé et Complet
+// CONTRÔLEUR ADMIN - Purge Totale de la Logique d'Infrastructure
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
 const adminService = require('../services/adminService');
-const cloudinary = require('../config/cloudinary');
+const subscriptionService = require('../services/subscriptionService'); // ✅ IMPORT DU NOUVEAU SERVICE
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const logger = require('../config/logger');
-const Transaction = require('../models/Transaction');
 
 /**
  * @desc Promouvoir/Rétrograder (SuperAdmin)
@@ -18,8 +17,7 @@ const updateAdminStatus = async (req, res) => {
     const { userId, action } = req.body;
     
     const result = await session.withTransaction(async () => {
-      const res = await adminService.updateUserRole(userId, action, req.user._id, session);
-      return res;
+      return await adminService.updateUserRole(userId, action, req.user._id, session);
     });
 
     logger.warn(`[AUDIT ROLE] ${req.user.email} changed ${result.user.email} -> ${result.newRole}`);
@@ -38,10 +36,8 @@ const updateAdminStatus = async (req, res) => {
 const toggleUserBan = async (req, res) => {
   try {
     const { userId, reason } = req.body;
-    // On passe req.user._id comme 3ème argument pour l'audit
     const user = await adminService.toggleUserBan(userId, reason, req.user._id);
     
-    // Le log Winston reste en complément (redondance utile)
     logger.warn(`[AUDIT BAN] ${req.user.email} toggled ban on ${user.email}.`);
     return successResponse(res, { isBanned: user.isBanned }, user.isBanned ? 'Utilisateur banni.' : 'Bannissement levé.');
 
@@ -73,10 +69,9 @@ const approveTransaction = async (req, res) => {
       return await adminService.approveTransaction(req.params.id, req.user._id, session);
     });
 
+    // ✅ DÉLÉGATION AU SERVICE : Plus d'appel direct à Cloudinary !
     if (result.proofPublicId) {
-      cloudinary.uploader.destroy(result.proofPublicId).catch(err => 
-        logger.warn(`[CLOUDINARY] Clean fail: ${err.message}`)
-      );
+      await subscriptionService.deleteProof(result.proofPublicId);
     }
 
     const io = req.app.get('socketio');
@@ -103,10 +98,9 @@ const rejectTransaction = async (req, res) => {
     const { reason } = req.body;
     const result = await adminService.rejectTransaction(req.params.id, reason, req.user._id);
 
+    // ✅ DÉLÉGATION AU SERVICE
     if (result.proofPublicId) {
-      cloudinary.uploader.destroy(result.proofPublicId).catch(err => 
-        logger.warn(`[CLOUDINARY] Clean fail: ${err.message}`)
-      );
+      await subscriptionService.deleteProof(result.proofPublicId);
     }
 
     const io = req.app.get('socketio');
@@ -126,25 +120,18 @@ const rejectTransaction = async (req, res) => {
 const getValidationQueue = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = 20;
-    const skip = (page - 1) * limit;
+    
+    // ✅ DÉLÉGATION AU SERVICE : Plus aucune requête Mongoose dans le contrôleur !
+    const data = await subscriptionService.getPendingTransactions(req.user.role, page);
 
-    const query = { status: 'PENDING' };
-    if (req.user.role === 'admin') query.assignedTo = 'PARTNER';
-
-    const [transactions, total] = await Promise.all([
-      Transaction.find(query).populate('driver', 'name phone vehicle subscription').sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-      Transaction.countDocuments(query)
-    ]);
-
-    return successResponse(res, { transactions, pagination: { page, total, pages: Math.ceil(total/limit) } }, "File d'attente récupérée.");
+    return successResponse(res, data, "File d'attente récupérée.");
   } catch (error) {
-    return errorResponse(res, error.message);
+    return errorResponse(res, error.message, 500);
   }
 };
 
 /**
- * @desc Dashboard Stats (CORRIGÉ: Appel Service)
+ * @desc Dashboard Stats
  */
 const getDashboardStats = async (req, res) => {
   try {
@@ -157,7 +144,7 @@ const getDashboardStats = async (req, res) => {
 };
 
 /**
- * @desc Get All Users (CORRIGÉ: Appel Service)
+ * @desc Get All Users
  */
 const getAllUsers = async (req, res) => {
   try {
@@ -176,6 +163,6 @@ module.exports = {
   approveTransaction,
   rejectTransaction,
   getValidationQueue,
-  getDashboardStats, // ✅ Plus de require()
-  getAllUsers        // ✅ Plus de require()
+  getDashboardStats,
+  getAllUsers
 };
