@@ -6,13 +6,15 @@ const User = require('../models/User');
 
 /**
  * Recherche des chauffeurs disponibles par proximité géospatiale
+ * Exclut ceux qui sont bannis, inactifs, ou sans abonnement valide.
+ * Permet aussi d'exclure les chauffeurs ayant déjà refusé la course.
  */
-const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait) => {
+const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait, rejectedDriverIds = []) => {
   const query = {
     role: 'driver',
     isAvailable: true,
     isBanned: false,
-    'subscription.isActive': true,
+    'subscription.isActive': true, // 🛡️ Règle d'or financière garantie ici
     currentLocation: {
       $near: {
         $geometry: { type: "Point", coordinates: coordinates },
@@ -21,6 +23,12 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait)
     }
   };
 
+  // 🛡️ Exclusion des chauffeurs ayant déjà refusé
+  if (rejectedDriverIds && rejectedDriverIds.length > 0) {
+    query._id = { $nin: rejectedDriverIds };
+  }
+
+  // Filtrage par catégorie de véhicule si spécifié
   if (forfait) {
     query['vehicle.category'] = forfait;
   }

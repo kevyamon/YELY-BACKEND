@@ -3,7 +3,7 @@
 // CSCSM Level: Bank Grade
 
 const rideService = require('../services/rideService');
-const User = require('../models/User'); // Pour re-dispatch
+const userRepository = require('../repositories/userRepository'); // ✅ IMPORT PROPRE (DAO) au lieu du Modèle User
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
 // 1. DEMANDE INITIALE
@@ -109,19 +109,13 @@ const finalizeRide = async (req, res) => {
         message: "Prix refusé. Retour à la recherche."
       });
 
-      // 📡 RE-DISPATCH: Trouver 5 NOUVEAUX chauffeurs
-      const newDrivers = await User.find({
-        role: 'driver',
-        isAvailable: true,
-        isBanned: false,
-        _id: { $nin: result.ride.rejectedDrivers },
-        currentLocation: {
-          $near: {
-            $geometry: { type: 'Point', coordinates: result.ride.origin.coordinates },
-            $maxDistance: 5000
-          }
-        }
-      }).limit(5);
+      // 📡 RE-DISPATCH: Trouver 5 NOUVEAUX chauffeurs via le REPOSITORY (Sécurité & Abonnement garantis)
+      const newDrivers = await userRepository.findAvailableDriversNear(
+        result.ride.origin.coordinates,
+        5000, // max distance en mètres
+        null, // pas de forfait spécifique pour cette requête
+        result.ride.rejectedDrivers // On exclut ceux qui ont déjà été rejetés
+      );
 
       // 📡 EMIT: Aux Nouveaux
       newDrivers.forEach(driver => {
