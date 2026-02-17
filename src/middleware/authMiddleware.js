@@ -1,5 +1,5 @@
 // src/middleware/authMiddleware.js
-// AUTHENTIFICATION FORTERESSE - Validation ObjectId, RBAC, Anti-tampering
+// AUTHENTIFICATION FORTERESSE - Validation ObjectId, RBAC, Anti-tampering & CACHE REDIS
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
@@ -7,6 +7,7 @@ const User = require('../models/User');
 const { verifyAccessToken } = require('../utils/tokenService');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
+const redisClient = require('../config/redis');
 
 /**
  * Valide qu'une chaîne est un ObjectId MongoDB valide
@@ -46,13 +47,23 @@ const protect = async (req, res, next) => {
       throw new AppError('Token corrompu.', 401);
     }
 
-    // 4. Récupération Utilisateur (Data Scrubbing .lean())
-    const user = await User.findById(decoded.userId)
-      .select('-password -__v')
-      .lean();
+    // 4. Vérification dans le cache Redis avant MongoDB (Scalabilité)
+    const cacheKey = `auth:user:${decoded.userId}`;
+    let user;
+    const cachedUser = await redisClient.get(cacheKey);
 
-    if (!user) {
-      throw new AppError('L\'utilisateur appartenant à ce token n\'existe plus.', 401);
+    if (cachedUser) {
+      user = JSON.parse(cachedUser);
+    } else {
+      // Récupération Utilisateur (Data Scrubbing .lean())
+      user = await User.findById(decoded.userId).select('-password -__v').lean();
+      
+      if (!user) {
+        throw new AppError('L\'utilisateur appartenant à ce token n\'existe plus.', 401);
+      }
+      
+      // Mise en cache pour 15 min (aligné sur l'expiration du JWT)
+      await redisClient.setex(cacheKey, 900, JSON.stringify(user));
     }
 
     // 5. Vérification Ban
@@ -62,18 +73,18 @@ const protect = async (req, res, next) => {
     }
 
     // 6. Anti-Tampering (Rôle Token vs DB)
-    // Si le rôle dans le token ne matche plus la DB (ex: admin rétrogradé), on rejette.
     if (decoded.role && decoded.role !== user.role) {
       logger.error(`[AUTH MISMATCH] Rôle Token (${decoded.role}) != DB (${user.role}) pour ${user.email}`);
+      await redisClient.del(cacheKey); // On purge le cache corrompu
       throw new AppError('Vos permissions ont changé. Veuillez vous reconnecter.', 403);
     }
 
-    // 7. Attachement User Sécurisé (Seulement les champs nécessaires)
+    // 7. Attachement User Sécurisé
     req.user = user;
     next();
 
   } catch (error) {
-    next(error); // On passe l'erreur au errorHandler centralisé
+    next(error);
   }
 };
 
@@ -92,7 +103,6 @@ const authorize = (...roles) => {
 
 /**
  * Middleware authentification optionnelle
- * (Ne bloque pas, mais hydrate req.user si token valide)
  */
 const optionalAuth = async (req, res, next) => {
   try {
@@ -104,7 +114,19 @@ const optionalAuth = async (req, res, next) => {
     if (!token) return next();
 
     const decoded = verifyAccessToken(token);
-    const user = await User.findById(decoded.userId).select('name email role isBanned').lean();
+    const cacheKey = `auth:user:${decoded.userId}`;
+    
+    let user;
+    const cachedUser = await redisClient.get(cacheKey);
+    
+    if (cachedUser) {
+      user = JSON.parse(cachedUser);
+    } else {
+      user = await User.findById(decoded.userId).select('name email role isBanned').lean();
+      if (user) {
+        await redisClient.setex(cacheKey, 900, JSON.stringify(user));
+      }
+    }
 
     if (user && !user.isBanned) {
       req.user = user;

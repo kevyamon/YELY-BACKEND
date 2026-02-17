@@ -6,12 +6,12 @@ const mongoose = require('mongoose');
 const axios = require('axios');
 const { Queue } = require('bullmq');
 const Ride = require('../models/Ride');
-const User = require('../models/User');
+const userRepository = require('../repositories/userRepository'); // ✅ Remplacement de User par userRepository
 const pricingService = require('./pricingService');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
 const { env } = require('../config/env');
-const { sendPushNotification } = require('./notificationService'); // ✅ IMPORT DU MOTEUR PUSH
+const { sendPushNotification } = require('./notificationService');
 
 // 1. Initialisation de la file d'attente Redis pour le nettoyage
 const cleanupQueue = new Queue('ride-cleanup', { 
@@ -33,15 +33,12 @@ const calculateHaversineDistance = (coords1, coords2) => {
 };
 
 /**
- * 🗺️ CALCUL DISTANCE RÉELLE (LocationIQ - 5000 req/jour)
+ * 🗺️ CALCUL DISTANCE RÉELLE (LocationIQ)
  */
 const getRouteDistance = async (originCoords, destCoords) => {
   try {
     const token = env.LOCATION_IQ_TOKEN;
-    
-    if (!token) {
-      throw new Error("Token LocationIQ introuvable dans les variables d'environnement.");
-    }
+    if (!token) throw new Error("Token LocationIQ introuvable dans les variables d'environnement.");
 
     const url = `https://us1.locationiq.com/v1/directions/driving/${originCoords[0]},${originCoords[1]};${destCoords[0]},${destCoords[1]}?key=${token}&overview=false`;
     const response = await axios.get(url, { timeout: 3000 });
@@ -50,7 +47,6 @@ const getRouteDistance = async (originCoords, destCoords) => {
       const distanceMeters = response.data.routes[0].distance;
       return parseFloat((distanceMeters / 1000).toFixed(2));
     }
-    
     throw new Error('Aucun itinéraire routier trouvé par LocationIQ');
 
   } catch (error) {
@@ -64,7 +60,6 @@ const getRouteDistance = async (originCoords, destCoords) => {
  * 1. CRÉER LA DEMANDE (Rider)
  */
 const createRideRequest = async (riderId, rideData, redis) => {
-  // 🛡️ SÉCURITÉ : Anti-Spam
   const existingRide = await Ride.findOne({
     rider: riderId,
     status: { $in: ['searching', 'negotiating', 'accepted', 'ongoing'] }
@@ -88,7 +83,6 @@ const createRideRequest = async (riderId, rideData, redis) => {
     rejectedDrivers: []
   });
 
-  // 🚀 OPTIMISATION REDIS GEO : Trouver les IDs des chauffeurs proches (5km)
   const nearbyDriverIds = await redis.georadius(
     'active_drivers', 
     origin.coordinates[0], 
@@ -96,26 +90,15 @@ const createRideRequest = async (riderId, rideData, redis) => {
     5, 'km'
   );
 
-  // 🚪 PORTE 1 DU VIDEUR : On filtre les détails dans MongoDB
-  const drivers = await User.find({
-    _id: { $in: nearbyDriverIds, $nin: ride.rejectedDrivers },
-    role: 'driver',
-    isAvailable: true,
-    isBanned: false,
-    'subscription.isActive': true
-  }).limit(5);
+  // 🚀 UTILISATION DU REPOSITORY : Couplage faible, code testable
+  const drivers = await userRepository.findActiveDriversByIds(nearbyDriverIds, ride.rejectedDrivers);
 
-  // 🚨 BOSS FINAL : ENVOI DES NOTIFICATIONS PUSH AUX CHAUFFEURS TROUVÉS
-  // On utilise un .forEach sans await pour ne pas bloquer la réponse de l'API au client
   drivers.forEach(driver => {
     sendPushNotification(
       driver._id,
       '🚨 Nouvelle course à proximité !',
       `Une course de ${distance} km est disponible. Ouvrez vite l'application !`,
-      { 
-        rideId: ride._id.toString(), 
-        type: 'NEW_RIDE_REQUEST' 
-      }
+      { rideId: ride._id.toString(), type: 'NEW_RIDE_REQUEST' }
     ).catch(err => logger.error(`[PUSH ASYNC ERROR] ${err.message}`));
   });
 
@@ -128,11 +111,7 @@ const createRideRequest = async (riderId, rideData, redis) => {
 const lockRideForNegotiation = async (rideId, driverId) => {
   const ride = await Ride.findOneAndUpdate(
     { _id: rideId, status: 'searching' },
-    { 
-      status: 'negotiating', 
-      driver: driverId,
-      negotiationStartedAt: new Date()
-    },
+    { status: 'negotiating', driver: driverId, negotiationStartedAt: new Date() },
     { new: true }
   );
 
@@ -179,9 +158,10 @@ const finalizeProposal = async (rideId, riderId, decision) => {
       ride.acceptedAt = new Date();
       await ride.save({ session });
       
-      await User.findByIdAndUpdate(ride.driver, { isAvailable: false }, { session });
+      // 🚀 UTILISATION DU REPOSITORY POUR L'UPDATE
+      await userRepository.updateDriverAvailability(ride.driver, false, session);
+      
       result = { status: 'ACCEPTED', ride };
-
     } else {
       const rejectedDriverId = ride.driver;
       ride.status = 'searching';
@@ -199,7 +179,11 @@ const finalizeProposal = async (rideId, riderId, decision) => {
 };
 
 const startRideSession = async (driverId, rideId) => {
-  const ride = await Ride.findOneAndUpdate({ _id: rideId, driver: driverId, status: 'accepted' }, { status: 'ongoing', startedAt: new Date() }, { new: true });
+  const ride = await Ride.findOneAndUpdate(
+    { _id: rideId, driver: driverId, status: 'accepted' }, 
+    { status: 'ongoing', startedAt: new Date() }, 
+    { new: true }
+  );
   if (!ride) throw new AppError('Action impossible.', 400);
   return ride;
 };
@@ -208,18 +192,22 @@ const completeRideSession = async (driverId, rideId) => {
   const session = await mongoose.startSession();
   let result;
   await session.withTransaction(async () => {
-    const ride = await Ride.findOneAndUpdate({ _id: rideId, driver: driverId, status: 'ongoing' }, { status: 'completed', completedAt: new Date() }, { new: true, session });
+    const ride = await Ride.findOneAndUpdate(
+      { _id: rideId, driver: driverId, status: 'ongoing' }, 
+      { status: 'completed', completedAt: new Date() }, 
+      { new: true, session }
+    );
     if (!ride) throw new AppError('Action impossible.', 400);
-    await User.findByIdAndUpdate(driverId, { isAvailable: true }, { session });
+    
+    // 🚀 UTILISATION DU REPOSITORY POUR L'UPDATE
+    await userRepository.updateDriverAvailability(driverId, true, session);
+    
     result = ride;
   });
   session.endSession();
   return result;
 };
 
-/**
- * 🛡️ CRON / WORKER LOGIC : Libérer les chauffeurs bloqués
- */
 const releaseStuckNegotiations = async (io, specificRideId = null) => {
   const query = specificRideId 
     ? { _id: specificRideId, status: 'negotiating' }

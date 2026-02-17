@@ -59,9 +59,8 @@ const loginUser = async (req, res) => {
       ...authTokens
     }, 'Connexion réussie.');
   } catch (error) {
-    // Délai anti brute-force
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return errorResponse(res, error.message, error.status || 500);
+    // La protection brute-force est désormais gérée par loginLimiter (express-rate-limit)
+    return errorResponse(res, error.message, error.status || 401);
   }
 };
 
@@ -136,5 +135,5 @@ module.exports = {
   refreshToken,
   logoutUser,
   updateAvailability,
-  updateFcmToken // ✅ AJOUT
+  updateFcmToken
 };

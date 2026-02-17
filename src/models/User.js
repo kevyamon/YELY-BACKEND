@@ -1,9 +1,9 @@
 // src/models/User.js
-// MODÈLE UTILISATEUR - Bank Grade & GeoSpatial Fix
+// MODÈLE UTILISATEUR - Bank Grade & Domain Driven
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
-const bcrypt = require('bcrypt'); // MIGRATION: bcryptjs -> bcrypt
+const bcrypt = require('bcrypt');
 const { SECURITY_CONSTANTS } = require('../config/env');
 
 const userSchema = new mongoose.Schema({
@@ -48,13 +48,11 @@ const userSchema = new mongoose.Schema({
   isBanned: { type: Boolean, default: false, index: true },
   banReason: { type: String, default: '', maxlength: 500 },
   
-  // Géolocalisation (GeoJSON standard)
   currentLocation: {
     type: { type: String, enum: ['Point'], default: 'Point' },
-    coordinates: { type: [Number], default: [0, 0] } // [Longitude, Latitude]
+    coordinates: { type: [Number], default: [0, 0] }
   },
 
-  // ✅ AJOUT : Stockage du Token Firebase pour réveiller le téléphone
   fcmToken: { type: String, default: null },
   
   isAvailable: { type: Boolean, default: false, index: true },
@@ -83,17 +81,32 @@ const userSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Index Géospatial CRUCIAL pour les requêtes $near
+// Index Géospatial
 userSchema.index({ currentLocation: '2dsphere' });
 
+// Normalisation stricte avant validation
+userSchema.pre('validate', function(next) {
+  if (this.email) {
+    this.email = this.email.toLowerCase().trim();
+  }
+  if (this.phone) {
+    this.phone = this.phone.replace(/[\s-]/g, '');
+  }
+  if (this.name) {
+    this.name = this.name.replace(/\s+/g, ' ').trim();
+  }
+  next();
+});
+
 // Hook Pre-save (Hashage)
-userSchema.pre('save', async function() {
-  if (!this.isModified('password')) return;
+userSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
   try {
-    const rounds = SECURITY_CONSTANTS?.BCRYPT_ROUNDS || 10;
+    const rounds = SECURITY_CONSTANTS?.BCRYPT_ROUNDS || 12;
     this.password = await bcrypt.hash(this.password, rounds);
+    next();
   } catch (error) {
-    throw new Error('Erreur de sécurisation du mot de passe: ' + error.message);
+    next(new Error('Erreur de sécurisation du mot de passe: ' + error.message));
   }
 });
 
@@ -105,31 +118,6 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
 // Comparaison mot de passe (Statique)
 userSchema.statics.comparePasswordStatic = async function(candidate, hash) {
   return bcrypt.compare(candidate, hash);
-};
-
-// 🛑 FIX CRITIQUE : Méthode manquante pour trouver les chauffeurs
-// + SÉCURITÉ : Exclusion explicite des champs sensibles
-userSchema.statics.findAvailableDriversNear = function(coordinates, maxDistanceMeters, forfait) {
-  const query = {
-    role: 'driver',
-    isAvailable: true,
-    isBanned: false,
-    'subscription.isActive': true, // Doit avoir un abo actif
-    currentLocation: {
-      $near: {
-        $geometry: { type: "Point", coordinates: coordinates },
-        $maxDistance: maxDistanceMeters
-      }
-    }
-  };
-
-  // Filtrage par catégorie de véhicule si spécifié
-  if (forfait) {
-    query['vehicle.category'] = forfait;
-  }
-
-  // ✅ AJOUT : On inclut fcmToken dans le select pour pouvoir l'utiliser
-  return this.find(query).select('name phone vehicle currentLocation rating fcmToken -password -__v').limit(5);
 };
 
 module.exports = mongoose.model('User', userSchema);
