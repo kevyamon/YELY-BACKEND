@@ -1,8 +1,9 @@
 // src/utils/tokenService.js
-// GESTION TOKENS JWT - Access 15min / Refresh 7j + Blacklist MongoDB
+// GESTION TOKENS JWT - Access 15min / Refresh 7j + Blacklist Hachée (SHA-256)
 // CSCSM Level: Bank Grade
 
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { env } = require('../config/env');
 const TokenBlacklist = require('../models/TokenBlacklist'); // Intégration DB
 
@@ -20,6 +21,14 @@ const TOKEN_CONFIG = {
     expiresIn: env.JWT_REFRESH_EXPIRATION || '7d',
     options: { algorithm: 'HS256' }
   }
+};
+
+/**
+ * 🛡️ Utilitaire de sécurité : Hachage SHA-256 unilatéral
+ * Empêche de stocker un token en clair dans la base de données.
+ */
+const hashToken = (token) => {
+  return crypto.createHash('sha256').update(token).digest('hex');
 };
 
 /**
@@ -46,7 +55,7 @@ const generateRefreshToken = (userId) => {
     { 
       userId, 
       type: 'refresh',
-      jti: require('crypto').randomUUID(),
+      jti: crypto.randomUUID(),
       iat: Math.floor(Date.now() / 1000)
     },
     TOKEN_CONFIG.refresh.secret,
@@ -63,7 +72,8 @@ const setRefreshTokenCookie = (res, refreshToken) => {
     secure: isProd,
     sameSite: isProd ? 'strict' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 jours
-    path: '/api/auth/refresh',
+    // 🚀 CORRECTIF : Le cookie est désormais envoyé pour toutes les routes /api/v1/auth (refresh ET logout)
+    path: '/api/v1/auth',
     signed: false,
   });
 };
@@ -77,7 +87,7 @@ const clearRefreshTokenCookie = (res) => {
     secure: isProd,
     sameSite: isProd ? 'strict' : 'lax',
     expires: new Date(0),
-    path: '/api/auth/refresh',
+    path: '/api/v1/auth', // 🚀 CORRECTIF : Doit correspondre exactement au path de création
   });
 };
 
@@ -88,12 +98,12 @@ const verifyAccessToken = (token) => {
 };
 
 /**
- * Vérifie un refresh token (Signature + Blacklist DB)
- * ⚠️ ASYNC MAINTENANT
+ * Vérifie un refresh token (Signature + Blacklist DB Hachée)
  */
 const verifyRefreshToken = async (token) => {
-  // 1. Vérification Blacklist DB
-  const isBlacklisted = await TokenBlacklist.exists({ token });
+  // 1. Vérification Blacklist DB (Comparaison des empreintes SHA-256)
+  const hashedToken = hashToken(token);
+  const isBlacklisted = await TokenBlacklist.exists({ token: hashedToken });
   if (isBlacklisted) throw new Error('Token revoked');
 
   // 2. Vérification Signature Crypto
@@ -104,13 +114,13 @@ const verifyRefreshToken = async (token) => {
 };
 
 /**
- * Révoque un token en l'ajoutant en base
- * ⚠️ ASYNC MAINTENANT
+ * Révoque un token en ajoutant son empreinte SHA-256 en base
  */
 const revokeRefreshToken = async (token) => {
   try {
-    await TokenBlacklist.create({ token });
-    console.log(`[TOKEN] Révocation persistante: ${token.slice(-10)}...`);
+    const hashedToken = hashToken(token);
+    await TokenBlacklist.create({ token: hashedToken });
+    console.log(`[TOKEN] Révocation persistante (Hashed): ${hashedToken.slice(0, 10)}...`);
   } catch (err) {
     // Ignore erreur si déjà blacklisté (code 11000)
     if (err.code !== 11000) console.error('[TOKEN] Erreur révocation:', err.message);
@@ -119,7 +129,6 @@ const revokeRefreshToken = async (token) => {
 
 /**
  * Rotation sécurisée : Révoque l'ancien -> Crée le nouveau
- * ⚠️ ASYNC MAINTENANT
  */
 const rotateTokens = async (res, oldRefreshToken, userId, role) => {
   await revokeRefreshToken(oldRefreshToken); // Invalide l'ancien immédiatement
