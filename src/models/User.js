@@ -1,5 +1,5 @@
 // src/models/User.js
-// MODÈLE UTILISATEUR - Bank Grade & Domain Driven
+// MODÈLE UTILISATEUR - Bank Grade & Domain Driven (Avec Account Lockout)
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
@@ -47,6 +47,10 @@ const userSchema = new mongoose.Schema({
   },
   isBanned: { type: Boolean, default: false, index: true },
   banReason: { type: String, default: '', maxlength: 500 },
+  
+  // 🛡️ SÉCURITÉ ANTI-BRUTEFORCE (Account Lockout)
+  loginAttempts: { type: Number, required: true, default: 0 },
+  lockUntil: { type: Date },
   
   currentLocation: {
     type: { type: String, enum: ['Point'], default: 'Point' },
