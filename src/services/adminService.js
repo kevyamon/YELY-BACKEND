@@ -1,5 +1,5 @@
 // src/services/adminService.js
-// LOGIQUE DE GOUVERNANCE - Transactions ACID & DTOs
+// LOGIQUE DE GOUVERNANCE - Transactions ACID & Invalidation Cache Dynamique
 // CSCSM Level: Bank Grade
 
 const User = require('../models/User');
@@ -8,10 +8,8 @@ const Settings = require('../models/Settings');
 const AuditLog = require('../models/AuditLog');
 const AppError = require('../utils/AppError');
 const mongoose = require('mongoose');
+const redisClient = require('../config/redis'); // 🔌 IMPORT REDIS POUR INVALIDATION
 
-/**
- * Audit Interne Système
- */
 const logSystemAction = async (actorId, action, targetId, details, session) => {
   await AuditLog.create([{
     actor: actorId,
@@ -42,6 +40,10 @@ const updateUserRole = async (userId, action, requesterId, session) => {
   await user.save({ session });
 
   await logSystemAction(requesterId, `${action}_USER`, user._id, `De ${oldRole} vers ${user.role}`, session);
+  
+  // 🛡️ SÉCURITÉ : Invalidation immédiate des permissions en cache
+  await redisClient.del(`auth:user:${user._id}`);
+  
   return { email: user.email, newRole: user.role };
 };
 
@@ -59,6 +61,10 @@ const toggleUserBan = async (userId, reason, requesterId) => {
 
     await logSystemAction(requesterId, user.isBanned ? 'BAN_USER' : 'UNBAN_USER', user._id, reason, session);
     await session.commitTransaction();
+    
+    // 🛡️ SÉCURITÉ : Kick immédiat du cache après validation transaction
+    await redisClient.del(`auth:user:${user._id}`);
+    
     return user;
   } catch (error) {
     await session.abortTransaction();
@@ -122,7 +128,6 @@ const getAllUsers = async (query, userRole) => {
   const filter = {};
   if (userRole === 'admin') filter.role = { $ne: 'superadmin' };
   
-  // 🛡️ SÉCURISATION REGEX : Échappement des caractères spéciaux pour éviter ReDoS
   if (query.search) {
     const safeSearch = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     filter.$or = [
