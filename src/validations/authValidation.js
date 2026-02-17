@@ -12,12 +12,14 @@ const DISPOSABLE_DOMAINS = [
 /**
  * Schéma d'inscription
  * Inclus : Nettoyage auto, validation email non-jetable, complexité mot de passe
+ * ✅ CORRECTIF ACCENTS : Ajout de la plage \u00C0-\u00FF dans la Regex
  */
 const registerSchema = z.object({
   name: z.string()
     .min(2, 'Le nom doit contenir au moins 2 caractères')
     .max(50, 'Le nom ne peut dépasser 50 caractères')
-    .regex(/^[a-zA-Z\s'-]+$/, 'Caractères autorisés: lettres, espaces, - et \' uniquement')
+    // Libération des accents ici (\u00C0-\u00FF)
+    .regex(/^[a-zA-Z\u00C0-\u00FF\s'-]+$/, 'Caractères autorisés: lettres (accents inclus), espaces, - et \' uniquement')
     .trim(),
     
   email: z.string()
@@ -40,7 +42,7 @@ const registerSchema = z.object({
       '1 majuscule, 1 minuscule, 1 chiffre, 1 symbole requis'),
 
   role: z.enum(['rider', 'driver']).default('rider')
-}).strict(); // Rejette tout champ non défini (Sécurité Mass Assignment)
+}).strict();
 
 const loginSchema = z.object({
   identifier: z.string()
