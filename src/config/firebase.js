@@ -17,12 +17,12 @@ try {
         privateKey: env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
       }),
     });
-    logger.info('✅ Moteur Push Firebase initialisé avec succès');
+    logger.info(' Moteur Push Firebase initialisé avec succès');
   } else {
-    logger.warn('⚠️ Variables Firebase manquantes. Push notifications désactivées temporairement.');
+    logger.warn(' Variables Firebase manquantes. Push notifications désactivées temporairement.');
   }
 } catch (error) {
-  logger.error('❌ Erreur critique lors de l\'initialisation de Firebase:', error);
+  logger.error('Erreur critique lors de l\'initialisation de Firebase:', error);
 }
 
 module.exports = admin;

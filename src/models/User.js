@@ -1,7 +1,4 @@
 // src/models/User.js
-// MODÈLE UTILISATEUR - Bank Grade & Domain Driven (Avec Account Lockout)
-// CSCSM Level: Bank Grade
-
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const { SECURITY_CONSTANTS } = require('../config/env');
@@ -48,7 +45,7 @@ const userSchema = new mongoose.Schema({
   isBanned: { type: Boolean, default: false, index: true },
   banReason: { type: String, default: '', maxlength: 500 },
   
-  // 🛡️ SÉCURITÉ ANTI-BRUTEFORCE (Account Lockout)
+  // Securite Anti-Bruteforce
   loginAttempts: { type: Number, required: true, default: 0 },
   lockUntil: { type: Date },
   
@@ -85,24 +82,17 @@ const userSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Index Géospatial
 userSchema.index({ currentLocation: '2dsphere' });
 
-// Normalisation stricte avant validation
+// Normalisation avant validation
 userSchema.pre('validate', function(next) {
-  if (this.email) {
-    this.email = this.email.toLowerCase().trim();
-  }
-  if (this.phone) {
-    this.phone = this.phone.replace(/[\s-]/g, '');
-  }
-  if (this.name) {
-    this.name = this.name.replace(/\s+/g, ' ').trim();
-  }
+  if (this.email) this.email = this.email.toLowerCase().trim();
+  if (this.phone) this.phone = this.phone.replace(/[\s-]/g, '');
+  if (this.name) this.name = this.name.replace(/\s+/g, ' ').trim();
   next();
 });
 
-// Hook Pre-save (Hashage)
+// Hashage du mot de passe
 userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
   try {
@@ -114,14 +104,8 @@ userSchema.pre('save', async function(next) {
   }
 });
 
-// Comparaison mot de passe (Instance)
 userSchema.methods.comparePassword = async function(candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
-};
-
-// Comparaison mot de passe (Statique)
-userSchema.statics.comparePasswordStatic = async function(candidate, hash) {
-  return bcrypt.compare(candidate, hash);
 };
 
 module.exports = mongoose.model('User', userSchema);

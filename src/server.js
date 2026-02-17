@@ -21,7 +21,7 @@ const server = http.createServer(app);
 // -------------------------------------------------------------
 const redis = new Redis(env.REDIS_URL);
 redis.on('error', (err) => logger.error('Redis Error:', err));
-redis.on('connect', () => logger.info('✅ Redis connecté (Rate Limit & GEO)'));
+redis.on('connect', () => logger.info('Redis connecté (Rate Limit & GEO)'));
 
 const checkSocketRateLimit = async (userId) => {
   const key = `ratelimit:socket:${userId}`;
@@ -179,10 +179,10 @@ io.on('connection', (socket) => {
 const startServer = async () => {
   try {
     await mongoose.connect(env.MONGO_URI);
-    logger.info('✅ MongoDB connecté');
+    logger.info('MongoDB connecté');
     
     server.listen(env.PORT, () => {
-      logger.info(`🚀 Serveur Yély (Redis Ready) actif sur port ${env.PORT}`);
+      logger.info(`Serveur Yély (Redis Ready) actif sur port ${env.PORT}`);
     });
   } catch (err) {
     logger.error('CRITICAL STARTUP ERROR:', err);

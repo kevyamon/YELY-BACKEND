@@ -26,8 +26,8 @@ const getRedisClient = () => {
       },
     });
 
-    redisClient.on('connect', () => logger.info('✅ Redis connecté avec succès'));
-    redisClient.on('error', (err) => logger.error(`❌ Erreur Redis: ${err.message}`));
+    redisClient.on('connect', () => logger.info(' Redis connecté avec succès'));
+    redisClient.on('error', (err) => logger.error(` Erreur Redis: ${err.message}`));
   }
   return redisClient;
 };

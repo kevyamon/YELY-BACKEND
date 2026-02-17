@@ -1,7 +1,4 @@
 // src/controllers/authController.js
-// ORCHESTRATION AUTH - Interface HTTP
-// CSCSM Level: Bank Grade
-
 const authService = require('../services/authService');
 const { 
   generateAuthResponse, 
@@ -11,9 +8,6 @@ const {
 } = require('../utils/tokenService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
-/**
- * @desc Inscription
- */
 const registerUser = async (req, res) => {
   try {
     const user = await authService.register(req.body);
@@ -26,7 +20,6 @@ const registerUser = async (req, res) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
-        // 🚪 PORTE 3 DU VIDEUR : On inclut l'abonnement même à la création
         subscription: user.subscription 
       },
       ...authTokens
@@ -36,9 +29,6 @@ const registerUser = async (req, res) => {
   }
 };
 
-/**
- * @desc Connexion
- */
 const loginUser = async (req, res) => {
   try {
     const { identifier, password } = req.body;
@@ -53,20 +43,15 @@ const loginUser = async (req, res) => {
         phone: user.phone,
         role: user.role,
         isAvailable: user.isAvailable,
-        // 🚪 PORTE 3 DU VIDEUR : Le Frontend a besoin de ça pour bloquer l'accès à la carte
         subscription: user.subscription 
       },
       ...authTokens
     }, 'Connexion réussie.');
   } catch (error) {
-    // La protection brute-force est désormais gérée par loginLimiter (express-rate-limit)
     return errorResponse(res, error.message, error.status || 401);
   }
 };
 
-/**
- * @desc Rotation des tokens
- */
 const refreshToken = async (req, res) => {
   try {
     const oldRefreshToken = req.cookies.refreshToken;
@@ -87,9 +72,6 @@ const refreshToken = async (req, res) => {
   }
 };
 
-/**
- * @desc Déconnexion
- */
 const logoutUser = async (req, res) => {
   const token = req.cookies.refreshToken;
   if (token) await revokeRefreshToken(token);
@@ -98,9 +80,6 @@ const logoutUser = async (req, res) => {
   return successResponse(res, null, 'Déconnexion réussie.');
 };
 
-/**
- * @desc Update Disponibilité
- */
 const updateAvailability = async (req, res) => {
   try {
     const { isAvailable } = req.body;
@@ -114,16 +93,11 @@ const updateAvailability = async (req, res) => {
   }
 };
 
-/**
- * @desc Update FCM Token (Pour les notifications Push)
- */
 const updateFcmToken = async (req, res) => {
   try {
     const { fcmToken } = req.body;
-    
     await require('../models/User').findByIdAndUpdate(req.user._id, { fcmToken });
-
-    return successResponse(res, null, 'Token de notification mis à jour avec succès.');
+    return successResponse(res, null, 'Token de notification mis à jour.');
   } catch (error) {
     return errorResponse(res, error.message, error.status || 500);
   }

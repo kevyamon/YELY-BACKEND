@@ -46,7 +46,7 @@ const startRideWorker = (io) => {
     logger.error(`[WORKER] Job ${job.id} a échoué : ${err.message}`);
   });
 
-  logger.info('🚀 Worker de nettoyage des courses actif');
+  logger.info('Worker de nettoyage des courses actif');
   
   return worker;
 };

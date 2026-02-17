@@ -73,8 +73,8 @@ app.use(cors(corsOptions));
 app.use('/api/', apiLimiter);
 
 // 5. PARSERS & PROTECTION PAYLOAD
-app.use(express.json({ limit: '10kb' })); 
-app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+app.use(express.json({ limit: '100kb' })); 
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 app.use(cookieParser());
 
 // 6. NETTOYAGE & PROTECTION PARAMÈTRES
@@ -90,7 +90,7 @@ app.use(sanitizationMiddleware);
 // 7. ROUTES DE BASE (Health Checks & Monitoring)
 // ✅ LE FIX EST ICI : Route racine pour Render/Heroku
 app.get('/', (req, res) => {
-  res.status(200).send('Yély API (Iron Dome) is running 🚀');
+  res.status(200).send('Yély API (Iron Dome) is running ');
 });
 
 app.get('/status', (req, res) => {
