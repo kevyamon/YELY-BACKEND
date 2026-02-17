@@ -1,5 +1,5 @@
 // src/server.js
-// SERVEUR YÉLY - Anti-Spoofing GPS, Redis GEO & BullMQ Worker
+// SERVEUR YÉLY - Anti-Spoofing GPS, Redis GEO, Cache Auth & BullMQ Worker
 // CSCSM Level: Bank Grade
 
 const http = require('http');
@@ -8,6 +8,7 @@ const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const Redis = require('ioredis');
+const { z } = require('zod'); // 🛡️ AJOUT DE ZOD POUR LA SÉCURITÉ DES PAYLOADS SOCKET
 const User = require('./models/User');
 const startRideWorker = require('./workers/rideWorker');
 const { env } = require('./config/env');
@@ -27,12 +28,18 @@ const checkSocketRateLimit = async (userId) => {
   const now = Date.now();
   const lastUpdate = await redis.get(key);
   
-  if (lastUpdate && now - parseInt(lastUpdate) < 1000) return false;
+  if (lastUpdate && now - parseInt(lastUpdate) < 1000) return false; // Max 1 event/sec
   
   await redis.set(key, now, 'EX', 60);
   return true;
 };
 // -------------------------------------------------------------
+
+// 🛡️ SCHÉMA DE VALIDATION ZOD POUR LES COORDONNÉES ENTRANTES
+const coordsSchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180)
+}).strict();
 
 const io = new Server(server, {
   cors: {
@@ -42,7 +49,7 @@ const io = new Server(server, {
   },
   transports: ['websocket'],
   pingTimeout: 60000,
-  maxHttpBufferSize: 1e6
+  maxHttpBufferSize: 1e6 // Limite à 1MB le payload Socket pour contrer les DoS
 });
 
 app.set('socketio', io);
@@ -60,20 +67,31 @@ const getDistKm = (lat1, lon1, lat2, lon2) => {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 };
 
-// Middleware Auth Socket
+// Middleware Auth Socket avec Cache Redis (Réduit la charge sur MongoDB)
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth.token;
     if (!token) return next(new Error('AUTH_TOKEN_MISSING'));
 
     const decoded = jwt.verify(token, env.JWT_SECRET);
-    const user = await User.findById(decoded.userId).select('-password -__v').lean();
+    
+    // 🚀 OPTIMISATION: Cache Redis pour l'authentification WebSocket
+    const cacheKey = `auth:user:${decoded.userId}`;
+    let user;
+    const cachedUser = await redis.get(cacheKey);
+
+    if (cachedUser) {
+      user = JSON.parse(cachedUser);
+    } else {
+      user = await User.findById(decoded.userId).select('-password -__v').lean();
+      if (user) await redis.setex(cacheKey, 900, JSON.stringify(user));
+    }
     
     if (!user || user.isBanned) return next(new Error('AUTH_REJECTED'));
     
     socket.user = user;
     socket.lastLocTime = Date.now();
-    socket.lastCoords = user.currentLocation?.coordinates || [0,0]; 
+    socket.lastCoords = user.currentLocation?.coordinates || [0,0]; // [Lng, Lat]
     
     next();
   } catch (err) {
@@ -82,51 +100,56 @@ io.use(async (socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  // On récupère le user qui a passé le middleware
   const user = socket.user; 
   
   socket.join(user._id.toString());
   if (user.role === 'driver') socket.join('drivers');
 
-  // UPDATE LOCATION (Avec Anti-Spoofing & Redis GEO)
-  socket.on('update_location', async (coords) => {
-    if (!coords?.latitude || !coords?.longitude) return;
-
-    // 🚪 PORTE 2 DU VIDEUR : Vérification de l'abonnement
-    if (user.role === 'driver' && (!user.subscription || !user.subscription.isActive)) {
-      // 1. On le supprime de Redis au cas où il y était
-      await redis.zrem('active_drivers', user._id.toString());
-      
-      // 2. On prévient le Front-end qu'il est bloqué (pratique pour afficher un popup)
-      socket.emit('subscription_expired', { message: 'Abonnement inactif. Position non partagée.' });
-      
-      // 3. ⛔ ON COUPE ICI, la position n'est pas sauvegardée
+  // UPDATE LOCATION (Avec Anti-Spoofing Corrigé, Cache Redis & Mur Zod)
+  socket.on('update_location', async (rawData) => {
+    // 🛡️ 1. Validation stricte du payload via Zod (Protège contre les crashs JS)
+    const parseResult = coordsSchema.safeParse(rawData);
+    if (!parseResult.success) {
+      logger.warn(`[SOCKET SECURITY] Payload malformé rejeté pour l'utilisateur ${user._id}`);
       return; 
     }
     
-    // Rate limit basé sur Redis
+    const coords = parseResult.data;
+
+    // 🚪 2. Vérification de l'abonnement
+    if (user.role === 'driver' && (!user.subscription || !user.subscription.isActive)) {
+      await redis.zrem('active_drivers', user._id.toString());
+      socket.emit('subscription_expired', { message: 'Abonnement inactif. Position non partagée.' });
+      return; 
+    }
+    
+    // 3. Rate limit basé sur Redis
     const isAllowed = await checkSocketRateLimit(user._id.toString());
     if (!isAllowed) return;
 
     const now = Date.now();
     const timeDiffSeconds = (now - socket.lastLocTime) / 1000;
     
-    if (timeDiffSeconds > 1) {
+    if (timeDiffSeconds > 0) { 
       const [prevLng, prevLat] = socket.lastCoords;
       const distanceKm = getDistKm(prevLat, prevLng, coords.latitude, coords.longitude);
       const speedKmH = distanceKm / (timeDiffSeconds / 3600);
 
       if (speedKmH > 200) {
         logger.warn(`[ANTI-SPOOFING] ${user.name}: ${speedKmH.toFixed(0)} km/h détecté.`);
+        // 🚀 CORRECTIF : On met à jour le temps, mais on GARDE les anciennes coordonnées.
+        // Cela empêche le tricheur d'attendre pour valider sa téléportation !
+        socket.lastLocTime = now;
         return; 
       }
     }
 
+    // 4. Mise à jour de l'état du socket
     socket.lastLocTime = now;
     socket.lastCoords = [coords.longitude, coords.latitude];
 
     try {
-      // 1. Persistance MongoDB
+      // 5. Persistance MongoDB
       await User.updateOne({ _id: user._id }, {
         currentLocation: {
           type: 'Point',
@@ -135,7 +158,7 @@ io.on('connection', (socket) => {
         lastLocationAt: new Date()
       });
 
-      // 2. Indexation Temps Réel Redis (GEO)
+      // 6. Indexation Temps Réel Redis (GEO)
       if (user.role === 'driver') {
         await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());
         await redis.expire('active_drivers', 120);
