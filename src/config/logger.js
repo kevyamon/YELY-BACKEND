@@ -1,20 +1,24 @@
 // src/config/logger.js
-// SYSTÈME DE LOGS CENTRALISÉ - Masquage PII & Rotation
+// SYSTÈME DE LOGS CENTRALISÉ - Masquage PII (RGPD Compliant) & Stack Traces
 // CSCSM Level: Bank Grade
 
 const winston = require('winston');
 const path = require('path');
 const { env } = require('./env');
 
-// 🛡️ Liste des champs sensibles à masquer
-const SENSITIVE_FIELDS = ['password', 'token', 'accessToken', 'refreshToken', 'currentPassword', 'newPassword'];
+// 🛡️ SÉCURITÉ RGPD & PCI-DSS : Liste des champs sensibles (Credentials + PII)
+const SENSITIVE_FIELDS = [
+  'password', 'token', 'accessToken', 'refreshToken', 'currentPassword', 'newPassword',
+  'email', 'phone', 'idCard', 'license', 'insurance', 'fcmToken' // 🚨 Ajout des PII Critiques
+];
 
 /**
  * Format de masquage (Redaction)
- * Remplace les valeurs sensibles par [MASKED] dans les logs
+ * Remplace rigoureusement les valeurs sensibles par [MASKED] dans les logs
  */
 const redactFormat = winston.format((info) => {
   const mask = (obj) => {
+    if (!obj || typeof obj !== 'object') return;
     for (const key in obj) {
       if (SENSITIVE_FIELDS.includes(key)) {
         obj[key] = '[MASKED]';
@@ -24,9 +28,18 @@ const redactFormat = winston.format((info) => {
     }
   };
 
+  // Masquage du message principal s'il s'agit d'un objet JSON
   if (info.message && typeof info.message === 'object') {
     mask(info.message);
   }
+  
+  // Masquage des métadonnées injectées (comme des requêtes brutes ou objets DB)
+  for (const sym of Object.getOwnPropertySymbols(info)) {
+    if (typeof info[sym] === 'object') {
+      mask(info[sym]);
+    }
+  }
+
   return info;
 });
 
@@ -36,14 +49,17 @@ winston.addColors(colors);
 
 const baseFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
-  redactFormat(), // Application du masquage avant l'écriture
-  winston.format.errors({ stack: true }), // Capture les stack traces proprement
+  winston.format.errors({ stack: true }), // 🚀 Doit être placé AVANT JSON pour extraire la stack proprement
+  redactFormat(), // Application du masquage avant formatage final
   winston.format.json() // Format JSON pour une meilleure analyse (Datadog/ELK)
 );
 
 const consoleFormat = winston.format.combine(
   winston.format.colorize({ all: true }),
-  winston.format.printf((info) => `${info.timestamp} ${info.level}: ${info.message}${info.stack ? '\n' + info.stack : ''}`)
+  winston.format.printf((info) => {
+    const stackInfo = info.stack ? `\n${info.stack}` : '';
+    return `${info.timestamp} ${info.level}: ${info.message}${stackInfo}`;
+  })
 );
 
 const logger = winston.createLogger({
