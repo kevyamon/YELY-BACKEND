@@ -1,113 +1,126 @@
 // src/controllers/authController.js
-const authService = require('../services/authService');
-const { 
-  generateAuthResponse, 
-  rotateTokens, 
-  clearRefreshTokenCookie, 
-  revokeRefreshToken 
-} = require('../utils/tokenService');
+// CONTRÔLEUR AUTHENTIFICATION - Inscription blindée (Anti-Crash 502)
+// CSCSM Level: Bank Grade
+
+const User = require('../models/User');
+const AppError = require('../utils/AppError');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
+const jwt = require('jsonwebtoken');
+const { env } = require('../config/env');
 
-const registerUser = async (req, res) => {
-  try {
-    const user = await authService.register(req.body);
-    const authTokens = generateAuthResponse(res, user);
-
-    return successResponse(res, {
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        subscription: user.subscription 
-      },
-      ...authTokens
-    }, 'Compte créé avec succès.', 201);
-  } catch (error) {
-    return errorResponse(res, error.message, error.status || 500);
-  }
+// Fonction interne pour fabriquer les badges d'accès (Tokens)
+const signToken = (id) => {
+  return jwt.sign({ userId: id }, env.JWT_SECRET || process.env.JWT_SECRET, {
+    expiresIn: '30d'
+  });
 };
 
-const loginUser = async (req, res) => {
+const register = async (req, res) => {
   try {
-    const { identifier, password } = req.body;
-    const user = await authService.login(identifier, password);
-    const authTokens = generateAuthResponse(res, user);
+    const { name, email, password, phone, role } = req.body;
 
-    return successResponse(res, {
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        isAvailable: user.isAvailable,
-        subscription: user.subscription 
-      },
-      ...authTokens
-    }, 'Connexion réussie.');
-  } catch (error) {
-    return errorResponse(res, error.message, error.status || 401);
-  }
-};
-
-const refreshToken = async (req, res) => {
-  try {
-    const oldRefreshToken = req.cookies.refreshToken;
-    if (!oldRefreshToken) {
-      return errorResponse(res, 'Session expirée', 401);
+    // 1. LE RADAR ANTI-CRASH : On vérifie si l'email ou le téléphone existe déjà AVANT de créer
+    const userExists = await User.findOne({ 
+      $or: [{ email: email }, { phone: phone }] 
+    });
+    
+    if (userExists) {
+      // Si on le trouve, on arrête tout doucement et on prévient le téléphone
+      return errorResponse(res, "Ce numéro de téléphone ou cet email est déjà utilisé.", 400);
     }
 
-    const user = await authService.validateSessionForRefresh(oldRefreshToken);
-    const tokens = await rotateTokens(res, oldRefreshToken, user._id, user.role);
+    // 2. Création de l'utilisateur (Maintenant c'est sans danger)
+    const user = await User.create({
+      name,
+      email,
+      password,
+      phone,
+      role: role || 'rider'
+    });
 
-    return successResponse(res, {
-      accessToken: tokens.accessToken,
-      expiresIn: 900
-    }, 'Session rafraîchie.');
+    // 3. Génération des clés d'accès
+    const accessToken = signToken(user._id);
+    const refreshToken = signToken(user._id); 
+
+    // 4. On prépare le colis de retour (sans le mot de passe, question de sécurité)
+    const userData = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      isAvailable: user.isAvailable,
+      rating: user.rating
+    };
+
+    return successResponse(res, { user: userData, accessToken, refreshToken }, 'Compte créé avec succès', 201);
+
   } catch (error) {
-    clearRefreshTokenCookie(res);
-    return errorResponse(res, error.message, error.status || 403);
+    // 5. LE FILET DE SÉCURITÉ ULTIME
+    console.error("[REGISTER CRASH PROTECTED]:", error);
+    
+    // Si la base de données se plaint quand même d'un doublon (Erreur 11000)
+    if (error.code === 11000) {
+       return errorResponse(res, "Doublon détecté. Ce compte existe déjà.", 400);
+    }
+
+    return errorResponse(res, "Erreur interne lors de l'inscription.", 500);
   }
 };
 
-const logoutUser = async (req, res) => {
-  const token = req.cookies.refreshToken;
-  if (token) await revokeRefreshToken(token);
-  
-  clearRefreshTokenCookie(res);
-  return successResponse(res, null, 'Déconnexion réussie.');
-};
-
-const updateAvailability = async (req, res) => {
+const login = async (req, res) => {
   try {
-    const { isAvailable } = req.body;
-    const result = await authService.updateAvailability(req.user._id, isAvailable);
+    const { identifier, password } = req.body;
 
-    return successResponse(res, result, 
-      isAvailable ? 'Vous êtes en ligne.' : 'Vous êtes hors ligne.'
-    );
+    if (!identifier || !password) {
+      return errorResponse(res, "Veuillez fournir un identifiant et un mot de passe.", 400);
+    }
+
+    // On cherche par email OU par téléphone
+    const user = await User.findOne({
+      $or: [{ email: identifier }, { phone: identifier }]
+    }).select('+password'); 
+
+    // On vérifie le mot de passe (la fonction comparePassword est dans ton modèle User)
+    if (!user || !(await user.comparePassword(password, user.password))) {
+      return errorResponse(res, "Identifiant ou mot de passe incorrect.", 401);
+    }
+
+    const accessToken = signToken(user._id);
+    const refreshToken = signToken(user._id);
+
+    const userData = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      isAvailable: user.isAvailable,
+      rating: user.rating
+    };
+
+    return successResponse(res, { user: userData, accessToken, refreshToken }, 'Connexion réussie', 200);
+
   } catch (error) {
-    return errorResponse(res, error.message, error.status || 500);
+    console.error("[LOGIN ERROR]:", error);
+    return errorResponse(res, "Erreur interne lors de la connexion.", 500);
   }
 };
 
-const updateFcmToken = async (req, res) => {
+const getMe = async (req, res) => {
   try {
-    const { fcmToken } = req.body;
-    await require('../models/User').findByIdAndUpdate(req.user._id, { fcmToken });
-    return successResponse(res, null, 'Token de notification mis à jour.');
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return errorResponse(res, "Utilisateur non trouvé.", 404);
+    }
+    return successResponse(res, { user }, 'Profil récupéré', 200);
   } catch (error) {
-    return errorResponse(res, error.message, error.status || 500);
+    return errorResponse(res, "Erreur lors de la récupération du profil.", 500);
   }
 };
 
 module.exports = {
-  registerUser,
-  loginUser,
-  refreshToken,
-  logoutUser,
-  updateAvailability,
-  updateFcmToken
+  register,
+  login,
+  getMe
 };
