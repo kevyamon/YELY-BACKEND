@@ -1,11 +1,40 @@
 // src/controllers/rideController.js
-// CONTRÔLEUR COURSE - Flux Gamifié & Annulation Réelle
+// CONTRÔLEUR COURSE - Flux Gamifié, Estimation & Annulation
 // CSCSM Level: Bank Grade
 
 const rideService = require('../services/rideService');
 const userRepository = require('../repositories/userRepository');
 const User = require('../models/User');
+const AppError = require('../utils/AppError'); // 🚀 IMPORT REQUIS POUR LES ERREURS
 const { successResponse, errorResponse } = require('../utils/responseHandler');
+
+// 🚀 NOUVEAU : La fonction d'estimation (Renvoie la distance et les forfaits)
+const estimateRide = async (req, res) => {
+  try {
+    const { pickupLat, pickupLng, dropoffLat, dropoffLng } = req.query;
+    
+    if (!pickupLat || !pickupLng || !dropoffLat || !dropoffLng) {
+      throw new AppError('Coordonnées GPS manquantes pour l\'estimation', 400);
+    }
+
+    const origin = [parseFloat(pickupLng), parseFloat(pickupLat)];
+    const destination = [parseFloat(dropoffLng), parseFloat(dropoffLat)];
+    
+    // On utilise le service existant pour calculer la distance réelle (en km)
+    const distance = await rideService.getRouteDistance(origin, destination);
+    
+    // Génération des véhicules et du temps estimé selon la distance
+    const vehicles = [
+      { id: '1', type: 'echo', name: 'Echo', duration: Math.max(1, Math.ceil(distance * 3)) },
+      { id: '2', type: 'standard', name: 'Standard', duration: Math.max(1, Math.ceil(distance * 2)) },
+      { id: '3', type: 'vip', name: 'VIP', duration: Math.max(1, Math.ceil(distance * 1.5)) }
+    ];
+
+    return successResponse(res, { distance, vehicles }, 'Estimation réussie');
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500);
+  }
+};
 
 const requestRide = async (req, res) => {
   try {
@@ -30,7 +59,6 @@ const requestRide = async (req, res) => {
   }
 };
 
-// 🚀 NOUVEAU : La fonction qui tue la course dans la base de données
 const cancelRide = async (req, res) => {
   try {
     const rideId = req.params.id || req.body.rideId; 
@@ -39,7 +67,6 @@ const cancelRide = async (req, res) => {
     const ride = await rideService.cancelRideByUser(rideId, req.user._id, reason);
     const io = req.app.get('socketio');
 
-    // On prévient les chauffeurs pour retirer la modale de leur écran
     io.to('drivers').emit('ride_taken_by_other', { rideId });
 
     return successResponse(res, { status: 'cancelled' }, 'Course annulée avec succès');
@@ -188,4 +215,5 @@ const completeRide = async (req, res) => {
   }
 };
 
-module.exports = { requestRide, cancelRide, lockRide, submitPrice, finalizeRide, startRide, completeRide };
+// 🚀 NOUVEAU : Ajout de 'estimateRide' dans l'export
+module.exports = { requestRide, cancelRide, lockRide, submitPrice, finalizeRide, startRide, completeRide, estimateRide };
