@@ -1,49 +1,48 @@
 // src/workers/rideWorker.js
-// WORKER DE NETTOYAGE - Libération automatique des négociations expirées
+// WORKER DE NETTOYAGE - Surveillance des Timeouts
 // CSCSM Level: Bank Grade
 
-const { Worker } = require('bullmq'); // npm install bullmq
+const { Worker } = require('bullmq'); 
 const rideService = require('../services/rideService');
 const logger = require('../config/logger');
 const { env } = require('../config/env');
 
-/**
- * Création du Worker
- * Il surveille la file 'ride-cleanup' définie dans rideService.js
- */
 const startRideWorker = (io) => {
   const worker = new Worker(
     'ride-cleanup',
     async (job) => {
       try {
         if (job.name === 'check-stuck-negotiation') {
+          // Si le chauffeur a verrouillé la course mais n'a rien cliqué après 60s
           const { rideId } = job.data;
-          
-          logger.info(`[WORKER] Vérification de la course : ${rideId}`);
-          
-          // On appelle la fonction de nettoyage pour cette course spécifique
-          // On passe l'instance 'io' pour notifier les utilisateurs par Socket.io
+          logger.info(`[WORKER] Libération du chauffeur muet pour la course : ${rideId}`);
           await rideService.releaseStuckNegotiations(io, rideId);
+        } 
+        else if (job.name === 'check-search-timeout') {
+          // 🚀 NOUVEAU : Si personne n'a pris la course après 1m30
+          const { rideId } = job.data;
+          logger.info(`[WORKER] Fin du temps de recherche (1m30) pour la course : ${rideId}`);
+          await rideService.cancelSearchTimeout(io, rideId);
         }
       } catch (error) {
         logger.error(`[WORKER ERROR] Job ${job.id} failed: ${error.message}`);
-        throw error; // Permet à BullMQ de retenter le job si besoin
+        throw error; 
       }
     },
     {
       connection: { url: env.REDIS_URL },
-      concurrency: 5, // Peut traiter 5 nettoyages en parallèle
-      removeOnComplete: { count: 100 }, // Garde un historique des 100 derniers jobs
+      concurrency: 5, 
+      removeOnComplete: { count: 100 }, 
       removeOnFail: { count: 500 }
     }
   );
 
   worker.on('completed', (job) => {
-    logger.debug(`[WORKER] Job ${job.id} terminé avec succès.`);
+    logger.debug(`[WORKER] Job ${job.name} terminé avec succès.`);
   });
 
   worker.on('failed', (job, err) => {
-    logger.error(`[WORKER] Job ${job.id} a échoué : ${err.message}`);
+    logger.error(`[WORKER] Job ${job.name} a échoué : ${err.message}`);
   });
 
   logger.info('Worker de nettoyage des courses actif');

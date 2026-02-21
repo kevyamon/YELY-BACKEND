@@ -1,4 +1,6 @@
 // src/services/rideService.js
+// SERVICE COURSE - Iron Dome avec Auto-Nettoyage et Timeout (1m30)
+
 const mongoose = require('mongoose');
 const axios = require('axios');
 const { Queue } = require('bullmq');
@@ -62,9 +64,8 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
     });
     
     if (existingRide) {
-      // 🛡️ CORRECTION : Auto-nettoyage des courses fantômes
       if (['searching', 'negotiating'].includes(existingRide.status)) {
-        logger.info(`[RIDE] Nettoyage de la course fantôme ${existingRide._id} pour le client ${riderId}`);
+        logger.info(`[RIDE] Nettoyage course fantôme ${existingRide._id} pour le client ${riderId}`);
         existingRide.status = 'cancelled';
         existingRide.cancellationReason = 'Annulation automatique par nouvelle requête';
         await existingRide.save();
@@ -85,11 +86,18 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       origin,
       destination,
       distance,
-      forfait: forfait || 'STANDARD', // Ajout de la sauvegarde du forfait demandé
+      forfait: forfait || 'STANDARD',
       priceOptions,
       status: 'searching',
       rejectedDrivers: []
     });
+
+    // 🚀 NOUVEAU : On déclenche le compte à rebours de 1m30 (90000 ms)
+    await cleanupQueue.add(
+      'check-search-timeout',
+      { rideId: ride._id },
+      { delay: 90000, removeOnComplete: true }
+    );
 
     const nearbyDriverIds = await redisClient.georadius(
       'active_drivers', 
@@ -130,6 +138,7 @@ const lockRideForNegotiation = async (rideId, driverId) => {
 
   if (!ride) throw new AppError('Course indisponible.', 409);
 
+  // Sécurité si le chauffeur ne propose pas de prix après 60s
   await cleanupQueue.add(
     'check-stuck-negotiation', 
     { rideId: ride._id }, 
@@ -225,6 +234,37 @@ const completeRideSession = async (driverId, rideId) => {
   return result;
 };
 
+// 🚀 NOUVEAU : Fonction de Timeout Global (1m30) appelée par le Worker
+const cancelSearchTimeout = async (io, rideId) => {
+  const ride = await Ride.findOne({ _id: rideId, status: 'searching' });
+  if (ride) {
+    ride.status = 'cancelled';
+    ride.cancellationReason = 'Temps de recherche expiré (1m30)';
+    await ride.save();
+
+    // On prévient le passager par Socket
+    io.to(ride.rider.toString()).emit('search_timeout', {
+      message: "Aucun chauffeur n'est disponible pour le moment."
+    });
+  }
+};
+
+// 🚀 NOUVEAU : Fonction de libération si le chauffeur bloque la négo
+const releaseStuckNegotiations = async (io, rideId) => {
+  const ride = await Ride.findOne({ _id: rideId, status: 'negotiating' });
+  if (ride) {
+    const rejectedDriverId = ride.driver;
+    ride.status = 'searching';
+    ride.driver = null;
+    ride.proposedPrice = null;
+    ride.negotiationStartedAt = null;
+    ride.rejectedDrivers.push(rejectedDriverId);
+    await ride.save();
+
+    io.to(rejectedDriverId.toString()).emit('ride_taken_by_other', { rideId }); // Retire la modale du chauffeur
+  }
+};
+
 module.exports = {
   createRideRequest,
   lockRideForNegotiation,
@@ -232,5 +272,7 @@ module.exports = {
   finalizeProposal,
   startRideSession,
   completeRideSession,
-  getRouteDistance
+  getRouteDistance,
+  cancelSearchTimeout,
+  releaseStuckNegotiations
 };
