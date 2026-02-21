@@ -1,5 +1,5 @@
 // src/controllers/authController.js
-// CONTRÔLEUR AUTHENTIFICATION - Restauration Complète & Inscription Blindée
+// CONTRÔLEUR AUTHENTIFICATION - Alignement Parfait & Anti-Crash
 // CSCSM Level: Bank Grade
 
 const User = require('../models/User');
@@ -14,7 +14,7 @@ const signToken = (id) => {
   });
 };
 
-const register = async (req, res) => {
+const registerUser = async (req, res) => {
   try {
     const { name, email, password, phone, role } = req.body;
 
@@ -38,7 +38,7 @@ const register = async (req, res) => {
 
     // 3. Génération des clés d'accès
     const accessToken = signToken(user._id);
-    const refreshToken = signToken(user._id); 
+    const refreshTokenStr = signToken(user._id); 
 
     const userData = {
       _id: user._id,
@@ -50,7 +50,7 @@ const register = async (req, res) => {
       rating: user.rating
     };
 
-    return successResponse(res, { user: userData, accessToken, refreshToken }, 'Compte créé avec succès', 201);
+    return successResponse(res, { user: userData, accessToken, refreshToken: refreshTokenStr }, 'Compte créé avec succès', 201);
 
   } catch (error) {
     console.error("[REGISTER CRASH PROTECTED]:", error);
@@ -63,7 +63,7 @@ const register = async (req, res) => {
   }
 };
 
-const login = async (req, res) => {
+const loginUser = async (req, res) => {
   try {
     const { identifier, password } = req.body;
 
@@ -80,7 +80,7 @@ const login = async (req, res) => {
     }
 
     const accessToken = signToken(user._id);
-    const refreshToken = signToken(user._id);
+    const refreshTokenStr = signToken(user._id);
 
     const userData = {
       _id: user._id,
@@ -92,7 +92,7 @@ const login = async (req, res) => {
       rating: user.rating
     };
 
-    return successResponse(res, { user: userData, accessToken, refreshToken }, 'Connexion réussie', 200);
+    return successResponse(res, { user: userData, accessToken, refreshToken: refreshTokenStr }, 'Connexion réussie', 200);
 
   } catch (error) {
     console.error("[LOGIN ERROR]:", error);
@@ -100,32 +100,58 @@ const login = async (req, res) => {
   }
 };
 
-const getMe = async (req, res) => {
+const logoutUser = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
-    if (!user) {
-      return errorResponse(res, "Utilisateur non trouvé.", 404);
-    }
-    return successResponse(res, { user }, 'Profil récupéré', 200);
-  } catch (error) {
-    return errorResponse(res, "Erreur lors de la récupération du profil.", 500);
-  }
-};
-
-// 🚀 LA FONCTION QUI MANQUAIT ET QUI FAISAIT PLANTER LE SERVEUR
-const logout = async (req, res) => {
-  try {
-    // Si tu gères les tokens côté client, le backend a juste besoin de valider la requête
     return successResponse(res, null, 'Déconnexion réussie', 200);
   } catch (error) {
     return errorResponse(res, "Erreur lors de la déconnexion.", 500);
   }
 };
 
-// 🚀 NOUVEAU : On s'assure que TOUT est exporté correctement pour authRoutes.js
+const refreshToken = async (req, res) => {
+  try {
+    const token = req.body.refreshToken;
+    if (!token) return errorResponse(res, "Refresh token manquant", 401);
+    
+    const decoded = jwt.verify(token, env.JWT_SECRET || process.env.JWT_SECRET);
+    const user = await User.findById(decoded.userId);
+    if (!user) return errorResponse(res, "Utilisateur invalide", 401);
+
+    const newAccessToken = signToken(user._id);
+    const newRefreshToken = signToken(user._id);
+
+    return successResponse(res, { accessToken: newAccessToken, refreshToken: newRefreshToken }, "Token rafraîchi", 200);
+  } catch (error) {
+    return errorResponse(res, "Token invalide ou expiré", 401);
+  }
+};
+
+const updateAvailability = async (req, res) => {
+  try {
+    const { isAvailable } = req.body;
+    const user = await User.findByIdAndUpdate(req.user._id, { isAvailable }, { new: true });
+    return successResponse(res, { isAvailable: user.isAvailable }, "Disponibilité mise à jour", 200);
+  } catch (error) {
+    return errorResponse(res, "Erreur de mise à jour", 500);
+  }
+};
+
+const updateFcmToken = async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+    await User.findByIdAndUpdate(req.user._id, { fcmToken });
+    return successResponse(res, null, "Token FCM mis à jour", 200);
+  } catch (error) {
+    return errorResponse(res, "Erreur de mise à jour", 500);
+  }
+};
+
+// 🚀 TOUTES LES FONCTIONS CORRESPONDENT EXACTEMENT À AUTHROUTES.JS
 module.exports = {
-  register,
-  login,
-  getMe,
-  logout
+  registerUser,
+  loginUser,
+  logoutUser,
+  refreshToken,
+  updateAvailability,
+  updateFcmToken
 };
