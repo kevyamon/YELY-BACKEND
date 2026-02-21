@@ -3,7 +3,7 @@
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcrypt'); // 🚀 CORRECTION : Utilisation de bcrypt uniquement
 
 const userSchema = new mongoose.Schema({
   name: { 
@@ -48,7 +48,7 @@ const userSchema = new mongoose.Schema({
     default: false 
   },
   
-  // 🚀 STATS DE PERFORMANCE DYNAMIQUE (DASHBOARD)
+  // STATS DE PERFORMANCE DYNAMIQUE (DASHBOARD - VAGUE 2)
   totalRides: { 
     type: Number, 
     default: 0 
@@ -94,4 +94,7 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-module.exports = mongoose.model('User', userSchema);
+// 🛡️ SÉCURITÉ DÉPLOIEMENT : Empêche l'OverwriteModelError
+const User = mongoose.models.User || mongoose.model('User', userSchema);
+
+module.exports = User;

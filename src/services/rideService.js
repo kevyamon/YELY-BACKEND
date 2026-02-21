@@ -1,10 +1,12 @@
 // src/services/rideService.js
-// SERVICE COURSE - Iron Dome avec Auto-Nettoyage et Timeout (1m30)
+// SERVICE COURSE - Iron Dome avec Calcul des Gains Automatique
+// CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
 const axios = require('axios');
 const { Queue } = require('bullmq');
 const Ride = require('../models/Ride');
+const User = require('../models/User'); // 🚀 NOUVEAU : Import pour les stats
 const userRepository = require('../repositories/userRepository');
 const pricingService = require('./pricingService');
 const AppError = require('../utils/AppError');
@@ -65,7 +67,7 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
     
     if (existingRide) {
       if (['searching', 'negotiating'].includes(existingRide.status)) {
-        logger.info(`[RIDE] Nettoyage course fantôme ${existingRide._id} pour le client ${riderId}`);
+        logger.info(`[RIDE] Nettoyage course fantôme ${existingRide._id}`);
         existingRide.status = 'cancelled';
         existingRide.cancellationReason = 'Annulation automatique par nouvelle requête';
         await existingRide.save();
@@ -92,7 +94,6 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       rejectedDrivers: []
     });
 
-    // 🚀 NOUVEAU : On déclenche le compte à rebours de 1m30 (90000 ms)
     await cleanupQueue.add(
       'check-search-timeout',
       { rideId: ride._id },
@@ -138,7 +139,6 @@ const lockRideForNegotiation = async (rideId, driverId) => {
 
   if (!ride) throw new AppError('Course indisponible.', 409);
 
-  // Sécurité si le chauffeur ne propose pas de prix après 60s
   await cleanupQueue.add(
     'check-stuck-negotiation', 
     { rideId: ride._id }, 
@@ -209,19 +209,31 @@ const startRideSession = async (driverId, rideId) => {
   return ride;
 };
 
+// 🚀 VAGUE 2 : LOGIQUE DE CALCUL DES GAINS AUTOMATIQUE
 const completeRideSession = async (driverId, rideId) => {
   const session = await mongoose.startSession();
   let result;
   try {
     session.startTransaction();
+    
     const ride = await Ride.findOneAndUpdate(
       { _id: rideId, driver: driverId, status: 'ongoing' }, 
       { $set: { status: 'completed', completedAt: new Date() } }, 
       { new: true, session }
     );
+    
     if (!ride) throw new AppError('Validation impossible.', 400);
     
+    // 1. Libérer le chauffeur pour de nouvelles courses
     await userRepository.updateDriverAvailability(driverId, true, session);
+    
+    // 2. Mettre à jour les statistiques du chauffeur (Compteur + Argent)
+    await User.findByIdAndUpdate(driverId, {
+      $inc: { 
+        totalRides: 1, 
+        totalEarnings: ride.price 
+      }
+    }, { session });
     
     result = ride;
     await session.commitTransaction();
@@ -234,22 +246,18 @@ const completeRideSession = async (driverId, rideId) => {
   return result;
 };
 
-// 🚀 NOUVEAU : Fonction de Timeout Global (1m30) appelée par le Worker
 const cancelSearchTimeout = async (io, rideId) => {
   const ride = await Ride.findOne({ _id: rideId, status: 'searching' });
   if (ride) {
     ride.status = 'cancelled';
     ride.cancellationReason = 'Temps de recherche expiré (1m30)';
     await ride.save();
-
-    // On prévient le passager par Socket
     io.to(ride.rider.toString()).emit('search_timeout', {
       message: "Aucun chauffeur n'est disponible pour le moment."
     });
   }
 };
 
-// 🚀 NOUVEAU : Fonction de libération si le chauffeur bloque la négo
 const releaseStuckNegotiations = async (io, rideId) => {
   const ride = await Ride.findOne({ _id: rideId, status: 'negotiating' });
   if (ride) {
@@ -260,8 +268,7 @@ const releaseStuckNegotiations = async (io, rideId) => {
     ride.negotiationStartedAt = null;
     ride.rejectedDrivers.push(rejectedDriverId);
     await ride.save();
-
-    io.to(rejectedDriverId.toString()).emit('ride_taken_by_other', { rideId }); // Retire la modale du chauffeur
+    io.to(rejectedDriverId.toString()).emit('ride_taken_by_other', { rideId });
   }
 };
 

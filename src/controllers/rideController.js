@@ -1,6 +1,10 @@
 // src/controllers/rideController.js
+// CONTRÔLEUR COURSE - Gestion des Flux & Sync des Stats Chauffeur
+// CSCSM Level: Bank Grade
+
 const rideService = require('../services/rideService');
 const userRepository = require('../repositories/userRepository');
+const User = require('../models/User'); // 🚀 Import pour récupérer les nouvelles stats
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
 const requestRide = async (req, res) => {
@@ -10,7 +14,6 @@ const requestRide = async (req, res) => {
     const io = req.app.get('socketio');
 
     drivers.forEach(driver => {
-      // On ajoute le forfait pour que le chauffeur sache quel véhicule le client attend
       io.to(driver._id.toString()).emit('new_ride_request', {
         rideId: ride._id,
         origin: ride.origin.address,
@@ -141,17 +144,29 @@ const startRide = async (req, res) => {
   }
 };
 
+// 🚀 VAGUE 2 : RÉPONSE AVEC STATS MISES À JOUR
 const completeRide = async (req, res) => {
   try {
     const { rideId } = req.body;
     const ride = await rideService.completeRideSession(req.user._id, rideId);
     
+    // Récupérer le chauffeur mis à jour pour renvoyer ses nouvelles stats au Dashboard
+    const updatedDriver = await User.findById(req.user._id).select('totalRides totalEarnings rating');
+
     req.app.get('socketio').to(ride.rider.toString()).emit('ride_completed', { 
       rideId: ride._id, 
       finalPrice: ride.price 
     });
     
-    return successResponse(res, { status: 'completed', finalPrice: ride.price }, 'Course achevée');
+    return successResponse(res, { 
+      status: 'completed', 
+      finalPrice: ride.price,
+      stats: {
+        totalRides: updatedDriver.totalRides,
+        totalEarnings: updatedDriver.totalEarnings,
+        rating: updatedDriver.rating
+      }
+    }, 'Course achevée');
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
