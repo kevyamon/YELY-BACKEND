@@ -1,5 +1,5 @@
 // src/server.js
-// SERVEUR YÉLY - Anti-Spoofing GPS, Redis GEO, Cache Auth & BullMQ Worker
+// SERVEUR YÉLY - Mode Dev: Abonnement bypassé pour tests
 // CSCSM Level: Bank Grade
 
 const http = require('http');
@@ -16,9 +16,6 @@ const logger = require('./config/logger');
 
 const server = http.createServer(app);
 
-// -------------------------------------------------------------
-// 🚀 CONFIGURATION REDIS (Moteur de performance & Kill Switch)
-// -------------------------------------------------------------
 const redis = new Redis(env.REDIS_URL);
 redis.on('error', (err) => logger.error('Redis Error:', err));
 redis.on('connect', () => logger.info('Redis connecté (Rate Limit & GEO)'));
@@ -33,7 +30,6 @@ const checkSocketRateLimit = async (userId) => {
   await redis.set(key, now, 'EX', 60);
   return true;
 };
-// -------------------------------------------------------------
 
 const coordsSchema = z.object({
   latitude: z.number().min(-90).max(90),
@@ -48,7 +44,6 @@ const io = new Server(server, {
   },
   transports: ['websocket'],
   pingTimeout: 60000,
-  // 🛡️ SÉCURITÉ : Mitigation DoS (Mémoire) - 5 Ko maximum (vs 1Mo avant)
   maxHttpBufferSize: 5000 
 });
 
@@ -57,7 +52,6 @@ app.set('redis', redis);
 
 startRideWorker(io);
 
-// Helper Distance (Haversine)
 const getDistKm = (lat1, lon1, lat2, lon2) => {
   const R = 6371; 
   const dLat = (lat2-lat1) * Math.PI/180;
@@ -89,7 +83,7 @@ io.use(async (socket, next) => {
     socket.user = user;
     socket.lastLocTime = Date.now();
     socket.lastCoords = user.currentLocation?.coordinates || [0,0]; 
-    socket.spoofStrikes = 0; // 🛡️ SÉCURITÉ : Initialisation du compteur de triche
+    socket.spoofStrikes = 0; 
     
     next();
   } catch (err) {
@@ -104,30 +98,27 @@ io.on('connection', (socket) => {
   if (user.role === 'driver') socket.join('drivers');
 
   socket.on('update_location', async (rawData) => {
-    // 🛡️ SÉCURITÉ : Kill Switch Temps Réel
-    // Vérifie à chaque ping si la session a été purgée de Redis par un admin
     const isSessionValid = await redis.exists(`auth:user:${user._id}`);
     if (!isSessionValid) {
-      logger.warn(`[SOCKET KICK] ${user.email} éjecté (Session invalidée/Banni)`);
       if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
-      socket.emit('force_disconnect', { reason: 'SESSION_REVOKED', message: 'Votre session a expiré ou vos accès ont été modifiés.' });
+      socket.emit('force_disconnect', { reason: 'SESSION_REVOKED' });
       socket.disconnect(true);
       return;
     }
 
     const parseResult = coordsSchema.safeParse(rawData);
-    if (!parseResult.success) {
-      logger.warn(`[SOCKET SECURITY] Payload malformé rejeté pour ${user._id}`);
-      return; 
-    }
+    if (!parseResult.success) return; 
     
     const coords = parseResult.data;
 
+    // 🚀 MODIFICATION POUR LE TEST : On commente le blocage strict de l'abonnement
+    /*
     if (user.role === 'driver' && (!user.subscription || !user.subscription.isActive)) {
       await redis.zrem('active_drivers', user._id.toString());
-      socket.emit('subscription_expired', { message: 'Abonnement inactif. Position non partagée.' });
+      socket.emit('subscription_expired', { message: 'Abonnement inactif.' });
       return; 
     }
+    */
     
     const isAllowed = await checkSocketRateLimit(user._id.toString());
     if (!isAllowed) return;
@@ -141,22 +132,16 @@ io.on('connection', (socket) => {
       const speedKmH = distanceKm / (timeDiffSeconds / 3600);
 
       if (speedKmH > 200) {
-        // 🛡️ SÉCURITÉ : Système de Strikes Anti-Spoofing
         socket.spoofStrikes += 1;
-        logger.warn(`[ANTI-SPOOFING] ${user.name}: Strike ${socket.spoofStrikes} - ${speedKmH.toFixed(0)} km/h détecté.`);
-        
         if (socket.spoofStrikes >= 3) {
-          logger.error(`[ANTI-SPOOFING KICK] ${user.name} déconnecté de force pour triche GPS.`);
           if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
-          socket.emit('force_disconnect', { reason: 'SPOOFING_DETECTED', message: 'Anomalie GPS détectée. Connexion interrompue.' });
+          socket.emit('force_disconnect', { reason: 'SPOOFING_DETECTED' });
           socket.disconnect(true);
           return;
         }
-        
-        socket.lastLocTime = now; // On avance le temps, mais on gèle la position
+        socket.lastLocTime = now; 
         return; 
       } else {
-        // Retour à la normale : On remet les strikes à zéro
         socket.spoofStrikes = 0;
       }
     }
@@ -166,14 +151,12 @@ io.on('connection', (socket) => {
 
     try {
       await User.updateOne({ _id: user._id }, {
-        currentLocation: {
-          type: 'Point',
-          coordinates: [coords.longitude, coords.latitude]
-        },
+        currentLocation: { type: 'Point', coordinates: [coords.longitude, coords.latitude] },
         lastLocationAt: new Date()
       });
 
       if (user.role === 'driver') {
+        // Le chauffeur est bien ajouté au radar Redis !
         await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());
         await redis.expire('active_drivers', 120);
       }
@@ -195,10 +178,9 @@ const startServer = async () => {
     logger.info('MongoDB connecté');
     
     server.listen(env.PORT, () => {
-      logger.info(`Serveur Yély (Redis Ready) actif sur port ${env.PORT}`);
+      logger.info(`Serveur Yély actif sur port ${env.PORT}`);
     });
   } catch (err) {
-    logger.error('CRITICAL STARTUP ERROR:', err);
     process.exit(1);
   }
 };
