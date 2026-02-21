@@ -1,3 +1,4 @@
+// src/services/rideService.js
 const mongoose = require('mongoose');
 const axios = require('axios');
 const { Queue } = require('bullmq');
@@ -69,14 +70,16 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
 
     if (distance < 0.1) throw new AppError('Distance invalide.', 400);
 
-    const priceOptions = await pricingService.generatePriceOptions(distance);
+    const pricingResult = await pricingService.generatePriceOptions(origin.coordinates, destination.coordinates, distance);
 
     const ride = await Ride.create({
       rider: riderId,
       origin,
       destination,
+      startZone: pricingResult.startZone,
+      endZone: pricingResult.endZone,
       distance,
-      priceOptions,
+      priceOptions: pricingResult.options,
       status: 'searching',
       rejectedDrivers: []
     });

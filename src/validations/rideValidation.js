@@ -39,11 +39,11 @@ const submitPriceSchema = z.object({
   amount: z.number().int().positive('Le montant doit être positif')
 }).strict();
 
-// 4. DÉCISION CLIENT (Rider)
+// 4. DÉCISION CLIENT (Rider) - CORRIGÉ (REJECTED au lieu de REFUSED)
 const finalizeRideSchema = z.object({
   rideId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'ID de course invalide'),
-  decision: z.enum(['ACCEPTED', 'REFUSED'], {
-    errorMap: () => ({ message: 'Décision invalide (ACCEPTED ou REFUSED)' })
+  decision: z.enum(['ACCEPTED', 'REJECTED'], {
+    errorMap: () => ({ message: 'Décision invalide (ACCEPTED ou REJECTED)' })
   })
 }).strict();
 

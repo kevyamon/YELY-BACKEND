@@ -26,6 +26,13 @@ const rideSchema = new mongoose.Schema({
     coordinates: { type: [Number], required: true, index: '2dsphere' }
   },
 
+  // Le choix du véhicule par le client
+  forfait: { 
+    type: String, 
+    enum: ['ECHO', 'STANDARD', 'VIP'], 
+    default: 'STANDARD' 
+  },
+
   // Moteur de Prix & Négociation
   distance: { type: Number, required: true }, // En Km
   

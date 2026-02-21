@@ -1,3 +1,4 @@
+// src/controllers/rideController.js
 const rideService = require('../services/rideService');
 const userRepository = require('../repositories/userRepository');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
@@ -9,11 +10,13 @@ const requestRide = async (req, res) => {
     const io = req.app.get('socketio');
 
     drivers.forEach(driver => {
+      // On ajoute le forfait pour que le chauffeur sache quel véhicule le client attend
       io.to(driver._id.toString()).emit('new_ride_request', {
         rideId: ride._id,
         origin: ride.origin.address,
         destination: ride.destination.address,
         distance: ride.distance,
+        forfait: ride.forfait,
         priceOptions: ride.priceOptions
       });
     });
@@ -110,6 +113,7 @@ const finalizeRide = async (req, res) => {
           origin: result.ride.origin.address,
           destination: result.ride.destination.address,
           distance: result.ride.distance,
+          forfait: result.ride.forfait,
           priceOptions: result.ride.priceOptions
         });
       });
