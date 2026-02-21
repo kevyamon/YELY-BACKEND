@@ -1,6 +1,5 @@
 // src/services/rideService.js
-// SERVICE COURSE - Iron Dome avec Auto-Nettoyage et Timeout (1m30)
-// CSCSM Level: Bank Grade
+// SERVICE COURSE - Avec destruction propre de la recherche
 
 const mongoose = require('mongoose');
 const axios = require('axios');
@@ -67,7 +66,6 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
     
     if (existingRide) {
       if (['searching', 'negotiating'].includes(existingRide.status)) {
-        logger.info(`[RIDE] Nettoyage course fantôme ${existingRide._id}`);
         existingRide.status = 'cancelled';
         existingRide.cancellationReason = 'Annulation automatique par nouvelle requête';
         await existingRide.save();
@@ -124,17 +122,17 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
   }
 };
 
-// 🚀 NOUVEAU : Annulation manuelle par l'utilisateur
+// 🚀 NOUVEAU : On tue la course dans la base de données
 const cancelRideByUser = async (rideId, userId, reason) => {
   const ride = await Ride.findOne({ _id: rideId, rider: userId });
   if (!ride) throw new AppError('Course introuvable.', 404);
   
   if (['completed', 'cancelled'].includes(ride.status)) {
-    throw new AppError('Cette course est déjà terminée ou annulée.', 400);
+    throw new AppError('Course déjà terminée ou annulée.', 400);
   }
 
   ride.status = 'cancelled';
-  ride.cancellationReason = reason || 'Annulé par le passager';
+  ride.cancellationReason = reason || 'Annulée par le passager';
   await ride.save();
 
   return ride;
@@ -260,6 +258,7 @@ const completeRideSession = async (driverId, rideId) => {
 };
 
 const cancelSearchTimeout = async (io, rideId) => {
+  // 🚀 SÉCURITÉ : Ne déclenche le Timeout que si la course est toujours "searching"
   const ride = await Ride.findOne({ _id: rideId, status: 'searching' });
   if (ride) {
     ride.status = 'cancelled';
@@ -287,7 +286,7 @@ const releaseStuckNegotiations = async (io, rideId) => {
 
 module.exports = {
   createRideRequest,
-  cancelRideByUser,
+  cancelRideByUser, // 🚀 EXPORTÉ ICI
   lockRideForNegotiation,
   submitPriceProposal,
   finalizeProposal,

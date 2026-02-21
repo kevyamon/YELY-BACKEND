@@ -1,6 +1,5 @@
 // src/controllers/rideController.js
-// CONTRÔLEUR COURSE - Flux Gamifié & Sécurité Anti-Blocage
-// CSCSM Level: Bank Grade
+// CONTRÔLEUR COURSE - Destruction connectée à l'API
 
 const rideService = require('../services/rideService');
 const userRepository = require('../repositories/userRepository');
@@ -30,16 +29,17 @@ const requestRide = async (req, res) => {
   }
 };
 
-// 🚀 CORRECTION : Annulation manuelle par l'utilisateur (Tue la recherche en DB)
+// 🚀 NOUVEAU : La route d'annulation tue vraiment la course
 const cancelRide = async (req, res) => {
   try {
-    const { rideId } = req.params;
+    // Gère les ID venant de /rides/:id/cancel
+    const rideId = req.params.id;
     const { reason } = req.body;
     
     const ride = await rideService.cancelRideByUser(rideId, req.user._id, reason);
     const io = req.app.get('socketio');
 
-    // On prévient les chauffeurs que la course n'est plus dispo
+    // On prévient tous les chauffeurs que la course n'existe plus
     io.to('drivers').emit('ride_taken_by_other', { rideId });
 
     return successResponse(res, { status: 'cancelled' }, 'Course annulée avec succès');
@@ -188,4 +188,5 @@ const completeRide = async (req, res) => {
   }
 };
 
+// 🚀 EXPORTATION AJOUTÉE POUR LE ROUTEUR
 module.exports = { requestRide, cancelRide, lockRide, submitPrice, finalizeRide, startRide, completeRide };
