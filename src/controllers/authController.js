@@ -1,9 +1,8 @@
 // src/controllers/authController.js
-// CONTRÔLEUR AUTHENTIFICATION - Inscription blindée (Anti-Crash 502)
+// CONTRÔLEUR AUTHENTIFICATION - Restauration Complète & Inscription Blindée
 // CSCSM Level: Bank Grade
 
 const User = require('../models/User');
-const AppError = require('../utils/AppError');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const jwt = require('jsonwebtoken');
 const { env } = require('../config/env');
@@ -19,17 +18,16 @@ const register = async (req, res) => {
   try {
     const { name, email, password, phone, role } = req.body;
 
-    // 1. LE RADAR ANTI-CRASH : On vérifie si l'email ou le téléphone existe déjà AVANT de créer
+    // 1. LE RADAR ANTI-CRASH : On vérifie les doublons AVANT de créer
     const userExists = await User.findOne({ 
       $or: [{ email: email }, { phone: phone }] 
     });
     
     if (userExists) {
-      // Si on le trouve, on arrête tout doucement et on prévient le téléphone
       return errorResponse(res, "Ce numéro de téléphone ou cet email est déjà utilisé.", 400);
     }
 
-    // 2. Création de l'utilisateur (Maintenant c'est sans danger)
+    // 2. Création de l'utilisateur
     const user = await User.create({
       name,
       email,
@@ -42,7 +40,6 @@ const register = async (req, res) => {
     const accessToken = signToken(user._id);
     const refreshToken = signToken(user._id); 
 
-    // 4. On prépare le colis de retour (sans le mot de passe, question de sécurité)
     const userData = {
       _id: user._id,
       name: user.name,
@@ -56,10 +53,8 @@ const register = async (req, res) => {
     return successResponse(res, { user: userData, accessToken, refreshToken }, 'Compte créé avec succès', 201);
 
   } catch (error) {
-    // 5. LE FILET DE SÉCURITÉ ULTIME
     console.error("[REGISTER CRASH PROTECTED]:", error);
     
-    // Si la base de données se plaint quand même d'un doublon (Erreur 11000)
     if (error.code === 11000) {
        return errorResponse(res, "Doublon détecté. Ce compte existe déjà.", 400);
     }
@@ -76,12 +71,10 @@ const login = async (req, res) => {
       return errorResponse(res, "Veuillez fournir un identifiant et un mot de passe.", 400);
     }
 
-    // On cherche par email OU par téléphone
     const user = await User.findOne({
       $or: [{ email: identifier }, { phone: identifier }]
     }).select('+password'); 
 
-    // On vérifie le mot de passe (la fonction comparePassword est dans ton modèle User)
     if (!user || !(await user.comparePassword(password, user.password))) {
       return errorResponse(res, "Identifiant ou mot de passe incorrect.", 401);
     }
@@ -119,8 +112,20 @@ const getMe = async (req, res) => {
   }
 };
 
+// 🚀 LA FONCTION QUI MANQUAIT ET QUI FAISAIT PLANTER LE SERVEUR
+const logout = async (req, res) => {
+  try {
+    // Si tu gères les tokens côté client, le backend a juste besoin de valider la requête
+    return successResponse(res, null, 'Déconnexion réussie', 200);
+  } catch (error) {
+    return errorResponse(res, "Erreur lors de la déconnexion.", 500);
+  }
+};
+
+// 🚀 NOUVEAU : On s'assure que TOUT est exporté correctement pour authRoutes.js
 module.exports = {
   register,
   login,
-  getMe
+  getMe,
+  logout
 };
