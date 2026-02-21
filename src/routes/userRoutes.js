@@ -1,17 +1,19 @@
 // src/routes/userRoutes.js
-// ROUTES UTILISATEUR - Blindage & Validation
+// ROUTES UTILISATEUR - Synchronisation avec le Contrôleur Forteresse
 // CSCSM Level: Bank Grade
 
 const express = require('express');
-const router = express.Router();
 const userController = require('../controllers/userController');
 const { protect } = require('../middleware/authMiddleware');
-const validate = require('../middleware/validationMiddleware');
-const { updateProfileSchema } = require('../validations/userValidation');
 
+const router = express.Router();
+
+// Toutes les routes ci-dessous sont protégées par l'Iron Dome (JWT)
 router.use(protect);
 
-router.get('/profile', userController.getMyProfile);
-router.put('/profile', validate(updateProfileSchema), userController.updateProfile);
+// 🚀 SYNC : On utilise les noms exacts du contrôleur
+router.get('/profile', userController.getProfile);
+router.patch('/update-profile', userController.updateProfile);
+router.patch('/update-availability', userController.updateAvailability);
 
 module.exports = router;
