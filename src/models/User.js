@@ -1,4 +1,7 @@
 // src/models/User.js
+// MODÈLE UTILISATEUR - Profils, Identités & Stats (Iron Dome)
+// CSCSM Level: Bank Grade
+
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const { SECURITY_CONSTANTS } = require('../config/env');
@@ -57,6 +60,11 @@ const userSchema = new mongoose.Schema({
   fcmToken: { type: String, default: null },
   
   isAvailable: { type: Boolean, default: false, index: true },
+
+  // 🚀 STATS DASHBOARD : On les ajoute ici proprement
+  totalRides: { type: Number, default: 0 },
+  totalEarnings: { type: Number, default: 0 },
+  rating: { type: Number, default: 5.0 },
   
   vehicle: {
     category: { type: String, enum: ['ECHO', 'STANDARD', 'VIP'], default: null },
@@ -108,4 +116,7 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-module.exports = mongoose.model('User', userSchema);
+// 🛡️ SÉCURITÉ RENDER : Empêche le crash OverwriteModelError
+const User = mongoose.models.User || mongoose.model('User', userSchema);
+
+module.exports = User;
