@@ -1,10 +1,10 @@
 // src/controllers/rideController.js
-// CONTRÔLEUR COURSE - Gestion des Flux & Sync des Stats Chauffeur
+// CONTRÔLEUR COURSE - Flux Gamifié & Sécurité Anti-Blocage
 // CSCSM Level: Bank Grade
 
 const rideService = require('../services/rideService');
 const userRepository = require('../repositories/userRepository');
-const User = require('../models/User'); // 🚀 Import pour récupérer les nouvelles stats
+const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
 const requestRide = async (req, res) => {
@@ -25,6 +25,24 @@ const requestRide = async (req, res) => {
     });
 
     return successResponse(res, { rideId: ride._id, status: ride.status }, 'Recherche en cours', 201);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500);
+  }
+};
+
+// 🚀 CORRECTION : Annulation manuelle par l'utilisateur (Tue la recherche en DB)
+const cancelRide = async (req, res) => {
+  try {
+    const { rideId } = req.params;
+    const { reason } = req.body;
+    
+    const ride = await rideService.cancelRideByUser(rideId, req.user._id, reason);
+    const io = req.app.get('socketio');
+
+    // On prévient les chauffeurs que la course n'est plus dispo
+    io.to('drivers').emit('ride_taken_by_other', { rideId });
+
+    return successResponse(res, { status: 'cancelled' }, 'Course annulée avec succès');
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -144,13 +162,11 @@ const startRide = async (req, res) => {
   }
 };
 
-// 🚀 VAGUE 2 : RÉPONSE AVEC STATS MISES À JOUR
 const completeRide = async (req, res) => {
   try {
     const { rideId } = req.body;
     const ride = await rideService.completeRideSession(req.user._id, rideId);
     
-    // Récupérer le chauffeur mis à jour pour renvoyer ses nouvelles stats au Dashboard
     const updatedDriver = await User.findById(req.user._id).select('totalRides totalEarnings rating');
 
     req.app.get('socketio').to(ride.rider.toString()).emit('ride_completed', { 
@@ -172,4 +188,4 @@ const completeRide = async (req, res) => {
   }
 };
 
-module.exports = { requestRide, lockRide, submitPrice, finalizeRide, startRide, completeRide };
+module.exports = { requestRide, cancelRide, lockRide, submitPrice, finalizeRide, startRide, completeRide };

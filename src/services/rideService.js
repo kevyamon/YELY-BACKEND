@@ -1,12 +1,12 @@
 // src/services/rideService.js
-// SERVICE COURSE - Iron Dome avec Calcul des Gains Automatique
+// SERVICE COURSE - Iron Dome avec Auto-Nettoyage et Timeout (1m30)
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
 const axios = require('axios');
 const { Queue } = require('bullmq');
 const Ride = require('../models/Ride');
-const User = require('../models/User'); // 🚀 NOUVEAU : Import pour les stats
+const User = require('../models/User');
 const userRepository = require('../repositories/userRepository');
 const pricingService = require('./pricingService');
 const AppError = require('../utils/AppError');
@@ -124,6 +124,22 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
   }
 };
 
+// 🚀 NOUVEAU : Annulation manuelle par l'utilisateur
+const cancelRideByUser = async (rideId, userId, reason) => {
+  const ride = await Ride.findOne({ _id: rideId, rider: userId });
+  if (!ride) throw new AppError('Course introuvable.', 404);
+  
+  if (['completed', 'cancelled'].includes(ride.status)) {
+    throw new AppError('Cette course est déjà terminée ou annulée.', 400);
+  }
+
+  ride.status = 'cancelled';
+  ride.cancellationReason = reason || 'Annulé par le passager';
+  await ride.save();
+
+  return ride;
+};
+
 const lockRideForNegotiation = async (rideId, driverId) => {
   const ride = await Ride.findOneAndUpdate(
     { _id: rideId, status: 'searching' },
@@ -209,7 +225,6 @@ const startRideSession = async (driverId, rideId) => {
   return ride;
 };
 
-// 🚀 VAGUE 2 : LOGIQUE DE CALCUL DES GAINS AUTOMATIQUE
 const completeRideSession = async (driverId, rideId) => {
   const session = await mongoose.startSession();
   let result;
@@ -224,10 +239,8 @@ const completeRideSession = async (driverId, rideId) => {
     
     if (!ride) throw new AppError('Validation impossible.', 400);
     
-    // 1. Libérer le chauffeur pour de nouvelles courses
     await userRepository.updateDriverAvailability(driverId, true, session);
     
-    // 2. Mettre à jour les statistiques du chauffeur (Compteur + Argent)
     await User.findByIdAndUpdate(driverId, {
       $inc: { 
         totalRides: 1, 
@@ -274,6 +287,7 @@ const releaseStuckNegotiations = async (io, rideId) => {
 
 module.exports = {
   createRideRequest,
+  cancelRideByUser,
   lockRideForNegotiation,
   submitPriceProposal,
   finalizeProposal,
