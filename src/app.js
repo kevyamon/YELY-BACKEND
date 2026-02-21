@@ -65,7 +65,8 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  // ✅ LE FIX EST ICI : Ajout des en-têtes web requis (x-content-type-options et Origin)
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'x-content-type-options', 'Origin'],
 };
 app.use(cors(corsOptions));
 
@@ -88,7 +89,6 @@ app.use(mongoSanitize({
 app.use(sanitizationMiddleware);
 
 // 7. ROUTES DE BASE (Health Checks & Monitoring)
-// ✅ LE FIX EST ICI : Route racine pour Render/Heroku
 app.get('/', (req, res) => {
   res.status(200).send('Yély API (Iron Dome) is running ');
 });
