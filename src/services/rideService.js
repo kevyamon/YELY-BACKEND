@@ -59,27 +59,34 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
     const existingRide = await Ride.findOne({
       rider: riderId,
       status: { $in: ['searching', 'negotiating', 'accepted', 'ongoing'] }
-    }).lean();
+    });
     
     if (existingRide) {
-      throw new AppError('Course active existante.', 409);
+      // 🛡️ CORRECTION : Auto-nettoyage des courses fantômes
+      if (['searching', 'negotiating'].includes(existingRide.status)) {
+        logger.info(`[RIDE] Nettoyage de la course fantôme ${existingRide._id} pour le client ${riderId}`);
+        existingRide.status = 'cancelled';
+        existingRide.cancellationReason = 'Annulation automatique par nouvelle requête';
+        await existingRide.save();
+      } else {
+        throw new AppError('Vous avez déjà une course active en cours.', 409);
+      }
     }
 
-    const { origin, destination } = rideData;
+    const { origin, destination, forfait } = rideData; 
     const distance = await getRouteDistance(origin.coordinates, destination.coordinates);
 
     if (distance < 0.1) throw new AppError('Distance invalide.', 400);
 
-    const pricingResult = await pricingService.generatePriceOptions(origin.coordinates, destination.coordinates, distance);
+    const priceOptions = await pricingService.generatePriceOptions(distance);
 
     const ride = await Ride.create({
       rider: riderId,
       origin,
       destination,
-      startZone: pricingResult.startZone,
-      endZone: pricingResult.endZone,
       distance,
-      priceOptions: pricingResult.options,
+      forfait: forfait || 'STANDARD', // Ajout de la sauvegarde du forfait demandé
+      priceOptions,
       status: 'searching',
       rejectedDrivers: []
     });
