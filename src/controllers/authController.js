@@ -4,21 +4,15 @@
 
 const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
-const jwt = require('jsonwebtoken');
+// 🚀 CORRECTION : On utilise TES vraies fonctions de tokens !
+const { generateTokens, verifyRefreshToken } = require('../utils/tokenService'); 
 const { env } = require('../config/env');
-
-// Fonction interne pour fabriquer les badges d'accès (Tokens)
-const signToken = (id) => {
-  return jwt.sign({ userId: id }, env.JWT_SECRET || process.env.JWT_SECRET, {
-    expiresIn: '30d'
-  });
-};
 
 const registerUser = async (req, res) => {
   try {
     const { name, email, password, phone, role } = req.body;
 
-    // 1. LE RADAR ANTI-CRASH : On vérifie les doublons AVANT de créer
+    // 1. LE RADAR ANTI-CRASH
     const userExists = await User.findOne({ 
       $or: [{ email: email }, { phone: phone }] 
     });
@@ -36,9 +30,9 @@ const registerUser = async (req, res) => {
       role: role || 'rider'
     });
 
-    // 3. Génération des clés d'accès
-    const accessToken = signToken(user._id);
-    const refreshTokenStr = signToken(user._id); 
+    // 3. 🚀 CORRECTION : Génération correcte avec ton service !
+    // generateTokens s'attend à recevoir un objet user complet pour inclure le rôle
+    const tokens = generateTokens(user); 
 
     const userData = {
       _id: user._id,
@@ -50,7 +44,11 @@ const registerUser = async (req, res) => {
       rating: user.rating
     };
 
-    return successResponse(res, { user: userData, accessToken, refreshToken: refreshTokenStr }, 'Compte créé avec succès', 201);
+    return successResponse(res, { 
+      user: userData, 
+      accessToken: tokens.accessToken, 
+      refreshToken: tokens.refreshToken 
+    }, 'Compte créé avec succès', 201);
 
   } catch (error) {
     console.error("[REGISTER CRASH PROTECTED]:", error);
@@ -79,8 +77,8 @@ const loginUser = async (req, res) => {
       return errorResponse(res, "Identifiant ou mot de passe incorrect.", 401);
     }
 
-    const accessToken = signToken(user._id);
-    const refreshTokenStr = signToken(user._id);
+    // 🚀 CORRECTION : Utilisation de ton service
+    const tokens = generateTokens(user);
 
     const userData = {
       _id: user._id,
@@ -92,7 +90,11 @@ const loginUser = async (req, res) => {
       rating: user.rating
     };
 
-    return successResponse(res, { user: userData, accessToken, refreshToken: refreshTokenStr }, 'Connexion réussie', 200);
+    return successResponse(res, { 
+      user: userData, 
+      accessToken: tokens.accessToken, 
+      refreshToken: tokens.refreshToken 
+    }, 'Connexion réussie', 200);
 
   } catch (error) {
     console.error("[LOGIN ERROR]:", error);
@@ -113,14 +115,17 @@ const refreshToken = async (req, res) => {
     const token = req.body.refreshToken;
     if (!token) return errorResponse(res, "Refresh token manquant", 401);
     
-    const decoded = jwt.verify(token, env.JWT_SECRET || process.env.JWT_SECRET);
+    // 🚀 CORRECTION : On utilise ta fonction de vérification
+    const decoded = verifyRefreshToken(token);
     const user = await User.findById(decoded.userId);
     if (!user) return errorResponse(res, "Utilisateur invalide", 401);
 
-    const newAccessToken = signToken(user._id);
-    const newRefreshToken = signToken(user._id);
+    const tokens = generateTokens(user);
 
-    return successResponse(res, { accessToken: newAccessToken, refreshToken: newRefreshToken }, "Token rafraîchi", 200);
+    return successResponse(res, { 
+      accessToken: tokens.accessToken, 
+      refreshToken: tokens.refreshToken 
+    }, "Token rafraîchi", 200);
   } catch (error) {
     return errorResponse(res, "Token invalide ou expiré", 401);
   }
@@ -146,7 +151,6 @@ const updateFcmToken = async (req, res) => {
   }
 };
 
-// 🚀 TOUTES LES FONCTIONS CORRESPONDENT EXACTEMENT À AUTHROUTES.JS
 module.exports = {
   registerUser,
   loginUser,
