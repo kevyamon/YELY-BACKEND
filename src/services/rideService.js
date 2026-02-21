@@ -1,5 +1,5 @@
 // src/services/rideService.js
-// SERVICE COURSE - Avec destruction propre de la recherche
+// SERVICE COURSE - Concurrence fixée & Annulation Dynamique
 
 const mongoose = require('mongoose');
 const axios = require('axios');
@@ -52,13 +52,16 @@ const getRouteDistance = async (originCoords, destCoords) => {
 
 const createRideRequest = async (riderId, rideData, redisClient) => {
   const lockKey = `lock:ride_req:${riderId}`;
-  const isLocked = await redisClient.set(lockKey, '1', 'NX', 'EX', 10);
+  let lockAcquired = false;
   
-  if (!isLocked) {
-    throw new AppError('Traitement en cours, veuillez patienter.', 429);
-  }
-
   try {
+    // 🚀 FIX CONCURRENCE: On s'assure qu'on a bien le verrou avant de continuer
+    const isLocked = await redisClient.set(lockKey, '1', 'NX', 'EX', 10);
+    if (!isLocked) {
+      throw new AppError('Traitement en cours, veuillez patienter.', 429);
+    }
+    lockAcquired = true;
+
     const existingRide = await Ride.findOne({
       rider: riderId,
       status: { $in: ['searching', 'negotiating', 'accepted', 'ongoing'] }
@@ -118,21 +121,28 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
 
     return { ride, drivers };
   } finally {
-    await redisClient.del(lockKey);
+    // 🚀 FIX CONCURRENCE: On supprime le verrou UNIQUEMENT si c'est nous qui l'avons créé !
+    if (lockAcquired) {
+      await redisClient.del(lockKey);
+    }
   }
 };
 
-// 🚀 NOUVEAU : On tue la course dans la base de données
-const cancelRideByUser = async (rideId, userId, reason) => {
-  const ride = await Ride.findOne({ _id: rideId, rider: userId });
-  if (!ride) throw new AppError('Course introuvable.', 404);
+// 🚀 FIX ANNULATION: On autorise Chauffeurs ET Passagers à annuler
+const cancelRideAction = async (rideId, userId, userRole, reason) => {
+  const query = { _id: rideId };
+  if (userRole === 'rider') query.rider = userId;
+  else if (userRole === 'driver') query.driver = userId;
+
+  const ride = await Ride.findOne(query);
+  if (!ride) throw new AppError('Course introuvable ou accès refusé.', 404);
   
   if (['completed', 'cancelled'].includes(ride.status)) {
     throw new AppError('Course déjà terminée ou annulée.', 400);
   }
 
   ride.status = 'cancelled';
-  ride.cancellationReason = reason || 'Annulée par le passager';
+  ride.cancellationReason = reason || 'Annulée';
   await ride.save();
 
   return ride;
@@ -258,7 +268,6 @@ const completeRideSession = async (driverId, rideId) => {
 };
 
 const cancelSearchTimeout = async (io, rideId) => {
-  // 🚀 SÉCURITÉ : Ne déclenche le Timeout que si la course est toujours "searching"
   const ride = await Ride.findOne({ _id: rideId, status: 'searching' });
   if (ride) {
     ride.status = 'cancelled';
@@ -286,7 +295,7 @@ const releaseStuckNegotiations = async (io, rideId) => {
 
 module.exports = {
   createRideRequest,
-  cancelRideByUser, // 🚀 EXPORTÉ ICI
+  cancelRideAction, // 🚀 NOUVEAU NOM EXPORTÉ
   lockRideForNegotiation,
   submitPriceProposal,
   finalizeProposal,

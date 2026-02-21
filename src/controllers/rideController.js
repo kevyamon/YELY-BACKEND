@@ -1,14 +1,13 @@
 // src/controllers/rideController.js
-// CONTRÔLEUR COURSE - Flux Gamifié, Estimation & Annulation
+// CONTRÔLEUR COURSE - Flux Gamifié, Tracé GPS Réparé & Annulation Multi-Rôle
 // CSCSM Level: Bank Grade
 
 const rideService = require('../services/rideService');
 const userRepository = require('../repositories/userRepository');
 const User = require('../models/User');
-const AppError = require('../utils/AppError'); // 🚀 IMPORT REQUIS POUR LES ERREURS
+const AppError = require('../utils/AppError');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
-// 🚀 NOUVEAU : La fonction d'estimation (Renvoie la distance et les forfaits)
 const estimateRide = async (req, res) => {
   try {
     const { pickupLat, pickupLng, dropoffLat, dropoffLng } = req.query;
@@ -20,10 +19,8 @@ const estimateRide = async (req, res) => {
     const origin = [parseFloat(pickupLng), parseFloat(pickupLat)];
     const destination = [parseFloat(dropoffLng), parseFloat(dropoffLat)];
     
-    // On utilise le service existant pour calculer la distance réelle (en km)
     const distance = await rideService.getRouteDistance(origin, destination);
     
-    // Génération des véhicules et du temps estimé selon la distance
     const vehicles = [
       { id: '1', type: 'echo', name: 'Echo', duration: Math.max(1, Math.ceil(distance * 3)) },
       { id: '2', type: 'standard', name: 'Standard', duration: Math.max(1, Math.ceil(distance * 2)) },
@@ -45,8 +42,9 @@ const requestRide = async (req, res) => {
     drivers.forEach(driver => {
       io.to(driver._id.toString()).emit('new_ride_request', {
         rideId: ride._id,
-        origin: ride.origin.address,
-        destination: ride.destination.address,
+        // 🚀 CORRECTION CRITIQUE : On envoie l'objet entier pour que la carte du chauffeur puisse tracer la ligne !
+        origin: ride.origin,       
+        destination: ride.destination, 
         distance: ride.distance,
         forfait: ride.forfait,
         priceOptions: ride.priceOptions
@@ -62,11 +60,19 @@ const requestRide = async (req, res) => {
 const cancelRide = async (req, res) => {
   try {
     const rideId = req.params.id || req.body.rideId; 
-    const reason = req.body.reason || 'Annulé par le passager';
+    const reason = req.body.reason || `Annulé par le ${req.user.role}`;
     
-    const ride = await rideService.cancelRideByUser(rideId, req.user._id, reason);
+    // 🚀 CORRECTION : On utilise la nouvelle fonction qui gère chauffeurs et passagers
+    const ride = await rideService.cancelRideAction(rideId, req.user._id, req.user.role, reason);
     const io = req.app.get('socketio');
 
+    // On prévient l'autre partie
+    if (req.user.role === 'rider' && ride.driver) {
+       io.to(ride.driver.toString()).emit('ride_cancelled', { rideId });
+    } else if (req.user.role === 'driver') {
+       io.to(ride.rider.toString()).emit('ride_cancelled', { rideId });
+    }
+    
     io.to('drivers').emit('ride_taken_by_other', { rideId });
 
     return successResponse(res, { status: 'cancelled' }, 'Course annulée avec succès');
@@ -158,8 +164,9 @@ const finalizeRide = async (req, res) => {
       newDrivers.forEach(driver => {
         io.to(driver._id.toString()).emit('new_ride_request', {
           rideId: result.ride._id,
-          origin: result.ride.origin.address,
-          destination: result.ride.destination.address,
+          // 🚀 CORRECTION CRITIQUE ICI AUSSI !
+          origin: result.ride.origin,
+          destination: result.ride.destination,
           distance: result.ride.distance,
           forfait: result.ride.forfait,
           priceOptions: result.ride.priceOptions
@@ -215,5 +222,4 @@ const completeRide = async (req, res) => {
   }
 };
 
-// 🚀 NOUVEAU : Ajout de 'estimateRide' dans l'export
 module.exports = { requestRide, cancelRide, lockRide, submitPrice, finalizeRide, startRide, completeRide, estimateRide };
