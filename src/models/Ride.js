@@ -1,97 +1,91 @@
-// src/models/User.js
-// MODÈLE UTILISATEUR - Profils, Identités & Stats Performance (Iron Dome)
+// src/models/Ride.js
+// MODÈLE COURSE - Flux Gamifié & Sécurité Anti-Blocage (Iron Dome)
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
-const bcrypt = require('bcrypt');
 
-const userSchema = new mongoose.Schema({
-  name: { 
-    type: String, 
-    required: true, 
-    trim: true 
+const rideSchema = new mongoose.Schema({
+  rider: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true 
   },
-  email: { 
-    type: String, 
-    required: true, 
-    unique: true, 
-    lowercase: true, 
-    trim: true 
-  },
-  phone: { 
-    type: String, 
-    required: true, 
-    unique: true 
-  },
-  password: { 
-    type: String, 
-    required: true, 
-    select: false 
-  },
-  role: { 
-    type: String, 
-    enum: ['rider', 'driver', 'superadmin'], 
-    default: 'rider' 
+  driver: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User' 
+    // Peut être null tant que la négo n'est pas finie
   },
   
-  // --- INFOS CHAUFFEUR ---
-  vehicle: {
-    brand: String,
-    model: String,
-    plate: String,
-    color: String,
-    type: { type: String, enum: ['ECHO', 'STANDARD', 'VIP'], default: 'STANDARD' }
-  },
-  
-  isAvailable: { 
-    type: Boolean, 
-    default: false 
-  },
-  
-  // 🚀 STATS DE PERFORMANCE DYNAMIQUE (DASHBOARD)
-  totalRides: { 
-    type: Number, 
-    default: 0 
-  },
-  totalEarnings: { 
-    type: Number, 
-    default: 0 
-  },
-  rating: { 
-    type: Number, 
-    default: 5.0 
-  },
-  
-  subscription: {
-    isActive: { type: Boolean, default: false },
-    plan: { type: String, enum: ['daily', 'weekly', 'monthly'], default: 'daily' },
-    expiresAt: Date
-  },
-
   // Géolocalisation
-  currentLocation: {
-    type: { type: String, default: 'Point' },
-    coordinates: { type: [Number], default: [0, 0] } // [longitude, latitude]
+  origin: {
+    address: { type: String, required: true },
+    coordinates: { type: [Number], required: true, index: '2dsphere' }
   },
+  destination: {
+    address: { type: String, required: true },
+    coordinates: { type: [Number], required: true, index: '2dsphere' }
+  },
+
+  // Le choix du véhicule par le client
+  forfait: { 
+    type: String, 
+    enum: ['ECHO', 'STANDARD', 'VIP'], 
+    default: 'STANDARD' 
+  },
+
+  // Moteur de Prix & Négociation
+  distance: { type: Number, required: true }, // En Km
   
-  lastLocationAt: Date,
-  isBanned: { type: Boolean, default: false },
-  createdAt: { type: Date, default: Date.now }
+  // Les 3 options calculées par le serveur (Sécurité)
+  priceOptions: [{
+    label: { type: String, enum: ['ECO', 'STANDARD', 'PREMIUM'] },
+    amount: { type: Number },
+    description: { type: String }
+  }],
+
+  // Le choix du chauffeur
+  proposedPrice: { type: Number }, 
+  
+  // Prix final validé
+  price: { type: Number }, 
+
+  status: {
+    type: String,
+    enum: [
+      'searching',    // Recherche en cours
+      'negotiating',  // Chauffeur a locké, attente accord prix
+      'accepted',     // Validé par client
+      'ongoing',      // En route
+      'completed',    // Fini
+      'cancelled'     // Annulé
+    ],
+    default: 'searching'
+  },
+
+  // Liste des chauffeurs qui ont ignoré ou été refusés (Soft Reject)
+  rejectedDrivers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+
+  // 🛡️ SÉCURITÉ IRON DOME : Timer pour tuer les négos zombies
+  // Si ce champ est vieux de > 60s, le Cron libère le chauffeur
+  negotiationStartedAt: { type: Date },
+
+  // Dates
+  createdAt: { type: Date, default: Date.now },
+  acceptedAt: { type: Date },
+  startedAt: { type: Date },
+  completedAt: { type: Date },
+  
+  // Raisons
+  cancellationReason: { type: String },
+  rejectionReason: { type: String }
 });
 
-// Indexation pour la recherche de proximité
-userSchema.index({ currentLocation: '2dsphere' });
+// Index Simples
+rideSchema.index({ status: 1 });
+rideSchema.index({ driver: 1 });
 
-// Middleware de hachage du mot de passe
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
-  this.password = await bcrypt.hash(this.password, 12);
-  next();
-});
+// 🛡️ SÉCURITÉ IRON DOME : Index Composite
+// Optimise la vérification "Est-ce que ce rider a DÉJÀ une course active ?"
+rideSchema.index({ rider: 1, status: 1 });
 
-// Méthode de vérification
-userSchema.methods.comparePassword = async function (candidatePassword) {
-  return await bcrypt.compare(candidatePassword, this.password);
-};
-
-module.exports = mongoose.model('User', userSchema);
+module.exports = mongoose.model('Ride', rideSchema);
