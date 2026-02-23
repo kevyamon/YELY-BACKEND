@@ -1,5 +1,5 @@
-// src/repositories/userRepository.js
-// DATA ACCESS OBJECT (DAO) - Utilisateurs
+// backend/src/repositories/userRepository.js
+// DATA ACCESS OBJECT (DAO) - Utilisateurs (CORRIGÉ PROJECTION MONGO)
 // CSCSM Level: Bank Grade
 
 const User = require('../models/User');
@@ -26,25 +26,22 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
     }
   };
 
-  // Exclusion stricte des chauffeurs ayant déjà refusé
   if (Array.isArray(rejectedDriverIds) && rejectedDriverIds.length > 0) {
     query._id = { $nin: rejectedDriverIds };
   }
 
-  // Filtrage par catégorie de véhicule si spécifié
   if (forfait) {
     query['vehicle.category'] = forfait;
   }
 
-  // Projection securisee: on ne remonte que le strict necessaire pour le dispatch
+  // 🛡️ CORRECTION : Uniquement des inclusions. MongoDB exclut le password automatiquement.
   return User.find(query)
-    .select('name phone vehicle currentLocation rating fcmToken -password -__v')
+    .select('name phone vehicle currentLocation rating fcmToken')
     .limit(5);
 };
 
 /**
  * Recherche des chauffeurs actifs à partir d'une liste d'IDs (Redis Geo Fallback)
- * Exclut les chauffeurs ayant déjà refusé la course
  */
 const findActiveDriversByIds = async (nearbyDriverIds, rejectedDriverIds = []) => {
   const query = {
