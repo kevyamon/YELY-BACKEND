@@ -31,10 +31,14 @@ const checkSocketRateLimit = async (userId) => {
   return true;
 };
 
+// 🚀 CORRECTION : On accepte les autres variables (heading, speed, timestamp) envoyées par le front
 const coordsSchema = z.object({
   latitude: z.number().min(-90).max(90),
-  longitude: z.number().min(-180).max(180)
-}).strict();
+  longitude: z.number().min(-180).max(180),
+  heading: z.number().optional(),
+  speed: z.number().optional(),
+  timestamp: z.number().optional()
+});
 
 const io = new Server(server, {
   cors: {
@@ -107,7 +111,11 @@ io.on('connection', (socket) => {
     }
 
     const parseResult = coordsSchema.safeParse(rawData);
-    if (!parseResult.success) return; 
+    if (!parseResult.success) {
+      // Pour débugger si jamais ça bloque encore
+      if (__DEV__) console.error('[SOCKET] Erreur validation position:', parseResult.error);
+      return; 
+    }
     
     const coords = parseResult.data;
 
