@@ -111,15 +111,6 @@ io.on('connection', (socket) => {
     
     const coords = parseResult.data;
 
-    // 🚀 MODIFICATION POUR LE TEST : On commente le blocage strict de l'abonnement
-    /*
-    if (user.role === 'driver' && (!user.subscription || !user.subscription.isActive)) {
-      await redis.zrem('active_drivers', user._id.toString());
-      socket.emit('subscription_expired', { message: 'Abonnement inactif.' });
-      return; 
-    }
-    */
-    
     const isAllowed = await checkSocketRateLimit(user._id.toString());
     if (!isAllowed) return;
 
@@ -156,7 +147,6 @@ io.on('connection', (socket) => {
       });
 
       if (user.role === 'driver') {
-        // Le chauffeur est bien ajouté au radar Redis !
         await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());
         await redis.expire('active_drivers', 120);
       }
