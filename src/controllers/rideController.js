@@ -1,4 +1,4 @@
-// src/controllers/rideController.js
+// backend/src/controllers/rideController.js
 // CONTRÔLEUR COURSE - Flux Gamifié, Tracé GPS Réparé & Annulation Multi-Rôle
 // CSCSM Level: Bank Grade
 
@@ -6,6 +6,7 @@ const rideService = require('../services/rideService');
 const userRepository = require('../repositories/userRepository');
 const User = require('../models/User');
 const AppError = require('../utils/AppError');
+const logger = require('../config/logger');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
 const estimateRide = async (req, res) => {
@@ -39,10 +40,12 @@ const requestRide = async (req, res) => {
     const { ride, drivers } = await rideService.createRideRequest(req.user._id, req.body, redisClient);
     const io = req.app.get('socketio');
 
+    logger.info(`[DISPATCH] Course ${ride._id} créée. ${drivers.length} chauffeurs trouvés.`);
+
+    // 🚀 CORRECTION CRITIQUE : Émission socket fiable aux chauffeurs
     drivers.forEach(driver => {
       io.to(driver._id.toString()).emit('new_ride_request', {
         rideId: ride._id,
-        // 🚀 CORRECTION CRITIQUE : On envoie l'objet entier pour que la carte du chauffeur puisse tracer la ligne !
         origin: ride.origin,       
         destination: ride.destination, 
         distance: ride.distance,
@@ -62,11 +65,9 @@ const cancelRide = async (req, res) => {
     const rideId = req.params.id || req.body.rideId; 
     const reason = req.body.reason || `Annulé par le ${req.user.role}`;
     
-    // 🚀 CORRECTION : On utilise la nouvelle fonction qui gère chauffeurs et passagers
     const ride = await rideService.cancelRideAction(rideId, req.user._id, req.user.role, reason);
     const io = req.app.get('socketio');
 
-    // On prévient l'autre partie
     if (req.user.role === 'rider' && ride.driver) {
        io.to(ride.driver.toString()).emit('ride_cancelled', { rideId });
     } else if (req.user.role === 'driver') {
@@ -154,17 +155,19 @@ const finalizeRide = async (req, res) => {
         message: 'Prix refusé'
       });
 
+      const maxDistance = 5000;
       const newDrivers = await userRepository.findAvailableDriversNear(
         result.ride.origin.coordinates,
-        5000, 
+        maxDistance, 
         null, 
         result.ride.rejectedDrivers
       );
 
+      logger.info(`[DISPATCH-RETRY] Recherche relancée pour ${result.ride._id}. ${newDrivers.length} chauffeurs trouvés.`);
+
       newDrivers.forEach(driver => {
         io.to(driver._id.toString()).emit('new_ride_request', {
           rideId: result.ride._id,
-          // 🚀 CORRECTION CRITIQUE ICI AUSSI !
           origin: result.ride.origin,
           destination: result.ride.destination,
           distance: result.ride.distance,

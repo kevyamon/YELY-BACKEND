@@ -1,4 +1,4 @@
-// src/models/Ride.js
+// backend/src/models/Ride.js
 // MODÈLE COURSE - Flux Gamifié & Sécurité Anti-Blocage (Iron Dome)
 // CSCSM Level: Bank Grade
 
@@ -16,14 +16,14 @@ const rideSchema = new mongoose.Schema({
     // Peut être null tant que la négo n'est pas finie
   },
   
-  // Géolocalisation
+  // Géolocalisation : Format GeoJSON strict exigé pour le bon dispatch
   origin: {
     address: { type: String, required: true },
-    coordinates: { type: [Number], required: true, index: '2dsphere' }
+    coordinates: { type: [Number], required: true, index: '2dsphere' } // [Longitude, Latitude]
   },
   destination: {
     address: { type: String, required: true },
-    coordinates: { type: [Number], required: true, index: '2dsphere' }
+    coordinates: { type: [Number], required: true, index: '2dsphere' } // [Longitude, Latitude]
   },
 
   // Le choix du véhicule par le client
@@ -36,7 +36,7 @@ const rideSchema = new mongoose.Schema({
   // Moteur de Prix & Négociation
   distance: { type: Number, required: true }, // En Km
   
-  // Les 3 options calculées par le serveur (Sécurité)
+  // Les options calculées par le serveur (Sécurité)
   priceOptions: [{
     label: { type: String, enum: ['ECO', 'STANDARD', 'PREMIUM'] },
     amount: { type: Number },

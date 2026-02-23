@@ -14,17 +14,20 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
     role: 'driver',
     isAvailable: true,
     isBanned: false,
-    'subscription.isActive': true, // 🛡️ Règle d'or financière garantie ici
+    'subscription.isActive': true, 
     currentLocation: {
       $near: {
-        $geometry: { type: "Point", coordinates: coordinates },
-        $maxDistance: maxDistanceMeters
+        $geometry: { 
+          type: "Point", 
+          coordinates: [parseFloat(coordinates[0]), parseFloat(coordinates[1])] 
+        },
+        $maxDistance: parseInt(maxDistanceMeters, 10)
       }
     }
   };
 
-  // 🛡️ Exclusion des chauffeurs ayant déjà refusé
-  if (rejectedDriverIds && rejectedDriverIds.length > 0) {
+  // Exclusion stricte des chauffeurs ayant déjà refusé
+  if (Array.isArray(rejectedDriverIds) && rejectedDriverIds.length > 0) {
     query._id = { $nin: rejectedDriverIds };
   }
 
@@ -33,22 +36,30 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
     query['vehicle.category'] = forfait;
   }
 
-  // SÉCURITÉ : On exclut le mot de passe et les données internes
-  return User.find(query).select('name phone vehicle currentLocation rating fcmToken -password -__v').limit(5);
+  // Projection securisee: on ne remonte que le strict necessaire pour le dispatch
+  return User.find(query)
+    .select('name phone vehicle currentLocation rating fcmToken -password -__v')
+    .limit(5);
 };
 
 /**
- * Recherche des chauffeurs actifs à partir d'une liste d'IDs (Redis Geo)
+ * Recherche des chauffeurs actifs à partir d'une liste d'IDs (Redis Geo Fallback)
  * Exclut les chauffeurs ayant déjà refusé la course
  */
 const findActiveDriversByIds = async (nearbyDriverIds, rejectedDriverIds = []) => {
-  return User.find({
-    _id: { $in: nearbyDriverIds, $nin: rejectedDriverIds },
+  const query = {
+    _id: { $in: nearbyDriverIds },
     role: 'driver',
     isAvailable: true,
     isBanned: false,
     'subscription.isActive': true
-  }).limit(5);
+  };
+
+  if (Array.isArray(rejectedDriverIds) && rejectedDriverIds.length > 0) {
+    query._id.$nin = rejectedDriverIds;
+  }
+
+  return User.find(query).limit(5);
 };
 
 /**

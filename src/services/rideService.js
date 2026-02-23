@@ -1,5 +1,5 @@
-// src/services/rideService.js
-// SERVICE COURSE - Concurrence fixée & Annulation Dynamique
+// backend/src/services/rideService.js
+// SERVICE COURSE - Concurrence fixée & Dispatch géospatial fiabilisé
 
 const mongoose = require('mongoose');
 const axios = require('axios');
@@ -101,34 +101,34 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       { delay: 90000, removeOnComplete: true }
     );
 
-    const nearbyDriverIds = await redisClient.georadius(
-      'active_drivers', 
-      origin.coordinates[0], 
-      origin.coordinates[1], 
-      5, 'km'
+    // 🚀 CORRECTION MAJEURE: On bypass Redis pour la recherche afin d'utiliser 
+    // l'index 2dsphere de MongoDB qui est la seule source de vérité 100% fiable.
+    const maxDistanceInMeters = 5000;
+    const drivers = await userRepository.findAvailableDriversNear(
+      origin.coordinates,
+      maxDistanceInMeters,
+      null, // Optionnel: filtrer par forfait ici si besoin plus tard
+      []
     );
 
-    const drivers = await userRepository.findActiveDriversByIds(nearbyDriverIds, []);
-
+    // Notifications push en mode asynchrone pour ne pas ralentir la requête
     drivers.forEach(driver => {
       sendPushNotification(
         driver._id,
-        'Nouvelle demande',
-        `Course de ${distance} km disponible.`,
+        'Nouvelle demande de course',
+        `Course de ${distance} km disponible à proximité.`,
         { rideId: ride._id.toString(), type: 'NEW_RIDE_REQUEST' }
       ).catch(err => logger.error(`[PUSH ERROR] ${err.message}`));
     });
 
     return { ride, drivers };
   } finally {
-    // 🚀 FIX CONCURRENCE: On supprime le verrou UNIQUEMENT si c'est nous qui l'avons créé !
     if (lockAcquired) {
       await redisClient.del(lockKey);
     }
   }
 };
 
-// 🚀 FIX ANNULATION: On autorise Chauffeurs ET Passagers à annuler
 const cancelRideAction = async (rideId, userId, userRole, reason) => {
   const query = { _id: rideId };
   if (userRole === 'rider') query.rider = userId;
@@ -295,7 +295,7 @@ const releaseStuckNegotiations = async (io, rideId) => {
 
 module.exports = {
   createRideRequest,
-  cancelRideAction, // 🚀 NOUVEAU NOM EXPORTÉ
+  cancelRideAction,
   lockRideForNegotiation,
   submitPriceProposal,
   finalizeProposal,
