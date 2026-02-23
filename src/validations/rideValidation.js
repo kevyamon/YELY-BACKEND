@@ -1,5 +1,5 @@
 // backend/src/validations/rideValidation.js
-// CONTRATS DE DONNÉES RIDE - Zod Strict (CORRIGÉ)
+// CONTRATS DE DONNÉES RIDE - Zod Flexible (Correction Blocage)
 // CSCSM Level: Bank Grade
 
 const { z } = require('zod');
@@ -18,25 +18,25 @@ const coordinatesSchema = z.tuple([
 const pointSchema = z.object({
   address: z.string({ required_error: "Adresse requise" }).min(5, "Adresse trop courte").max(200, "Adresse trop longue").trim(),
   coordinates: coordinatesSchema
-}).strict();
+}); // 🚀 .strict() SUPPRIMÉ ICI
 
 // 1. DEMANDE DE COURSE (Rider)
 const requestRideSchema = z.object({
   origin: pointSchema,
   destination: pointSchema,
   forfait: z.enum(['ECHO', 'STANDARD', 'VIP']).optional().default('STANDARD')
-}).strict();
+}); // 🚀 .strict() SUPPRIMÉ ICI
 
 // 2. ACTION GÉNÉRIQUE (ID seul)
 const rideActionSchema = z.object({
   rideId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'ID de course invalide')
-}).strict();
+}); // 🚀 .strict() SUPPRIMÉ ICI
 
 // 3. PROPOSITION DE PRIX (Driver)
 const submitPriceSchema = z.object({
   rideId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'ID de course invalide'),
-  amount: z.number().int().positive('Le montant doit être positif')
-}).strict();
+  amount: z.number().positive('Le montant doit être positif')
+}); // 🚀 .strict() SUPPRIMÉ ICI
 
 // 4. DÉCISION CLIENT (Rider)
 const finalizeRideSchema = z.object({
@@ -44,7 +44,7 @@ const finalizeRideSchema = z.object({
   decision: z.enum(['ACCEPTED', 'REJECTED'], {
     errorMap: () => ({ message: 'Décision invalide (ACCEPTED ou REJECTED)' })
   })
-}).strict();
+}); // 🚀 .strict() SUPPRIMÉ ICI
 
 module.exports = {
   requestRideSchema,
