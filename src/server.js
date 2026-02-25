@@ -10,6 +10,7 @@ const jwt = require('jsonwebtoken');
 const Redis = require('ioredis');
 const { z } = require('zod'); 
 const User = require('./models/User');
+const Ride = require('./models/Ride'); // Requis pour le relais télémétrique
 const startRideWorker = require('./workers/rideWorker');
 const { env } = require('./config/env');
 const logger = require('./config/logger');
@@ -111,6 +112,7 @@ io.on('connection', (socket) => {
 
     const parseResult = coordsSchema.safeParse(rawData);
     if (!parseResult.success) {
+      if (__DEV__) console.error('[SOCKET] Erreur validation position:', parseResult.error);
       return; 
     }
     
@@ -120,24 +122,55 @@ io.on('connection', (socket) => {
     if (!isAllowed) return;
 
     const now = Date.now();
-    const currentLat = parseFloat(coords.latitude);
-    const currentLng = parseFloat(coords.longitude);
+    const timeDiffSeconds = (now - socket.lastLocTime) / 1000;
+    
+    if (timeDiffSeconds > 0) { 
+      const [prevLng, prevLat] = socket.lastCoords;
+      const distanceKm = getDistKm(prevLat, prevLng, coords.latitude, coords.longitude);
+      const speedKmH = distanceKm / (timeDiffSeconds / 3600);
 
-    // DÉSACTIVATION DE L'ANTI-SPOOFING POUR LES TESTS (Fake GPS autorisé)
-    // On met à jour les coordonnées sans bloquer les téléportations rapides
+      if (speedKmH > 200) {
+        socket.spoofStrikes += 1;
+        if (socket.spoofStrikes >= 3) {
+          if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
+          socket.emit('force_disconnect', { reason: 'SPOOFING_DETECTED' });
+          socket.disconnect(true);
+          return;
+        }
+        socket.lastLocTime = now; 
+        return; 
+      } else {
+        socket.spoofStrikes = 0;
+      }
+    }
+
     socket.lastLocTime = now;
-    socket.lastCoords = [currentLng, currentLat];
+    socket.lastCoords = [coords.longitude, coords.latitude];
 
     try {
       await User.updateOne({ _id: user._id }, {
-        currentLocation: { type: 'Point', coordinates: [currentLng, currentLat] },
+        currentLocation: { type: 'Point', coordinates: [coords.longitude, coords.latitude] },
         lastLocationAt: new Date()
       });
 
       if (user.role === 'driver') {
-        await redis.geoadd('active_drivers', currentLng, currentLat, user._id.toString());
+        await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());
         await redis.expire('active_drivers', 120);
-        logger.info(`[GPS] Position Chauffeur ${user._id} mise à jour à Maféré.`);
+
+        // RELAIS TÉLÉMÉTRIQUE : Si le chauffeur est en course, on envoie la position au client
+        const activeRide = await Ride.findOne({
+          driver: user._id,
+          status: { $in: ['accepted', 'ongoing'] }
+        }).select('rider').lean();
+
+        if (activeRide) {
+          io.to(activeRide.rider.toString()).emit('driver_location_update', {
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            heading: coords.heading || 0,
+            speed: coords.speed || 0
+          });
+        }
       }
     } catch (error) {
       logger.error(`[SOCKET LOC] ${user._id}: ${error.message}`);
