@@ -87,7 +87,8 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
 
     if (distance < 0.1) throw new AppError('Distance invalide.', 400);
 
-    const priceOptions = await pricingService.generatePriceOptions(distance);
+    // CORRECTION CRITIQUE : Paramétrage correct du moteur de prix
+    const pricingResult = await pricingService.generatePriceOptions(originCoords, destCoords, distance);
 
     const ride = await Ride.create({
       rider: riderId,
@@ -95,7 +96,7 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       destination: { ...destination, coordinates: destCoords },
       distance,
       forfait: forfait || 'STANDARD',
-      priceOptions,
+      priceOptions: pricingResult.options, // On extrait uniquement le tableau d'options pour MongoDB
       status: 'searching',
       rejectedDrivers: []
     });
@@ -152,7 +153,6 @@ const cancelRideAction = async (rideId, userId, userRole, reason) => {
   return ride;
 };
 
-// GARANTIE D'ATOMICITE STRICTE MONGODB VIA status: 'searching'
 const lockRideForNegotiation = async (rideId, driverId) => {
   const ride = await Ride.findOneAndUpdate(
     { _id: rideId, status: 'searching' },
@@ -283,7 +283,6 @@ const cancelSearchTimeout = async (io, rideId) => {
       message: "Aucun chauffeur n'est disponible pour le moment."
     });
     
-    // CORRECTION : On avertit tous les chauffeurs de fermer leur modale fantôme
     io.to('drivers').emit('ride_taken_by_other', { rideId });
   }
 };
