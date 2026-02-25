@@ -1,6 +1,3 @@
-// backend/src/services/rideService.js
-// SERVICE COURSE - Concurrence fixée, Dispatch & Idempotence Stricte
-
 const mongoose = require('mongoose');
 const axios = require('axios');
 const { Queue } = require('bullmq');
@@ -66,13 +63,11 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       status: { $in: ['searching', 'negotiating', 'accepted', 'ongoing'] }
     });
     
-    // SÉCURITÉ : LOGIQUE D'IDEMPOTENCE (ZÉRO SPAM)
+    // SECURITE : LOGIQUE D'IDEMPOTENCE (ZERO SPAM)
     if (existingRide) {
       if (['accepted', 'ongoing'].includes(existingRide.status)) {
         throw new AppError('Vous avez déjà une course active. Veuillez l\'annuler ou la terminer d\'abord.', 409);
       } else {
-        // La course cherche encore. On ne recrée rien, on renvoie l'existant.
-        // Cela restaure l'UI du client s'il avait relancé l'app, sans saturer la DB.
         logger.info(`[DISPATCH] Requête interceptée : Renvoi de la course en cours (Idempotence) pour le passager ${riderId}`);
         return { ride: existingRide, drivers: [] }; 
       }
@@ -156,6 +151,47 @@ const cancelRideAction = async (rideId, userId, userRole, reason) => {
   }
 
   return ride;
+};
+
+const emergencyCancelUserRides = async (userId) => {
+  const activeRides = await Ride.find({
+    rider: userId,
+    status: { $in: ['searching', 'negotiating', 'accepted', 'ongoing'] }
+  });
+
+  if (activeRides.length === 0) {
+    return { count: 0, message: 'Aucune course bloquée trouvée.' };
+  }
+
+  const driverIdsToFree = [];
+  const rideIdsToCancel = [];
+
+  for (const ride of activeRides) {
+    rideIdsToCancel.push(ride._id);
+    if (ride.driver) {
+      driverIdsToFree.push(ride.driver);
+    }
+  }
+
+  await Ride.updateMany(
+    { _id: { $in: rideIdsToCancel } },
+    { 
+      $set: { 
+        status: 'cancelled', 
+        cancellationReason: 'Annulation système (Nettoyage d\'urgence)' 
+      } 
+    }
+  );
+
+  for (const driverId of driverIdsToFree) {
+    await userRepository.updateDriverAvailability(driverId, true);
+  }
+
+  return { 
+    count: activeRides.length, 
+    ridesCleared: rideIdsToCancel, 
+    driversFreed: driverIdsToFree 
+  };
 };
 
 const lockRideForNegotiation = async (rideId, driverId) => {
@@ -309,6 +345,7 @@ const releaseStuckNegotiations = async (io, rideId) => {
 module.exports = {
   createRideRequest,
   cancelRideAction,
+  emergencyCancelUserRides,
   lockRideForNegotiation,
   submitPriceProposal,
   finalizeProposal,

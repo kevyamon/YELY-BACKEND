@@ -1,7 +1,3 @@
-// backend/src/controllers/rideController.js
-// CONTRÔLEUR COURSE - Flux Gamifié, Tracé GPS Réparé & Annulation Multi-Rôle
-// CSCSM Level: Bank Grade
-
 const rideService = require('../services/rideService');
 const userRepository = require('../repositories/userRepository');
 const User = require('../models/User');
@@ -42,7 +38,7 @@ const requestRide = async (req, res) => {
 
     logger.info(`[DISPATCH] Course ${ride._id} créée. ${drivers.length} chauffeurs trouvés.`);
 
-    // 🚀 CORRECTION CRITIQUE : Émission socket fiable aux chauffeurs
+    // CORRECTION CRITIQUE : Émission socket fiable aux chauffeurs
     drivers.forEach(driver => {
       io.to(driver._id.toString()).emit('new_ride_request', {
         rideId: ride._id,
@@ -77,6 +73,25 @@ const cancelRide = async (req, res) => {
     io.to('drivers').emit('ride_taken_by_other', { rideId });
 
     return successResponse(res, { status: 'cancelled' }, 'Course annulée avec succès');
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500);
+  }
+};
+
+const emergencyCancel = async (req, res) => {
+  try {
+    const result = await rideService.emergencyCancelUserRides(req.user._id);
+    const io = req.app.get('socketio');
+
+    if (result.driversFreed && result.driversFreed.length > 0) {
+      result.driversFreed.forEach(driverId => {
+        io.to(driverId.toString()).emit('ride_cancelled', {
+          message: 'La course a été annulée suite à une réinitialisation du client.'
+        });
+      });
+    }
+
+    return successResponse(res, result, 'Base de données nettoyée avec succès');
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -225,4 +240,4 @@ const completeRide = async (req, res) => {
   }
 };
 
-module.exports = { requestRide, cancelRide, lockRide, submitPrice, finalizeRide, startRide, completeRide, estimateRide };
+module.exports = { requestRide, cancelRide, emergencyCancel, lockRide, submitPrice, finalizeRide, startRide, completeRide, estimateRide };

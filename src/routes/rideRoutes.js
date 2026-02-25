@@ -1,6 +1,3 @@
-// src/routes/rideRoutes.js
-// ROUTES COURSE - Securisees et completes
-
 const express = require('express');
 const router = express.Router();
 const rideController = require('../controllers/rideController');
@@ -15,6 +12,7 @@ const {
 
 // ROUTES DE LECTURE & ANNULATION
 router.get('/estimate', protect, authorize('rider', 'superadmin'), rideController.estimateRide);
+router.post('/emergency-cancel', protect, authorize('rider', 'superadmin'), rideController.emergencyCancel);
 router.put('/:id/cancel', protect, authorize('rider', 'driver', 'superadmin'), rideController.cancelRide);
 
 // ROUTES D'ACTION AVEC VALIDATION STRICTE DU BODY
