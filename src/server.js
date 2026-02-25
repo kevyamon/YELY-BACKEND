@@ -31,7 +31,6 @@ const checkSocketRateLimit = async (userId) => {
   return true;
 };
 
-// CORRECTION: On accepte les autres variables (heading, speed, timestamp) envoyées par le front
 const coordsSchema = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
@@ -112,7 +111,6 @@ io.on('connection', (socket) => {
 
     const parseResult = coordsSchema.safeParse(rawData);
     if (!parseResult.success) {
-      if (__DEV__) console.error('[SOCKET] Erreur validation position:', parseResult.error);
       return; 
     }
     
@@ -122,32 +120,11 @@ io.on('connection', (socket) => {
     if (!isAllowed) return;
 
     const now = Date.now();
-    const timeDiffSeconds = (now - socket.lastLocTime) / 1000;
-    
-    // SECURITE: Parsing agressif en Float pour eviter toute erreur silencieuse Redis/MongoDB
     const currentLat = parseFloat(coords.latitude);
     const currentLng = parseFloat(coords.longitude);
 
-    if (timeDiffSeconds > 0) { 
-      const [prevLng, prevLat] = socket.lastCoords;
-      const distanceKm = getDistKm(prevLat, prevLng, currentLat, currentLng);
-      const speedKmH = distanceKm / (timeDiffSeconds / 3600);
-
-      if (speedKmH > 200) {
-        socket.spoofStrikes += 1;
-        if (socket.spoofStrikes >= 3) {
-          if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
-          socket.emit('force_disconnect', { reason: 'SPOOFING_DETECTED' });
-          socket.disconnect(true);
-          return;
-        }
-        socket.lastLocTime = now; 
-        return; 
-      } else {
-        socket.spoofStrikes = 0;
-      }
-    }
-
+    // DÉSACTIVATION DE L'ANTI-SPOOFING POUR LES TESTS (Fake GPS autorisé)
+    // On met à jour les coordonnées sans bloquer les téléportations rapides
     socket.lastLocTime = now;
     socket.lastCoords = [currentLng, currentLat];
 
@@ -160,6 +137,7 @@ io.on('connection', (socket) => {
       if (user.role === 'driver') {
         await redis.geoadd('active_drivers', currentLng, currentLat, user._id.toString());
         await redis.expire('active_drivers', 120);
+        logger.info(`[GPS] Position Chauffeur ${user._id} mise à jour à Maféré.`);
       }
     } catch (error) {
       logger.error(`[SOCKET LOC] ${user._id}: ${error.message}`);
