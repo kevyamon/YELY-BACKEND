@@ -189,7 +189,7 @@ const submitPriceProposal = async (rideId, driverId, selectedAmount) => {
   if (!isValidOption) throw new AppError('Montant non autorisé.', 400);
 
   ride.proposedPrice = selectedAmount;
-  await ride.save();
+  await ride.save(); 
   return ride;
 };
 
