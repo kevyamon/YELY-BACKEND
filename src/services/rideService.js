@@ -55,7 +55,6 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
   let lockAcquired = false;
   
   try {
-    // FIX CONCURRENCE: On s'assure qu'on a bien le verrou avant de continuer
     const isLocked = await redisClient.set(lockKey, '1', 'NX', 'EX', 10);
     if (!isLocked) {
       throw new AppError('Traitement en cours, veuillez patienter.', 429);
@@ -79,7 +78,6 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
 
     const { origin, destination, forfait } = rideData; 
     
-    // VERIFICATION STRICTE DES COORDONNEES
     const originCoords = [parseFloat(origin.coordinates[0]), parseFloat(origin.coordinates[1])];
     const destCoords = [parseFloat(destination.coordinates[0]), parseFloat(destination.coordinates[1])];
     
@@ -108,8 +106,6 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       { delay: 90000, removeOnComplete: true }
     );
 
-    // CORRECTION MAJEURE: On bypass Redis pour la recherche afin d'utiliser 
-    // l'index 2dsphere de MongoDB qui est la seule source de vérité 100% fiable.
     const maxDistanceInMeters = 5000;
     const drivers = await userRepository.findAvailableDriversNear(
       originCoords,
@@ -120,7 +116,6 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
     
     logger.info(`[DISPATCH] ${drivers.length} chauffeurs trouves dans un rayon de ${maxDistanceInMeters}m.`);
 
-    // Notifications push en mode asynchrone pour ne pas ralentir la requête
     drivers.forEach(driver => {
       sendPushNotification(
         driver._id,
@@ -157,6 +152,7 @@ const cancelRideAction = async (rideId, userId, userRole, reason) => {
   return ride;
 };
 
+// GARANTIE D'ATOMICITE STRICTE MONGODB VIA status: 'searching'
 const lockRideForNegotiation = async (rideId, driverId) => {
   const ride = await Ride.findOneAndUpdate(
     { _id: rideId, status: 'searching' },
@@ -170,7 +166,7 @@ const lockRideForNegotiation = async (rideId, driverId) => {
     { new: true }
   );
 
-  if (!ride) throw new AppError('Course indisponible.', 409);
+  if (!ride) throw new AppError('Course indisponible ou déjà prise.', 409);
 
   await cleanupQueue.add(
     'check-stuck-negotiation', 
@@ -189,7 +185,7 @@ const submitPriceProposal = async (rideId, driverId, selectedAmount) => {
   if (!isValidOption) throw new AppError('Montant non autorisé.', 400);
 
   ride.proposedPrice = selectedAmount;
-  await ride.save(); 
+  await ride.save();
   return ride;
 };
 
@@ -282,9 +278,13 @@ const cancelSearchTimeout = async (io, rideId) => {
     ride.status = 'cancelled';
     ride.cancellationReason = 'Temps de recherche expiré (1m30)';
     await ride.save();
+    
     io.to(ride.rider.toString()).emit('search_timeout', {
       message: "Aucun chauffeur n'est disponible pour le moment."
     });
+    
+    // CORRECTION : On avertit tous les chauffeurs de fermer leur modale fantôme
+    io.to('drivers').emit('ride_taken_by_other', { rideId });
   }
 };
 
