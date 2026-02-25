@@ -10,20 +10,24 @@ const User = require('../models/User');
  * Permet aussi d'exclure les chauffeurs ayant déjà refusé la course.
  */
 const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait, rejectedDriverIds = []) => {
+  // SECURITE: Formatage strict [longitude, latitude] en Float pour MongoDB 2dsphere
+  const safeLng = parseFloat(coordinates[0]);
+  const safeLat = parseFloat(coordinates[1]);
+
   const query = {
     role: 'driver',
     isAvailable: true,
     isBanned: false,
-    // 🛡️ 'subscription.isActive': true, ---> DÉSACTIVÉ POUR LES TESTS (Phase 9)
+    // 'subscription.isActive': true, ---> DESACTIVE POUR LES TESTS (Phase 9)
     currentLocation: {
       $near: {
-        $geometry: { type: "Point", coordinates: coordinates },
+        $geometry: { type: "Point", coordinates: [safeLng, safeLat] },
         $maxDistance: maxDistanceMeters
       }
     }
   };
 
-  // 🛡️ Exclusion des chauffeurs ayant déjà refusé
+  // Exclusion des chauffeurs ayant déjà refusé
   if (rejectedDriverIds && rejectedDriverIds.length > 0) {
     query._id = { $nin: rejectedDriverIds };
   }
@@ -33,7 +37,7 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
     query['vehicle.category'] = forfait;
   }
 
-  // SÉCURITÉ : Uniquement des inclusions pour éviter le crash MongoDB (exclusion de password implicite)
+  // SECURITE : Uniquement des inclusions pour éviter le crash MongoDB (exclusion de password implicite)
   return User.find(query).select('name phone vehicle currentLocation rating fcmToken').limit(5);
 };
 
@@ -47,7 +51,7 @@ const findActiveDriversByIds = async (nearbyDriverIds, rejectedDriverIds = []) =
     role: 'driver',
     isAvailable: true,
     isBanned: false
-    // 🛡️ 'subscription.isActive': true ---> DÉSACTIVÉ ICI AUSSI POUR LES TESTS
+    // 'subscription.isActive': true ---> DESACTIVE ICI AUSSI POUR LES TESTS
   }).select('name phone vehicle currentLocation rating fcmToken').limit(5);
 };
 

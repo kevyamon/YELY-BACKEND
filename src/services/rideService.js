@@ -55,7 +55,7 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
   let lockAcquired = false;
   
   try {
-    // 🚀 FIX CONCURRENCE: On s'assure qu'on a bien le verrou avant de continuer
+    // FIX CONCURRENCE: On s'assure qu'on a bien le verrou avant de continuer
     const isLocked = await redisClient.set(lockKey, '1', 'NX', 'EX', 10);
     if (!isLocked) {
       throw new AppError('Traitement en cours, veuillez patienter.', 429);
@@ -78,7 +78,14 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
     }
 
     const { origin, destination, forfait } = rideData; 
-    const distance = await getRouteDistance(origin.coordinates, destination.coordinates);
+    
+    // VERIFICATION STRICTE DES COORDONNEES
+    const originCoords = [parseFloat(origin.coordinates[0]), parseFloat(origin.coordinates[1])];
+    const destCoords = [parseFloat(destination.coordinates[0]), parseFloat(destination.coordinates[1])];
+    
+    logger.info(`[DISPATCH] Nouvelle demande. Recherche autour de Lng: ${originCoords[0]}, Lat: ${originCoords[1]}`);
+
+    const distance = await getRouteDistance(originCoords, destCoords);
 
     if (distance < 0.1) throw new AppError('Distance invalide.', 400);
 
@@ -86,8 +93,8 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
 
     const ride = await Ride.create({
       rider: riderId,
-      origin,
-      destination,
+      origin: { ...origin, coordinates: originCoords },
+      destination: { ...destination, coordinates: destCoords },
       distance,
       forfait: forfait || 'STANDARD',
       priceOptions,
@@ -101,15 +108,17 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       { delay: 90000, removeOnComplete: true }
     );
 
-    // 🚀 CORRECTION MAJEURE: On bypass Redis pour la recherche afin d'utiliser 
+    // CORRECTION MAJEURE: On bypass Redis pour la recherche afin d'utiliser 
     // l'index 2dsphere de MongoDB qui est la seule source de vérité 100% fiable.
     const maxDistanceInMeters = 5000;
     const drivers = await userRepository.findAvailableDriversNear(
-      origin.coordinates,
+      originCoords,
       maxDistanceInMeters,
-      null, // Optionnel: filtrer par forfait ici si besoin plus tard
+      null, 
       []
     );
+    
+    logger.info(`[DISPATCH] ${drivers.length} chauffeurs trouves dans un rayon de ${maxDistanceInMeters}m.`);
 
     // Notifications push en mode asynchrone pour ne pas ralentir la requête
     drivers.forEach(driver => {

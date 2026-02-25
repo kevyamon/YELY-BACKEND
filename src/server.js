@@ -31,7 +31,7 @@ const checkSocketRateLimit = async (userId) => {
   return true;
 };
 
-// 🚀 CORRECTION : On accepte les autres variables (heading, speed, timestamp) envoyées par le front
+// CORRECTION: On accepte les autres variables (heading, speed, timestamp) envoyées par le front
 const coordsSchema = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
@@ -112,7 +112,6 @@ io.on('connection', (socket) => {
 
     const parseResult = coordsSchema.safeParse(rawData);
     if (!parseResult.success) {
-      // Pour débugger si jamais ça bloque encore
       if (__DEV__) console.error('[SOCKET] Erreur validation position:', parseResult.error);
       return; 
     }
@@ -125,9 +124,13 @@ io.on('connection', (socket) => {
     const now = Date.now();
     const timeDiffSeconds = (now - socket.lastLocTime) / 1000;
     
+    // SECURITE: Parsing agressif en Float pour eviter toute erreur silencieuse Redis/MongoDB
+    const currentLat = parseFloat(coords.latitude);
+    const currentLng = parseFloat(coords.longitude);
+
     if (timeDiffSeconds > 0) { 
       const [prevLng, prevLat] = socket.lastCoords;
-      const distanceKm = getDistKm(prevLat, prevLng, coords.latitude, coords.longitude);
+      const distanceKm = getDistKm(prevLat, prevLng, currentLat, currentLng);
       const speedKmH = distanceKm / (timeDiffSeconds / 3600);
 
       if (speedKmH > 200) {
@@ -146,16 +149,16 @@ io.on('connection', (socket) => {
     }
 
     socket.lastLocTime = now;
-    socket.lastCoords = [coords.longitude, coords.latitude];
+    socket.lastCoords = [currentLng, currentLat];
 
     try {
       await User.updateOne({ _id: user._id }, {
-        currentLocation: { type: 'Point', coordinates: [coords.longitude, coords.latitude] },
+        currentLocation: { type: 'Point', coordinates: [currentLng, currentLat] },
         lastLocationAt: new Date()
       });
 
       if (user.role === 'driver') {
-        await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());
+        await redis.geoadd('active_drivers', currentLng, currentLat, user._id.toString());
         await redis.expire('active_drivers', 120);
       }
     } catch (error) {
