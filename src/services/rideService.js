@@ -1,5 +1,5 @@
 // backend/src/services/rideService.js
-// SERVICE COURSE - Concurrence fixée & Dispatch géospatial fiabilisé
+// SERVICE COURSE - Concurrence fixée, Dispatch & Auto-Guérison (Self-Healing)
 
 const mongoose = require('mongoose');
 const axios = require('axios');
@@ -66,13 +66,18 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       status: { $in: ['searching', 'negotiating', 'accepted', 'ongoing'] }
     });
     
+    // MÉCANISME D'AUTO-GUÉRISON (SELF-HEALING)
     if (existingRide) {
-      if (['searching', 'negotiating'].includes(existingRide.status)) {
-        existingRide.status = 'cancelled';
-        existingRide.cancellationReason = 'Annulation automatique par nouvelle requête';
-        await existingRide.save();
-      } else {
-        throw new AppError('Vous avez déjà une course active en cours.', 409);
+      logger.warn(`[DISPATCH] Désynchronisation détectée. Annulation de la course fantôme ${existingRide._id}`);
+      
+      existingRide.status = 'cancelled';
+      existingRide.cancellationReason = 'Nouvelle requête prioritaire (Désynchronisation UI)';
+      await existingRide.save();
+
+      // Si un chauffeur était bloqué sur cette ancienne course, on le libère
+      if (existingRide.driver) {
+        await userRepository.updateDriverAvailability(existingRide.driver, true);
+        logger.info(`[DISPATCH] Chauffeur ${existingRide.driver} libéré de la course fantôme.`);
       }
     }
 
@@ -87,7 +92,6 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
 
     if (distance < 0.1) throw new AppError('Distance invalide.', 400);
 
-    // CORRECTION CRITIQUE : Paramétrage correct du moteur de prix
     const pricingResult = await pricingService.generatePriceOptions(originCoords, destCoords, distance);
 
     const ride = await Ride.create({
@@ -96,7 +100,7 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       destination: { ...destination, coordinates: destCoords },
       distance,
       forfait: forfait || 'STANDARD',
-      priceOptions: pricingResult.options, // On extrait uniquement le tableau d'options pour MongoDB
+      priceOptions: pricingResult.options, 
       status: 'searching',
       rejectedDrivers: []
     });
@@ -147,8 +151,13 @@ const cancelRideAction = async (rideId, userId, userRole, reason) => {
   }
 
   ride.status = 'cancelled';
-  ride.cancellationReason = reason || 'Annulée';
+  ride.cancellationReason = reason || 'Annulée manuellement';
   await ride.save();
+
+  // LIBÉRATION GARANTIE DU CHAUFFEUR
+  if (ride.driver) {
+    await userRepository.updateDriverAvailability(ride.driver, true);
+  }
 
   return ride;
 };
