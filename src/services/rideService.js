@@ -1,5 +1,5 @@
 // backend/src/services/rideService.js
-// SERVICE COURSE - Concurrence fixée, Dispatch & Auto-Guérison (Self-Healing)
+// SERVICE COURSE - Concurrence fixée, Dispatch & Idempotence Stricte
 
 const mongoose = require('mongoose');
 const axios = require('axios');
@@ -66,18 +66,15 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       status: { $in: ['searching', 'negotiating', 'accepted', 'ongoing'] }
     });
     
-    // MÉCANISME D'AUTO-GUÉRISON (SELF-HEALING)
+    // SÉCURITÉ : LOGIQUE D'IDEMPOTENCE (ZÉRO SPAM)
     if (existingRide) {
-      logger.warn(`[DISPATCH] Désynchronisation détectée. Annulation de la course fantôme ${existingRide._id}`);
-      
-      existingRide.status = 'cancelled';
-      existingRide.cancellationReason = 'Nouvelle requête prioritaire (Désynchronisation UI)';
-      await existingRide.save();
-
-      // Si un chauffeur était bloqué sur cette ancienne course, on le libère
-      if (existingRide.driver) {
-        await userRepository.updateDriverAvailability(existingRide.driver, true);
-        logger.info(`[DISPATCH] Chauffeur ${existingRide.driver} libéré de la course fantôme.`);
+      if (['accepted', 'ongoing'].includes(existingRide.status)) {
+        throw new AppError('Vous avez déjà une course active. Veuillez l\'annuler ou la terminer d\'abord.', 409);
+      } else {
+        // La course cherche encore. On ne recrée rien, on renvoie l'existant.
+        // Cela restaure l'UI du client s'il avait relancé l'app, sans saturer la DB.
+        logger.info(`[DISPATCH] Requête interceptée : Renvoi de la course en cours (Idempotence) pour le passager ${riderId}`);
+        return { ride: existingRide, drivers: [] }; 
       }
     }
 
@@ -154,7 +151,6 @@ const cancelRideAction = async (rideId, userId, userRole, reason) => {
   ride.cancellationReason = reason || 'Annulée manuellement';
   await ride.save();
 
-  // LIBÉRATION GARANTIE DU CHAUFFEUR
   if (ride.driver) {
     await userRepository.updateDriverAvailability(ride.driver, true);
   }
