@@ -39,7 +39,7 @@ const getRouteDistance = async (originCoords, destCoords) => {
       const distanceMeters = response.data.routes[0].distance;
       return parseFloat((distanceMeters / 1000).toFixed(2));
     }
-    throw new Error('Itinéraire introuvable.');
+    throw new Error('Itineraire introuvable.');
   } catch (error) {
     logger.warn(`[ROUTING] Fallback active: ${error.message}`);
     const directDist = calculateHaversineDistance(originCoords, destCoords);
@@ -275,9 +275,14 @@ const startRideSession = async (driverId, rideId) => {
     throw new AppError('Course introuvable ou non assignee a ce chauffeur.', 404);
   }
   
+  if (ride.status === 'ongoing') {
+    logger.info(`[IDEMPOTENCE] Course ${rideId} deja demarree. Renvoi silencieux du succes.`);
+    return ride;
+  }
+
   if (ride.status !== 'accepted') {
-    logger.warn(`[SECURITY] Tentative de demarrage de course illicite. Driver: ${driverId}, Ride: ${rideId}, Status: ${ride.status}`);
-    throw new AppError(`Transition illegale. Le statut actuel de la course est '${ride.status}'.`, 403);
+    logger.warn(`[SECURITY] Tentative de demarrage de course invalide. Driver: ${driverId}, Ride: ${rideId}, Status: ${ride.status}`);
+    throw new AppError("Action impossible a ce stade de la course.", 403);
   }
 
   ride.status = 'ongoing';
@@ -300,9 +305,15 @@ const completeRideSession = async (driverId, rideId) => {
       throw new AppError('Course introuvable ou non assignee a ce chauffeur.', 404);
     }
     
+    if (ride.status === 'completed') {
+      logger.info(`[IDEMPOTENCE] Course ${rideId} deja cloturee. Renvoi silencieux du succes.`);
+      await session.commitTransaction();
+      return ride;
+    }
+
     if (ride.status !== 'ongoing') {
-      logger.warn(`[SECURITY] Tentative de cloture de course illicite. Driver: ${driverId}, Ride: ${rideId}, Status: ${ride.status}`);
-      throw new AppError(`Transition illegale. La course doit etre 'ongoing' pour etre terminee.`, 403);
+      logger.warn(`[SECURITY] Tentative de cloture de course invalide. Driver: ${driverId}, Ride: ${rideId}, Status: ${ride.status}`);
+      throw new AppError("Action impossible a ce stade de la course.", 403);
     }
 
     ride.status = 'completed';
