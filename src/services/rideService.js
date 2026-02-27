@@ -41,7 +41,7 @@ const getRouteDistance = async (originCoords, destCoords) => {
     }
     throw new Error('Itinéraire introuvable.');
   } catch (error) {
-    logger.warn(`[ROUTING] Fallback activé: ${error.message}`);
+    logger.warn(`[ROUTING] Fallback active: ${error.message}`);
     const directDist = calculateHaversineDistance(originCoords, destCoords);
     return parseFloat((directDist * 1.3).toFixed(2));
   }
@@ -63,12 +63,11 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       status: { $in: ['searching', 'negotiating', 'accepted', 'ongoing'] }
     });
     
-    // SECURITE : LOGIQUE D'IDEMPOTENCE (ZERO SPAM)
     if (existingRide) {
       if (['accepted', 'ongoing'].includes(existingRide.status)) {
-        throw new AppError('Vous avez déjà une course active. Veuillez l\'annuler ou la terminer d\'abord.', 409);
+        throw new AppError('Vous avez deja une course active. Veuillez l\'annuler ou la terminer d\'abord.', 409);
       } else {
-        logger.info(`[DISPATCH] Requête interceptée : Renvoi de la course en cours (Idempotence) pour le passager ${riderId}`);
+        logger.info(`[DISPATCH] Requete interceptee : Renvoi de la course en cours (Idempotence) pour le passager ${riderId}`);
         return { ride: existingRide, drivers: [] }; 
       }
     }
@@ -117,7 +116,7 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       sendPushNotification(
         driver._id,
         'Nouvelle demande de course',
-        `Course de ${distance} km disponible à proximité.`,
+        `Course de ${distance} km disponible a proximite.`,
         { rideId: ride._id.toString(), type: 'NEW_RIDE_REQUEST' }
       ).catch(err => logger.error(`[PUSH ERROR] ${err.message}`));
     });
@@ -136,14 +135,14 @@ const cancelRideAction = async (rideId, userId, userRole, reason) => {
   else if (userRole === 'driver') query.driver = userId;
 
   const ride = await Ride.findOne(query);
-  if (!ride) throw new AppError('Course introuvable ou accès refusé.', 404);
+  if (!ride) throw new AppError('Course introuvable ou acces refuse.', 404);
   
   if (['completed', 'cancelled'].includes(ride.status)) {
-    throw new AppError('Course déjà terminée ou annulée.', 400);
+    throw new AppError('Course deja terminee ou annulee.', 400);
   }
 
   ride.status = 'cancelled';
-  ride.cancellationReason = reason || 'Annulée manuellement';
+  ride.cancellationReason = reason || 'Annulee manuellement';
   await ride.save();
 
   if (ride.driver) {
@@ -160,7 +159,7 @@ const emergencyCancelUserRides = async (userId) => {
   });
 
   if (activeRides.length === 0) {
-    return { count: 0, message: 'Aucune course bloquée trouvée.' };
+    return { count: 0, message: 'Aucune course bloquee trouvee.' };
   }
 
   const driverIdsToFree = [];
@@ -178,7 +177,7 @@ const emergencyCancelUserRides = async (userId) => {
     { 
       $set: { 
         status: 'cancelled', 
-        cancellationReason: 'Annulation système (Nettoyage d\'urgence)' 
+        cancellationReason: 'Annulation systeme (Nettoyage d\'urgence)' 
       } 
     }
   );
@@ -207,7 +206,7 @@ const lockRideForNegotiation = async (rideId, driverId) => {
     { new: true }
   );
 
-  if (!ride) throw new AppError('Course indisponible ou déjà prise.', 409);
+  if (!ride) throw new AppError('Course indisponible ou deja prise.', 409);
 
   await cleanupQueue.add(
     'check-stuck-negotiation', 
@@ -223,7 +222,7 @@ const submitPriceProposal = async (rideId, driverId, selectedAmount) => {
   if (!ride) throw new AppError('Session invalide.', 404);
 
   const isValidOption = ride.priceOptions.some(opt => opt.amount === selectedAmount);
-  if (!isValidOption) throw new AppError('Montant non autorisé.', 400);
+  if (!isValidOption) throw new AppError('Montant non autorise.', 400);
 
   ride.proposedPrice = selectedAmount;
   await ride.save();
@@ -270,28 +269,45 @@ const finalizeProposal = async (rideId, riderId, decision) => {
 };
 
 const startRideSession = async (driverId, rideId) => {
-  const ride = await Ride.findOneAndUpdate(
-    { _id: rideId, driver: driverId, status: 'accepted' }, 
-    { $set: { status: 'ongoing', startedAt: new Date() } }, 
-    { new: true }
-  );
-  if (!ride) throw new AppError('Validation impossible.', 400);
+  const ride = await Ride.findOne({ _id: rideId, driver: driverId });
+  
+  if (!ride) {
+    throw new AppError('Course introuvable ou non assignee a ce chauffeur.', 404);
+  }
+  
+  if (ride.status !== 'accepted') {
+    logger.warn(`[SECURITY] Tentative de demarrage de course illicite. Driver: ${driverId}, Ride: ${rideId}, Status: ${ride.status}`);
+    throw new AppError(`Transition illegale. Le statut actuel de la course est '${ride.status}'.`, 403);
+  }
+
+  ride.status = 'ongoing';
+  ride.startedAt = new Date();
+  await ride.save();
+  
   return ride;
 };
 
 const completeRideSession = async (driverId, rideId) => {
   const session = await mongoose.startSession();
   let result;
+  
   try {
     session.startTransaction();
     
-    const ride = await Ride.findOneAndUpdate(
-      { _id: rideId, driver: driverId, status: 'ongoing' }, 
-      { $set: { status: 'completed', completedAt: new Date() } }, 
-      { new: true, session }
-    );
+    const ride = await Ride.findOne({ _id: rideId, driver: driverId }).session(session);
     
-    if (!ride) throw new AppError('Validation impossible.', 400);
+    if (!ride) {
+      throw new AppError('Course introuvable ou non assignee a ce chauffeur.', 404);
+    }
+    
+    if (ride.status !== 'ongoing') {
+      logger.warn(`[SECURITY] Tentative de cloture de course illicite. Driver: ${driverId}, Ride: ${rideId}, Status: ${ride.status}`);
+      throw new AppError(`Transition illegale. La course doit etre 'ongoing' pour etre terminee.`, 403);
+    }
+
+    ride.status = 'completed';
+    ride.completedAt = new Date();
+    await ride.save({ session });
     
     await userRepository.updateDriverAvailability(driverId, true, session);
     
@@ -317,7 +333,7 @@ const cancelSearchTimeout = async (io, rideId) => {
   const ride = await Ride.findOne({ _id: rideId, status: 'searching' });
   if (ride) {
     ride.status = 'cancelled';
-    ride.cancellationReason = 'Temps de recherche expiré (1m30)';
+    ride.cancellationReason = 'Temps de recherche expire (1m30)';
     await ride.save();
     
     io.to(ride.rider.toString()).emit('search_timeout', {

@@ -10,7 +10,7 @@ const estimateRide = async (req, res) => {
     const { pickupLat, pickupLng, dropoffLat, dropoffLng } = req.query;
     
     if (!pickupLat || !pickupLng || !dropoffLat || !dropoffLng) {
-      throw new AppError('Coordonnées GPS manquantes pour l\'estimation', 400);
+      throw new AppError('Coordonnees GPS manquantes pour l\'estimation', 400);
     }
 
     const origin = [parseFloat(pickupLng), parseFloat(pickupLat)];
@@ -24,7 +24,7 @@ const estimateRide = async (req, res) => {
       { id: '3', type: 'vip', name: 'VIP', duration: Math.max(1, Math.ceil(distance * 1.5)) }
     ];
 
-    return successResponse(res, { distance, vehicles }, 'Estimation réussie');
+    return successResponse(res, { distance, vehicles }, 'Estimation reussie');
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -36,9 +36,8 @@ const requestRide = async (req, res) => {
     const { ride, drivers } = await rideService.createRideRequest(req.user._id, req.body, redisClient);
     const io = req.app.get('socketio');
 
-    logger.info(`[DISPATCH] Course ${ride._id} créée. ${drivers.length} chauffeurs trouvés.`);
+    logger.info(`[DISPATCH] Course ${ride._id} creee. ${drivers.length} chauffeurs trouves.`);
 
-    // CORRECTION CRITIQUE : Émission socket fiable aux chauffeurs
     drivers.forEach(driver => {
       io.to(driver._id.toString()).emit('new_ride_request', {
         rideId: ride._id,
@@ -59,8 +58,12 @@ const requestRide = async (req, res) => {
 const cancelRide = async (req, res) => {
   try {
     const rideId = req.params.id || req.body.rideId; 
-    const reason = req.body.reason || `Annulé par le ${req.user.role}`;
+    const reason = req.body.reason || `Annule par le ${req.user.role}`;
     
+    if (!rideId) {
+      throw new AppError('ID de la course manquant.', 400);
+    }
+
     const ride = await rideService.cancelRideAction(rideId, req.user._id, req.user.role, reason);
     const io = req.app.get('socketio');
 
@@ -72,7 +75,7 @@ const cancelRide = async (req, res) => {
     
     io.to('drivers').emit('ride_taken_by_other', { rideId });
 
-    return successResponse(res, { status: 'cancelled' }, 'Course annulée avec succès');
+    return successResponse(res, { status: 'cancelled' }, 'Course annulee avec succes');
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -86,12 +89,12 @@ const emergencyCancel = async (req, res) => {
     if (result.driversFreed && result.driversFreed.length > 0) {
       result.driversFreed.forEach(driverId => {
         io.to(driverId.toString()).emit('ride_cancelled', {
-          message: 'La course a été annulée suite à une réinitialisation du client.'
+          message: 'La course a ete annulee suite a une reinitialisation du client.'
         });
       });
     }
 
-    return successResponse(res, result, 'Base de données nettoyée avec succès');
+    return successResponse(res, result, 'Base de donnees nettoyee avec succes');
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -100,6 +103,11 @@ const emergencyCancel = async (req, res) => {
 const lockRide = async (req, res) => {
   try {
     const { rideId } = req.body;
+    
+    if (!rideId) {
+      throw new AppError('ID de la course manquant.', 400);
+    }
+
     const ride = await rideService.lockRideForNegotiation(rideId, req.user._id);
     const io = req.app.get('socketio');
 
@@ -114,7 +122,7 @@ const lockRide = async (req, res) => {
       rideId: ride._id, 
       status: ride.status, 
       priceOptions: ride.priceOptions 
-    }, 'Course verrouillée');
+    }, 'Course verrouillee');
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -123,6 +131,11 @@ const lockRide = async (req, res) => {
 const submitPrice = async (req, res) => {
   try {
     const { rideId, amount } = req.body;
+    
+    if (!rideId || !amount) {
+      throw new AppError('Donnees incomplètes.', 400);
+    }
+
     const ride = await rideService.submitPriceProposal(rideId, req.user._id, amount);
     const io = req.app.get('socketio');
 
@@ -140,6 +153,11 @@ const submitPrice = async (req, res) => {
 const finalizeRide = async (req, res) => {
   try {
     const { rideId, decision } = req.body;
+    
+    if (!rideId || !decision) {
+      throw new AppError('Donnees incomplètes.', 400);
+    }
+
     const result = await rideService.finalizeProposal(rideId, req.user._id, decision);
     const io = req.app.get('socketio');
 
@@ -163,11 +181,11 @@ const finalizeRide = async (req, res) => {
           vehicle: driver.vehicle, 
           location: driver.currentLocation 
         } 
-      }, 'Course confirmée');
+      }, 'Course confirmee');
 
     } else {
       io.to(result.rejectedDriverId.toString()).emit('proposal_rejected', {
-        message: 'Prix refusé'
+        message: 'Prix refuse'
       });
 
       const maxDistance = 5000;
@@ -178,7 +196,7 @@ const finalizeRide = async (req, res) => {
         result.ride.rejectedDrivers
       );
 
-      logger.info(`[DISPATCH-RETRY] Recherche relancée pour ${result.ride._id}. ${newDrivers.length} chauffeurs trouvés.`);
+      logger.info(`[DISPATCH-RETRY] Recherche relancee pour ${result.ride._id}. ${newDrivers.length} chauffeurs trouves.`);
 
       newDrivers.forEach(driver => {
         io.to(driver._id.toString()).emit('new_ride_request', {
@@ -191,7 +209,7 @@ const finalizeRide = async (req, res) => {
         });
       });
 
-      return successResponse(res, { status: 'searching' }, 'Recherche relancée');
+      return successResponse(res, { status: 'searching' }, 'Recherche relancee');
     }
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
@@ -201,12 +219,19 @@ const finalizeRide = async (req, res) => {
 const startRide = async (req, res) => {
   try {
     const { rideId } = req.body;
+    
+    if (!rideId) {
+      throw new AppError('ID de la course manquant.', 400);
+    }
+
     const ride = await rideService.startRideSession(req.user._id, rideId);
     
     req.app.get('socketio').to(ride.rider.toString()).emit('ride_started', { 
       rideId: ride._id, 
       startedAt: ride.startedAt 
     });
+    
+    logger.info(`[RIDE EXECUTION] Course ${rideId} demarree (Statut: ongoing). Driver ID: ${req.user._id}`);
     
     return successResponse(res, { status: 'ongoing' }, 'En route');
   } catch (error) {
@@ -217,6 +242,11 @@ const startRide = async (req, res) => {
 const completeRide = async (req, res) => {
   try {
     const { rideId } = req.body;
+    
+    if (!rideId) {
+      throw new AppError('ID de la course manquant.', 400);
+    }
+
     const ride = await rideService.completeRideSession(req.user._id, rideId);
     
     const updatedDriver = await User.findById(req.user._id).select('totalRides totalEarnings rating');
@@ -226,6 +256,8 @@ const completeRide = async (req, res) => {
       finalPrice: ride.price 
     });
     
+    logger.info(`[RIDE EXECUTION] Course ${rideId} terminee. Driver ID: ${req.user._id}. Prix final: ${ride.price}`);
+    
     return successResponse(res, { 
       status: 'completed', 
       finalPrice: ride.price,
@@ -234,7 +266,7 @@ const completeRide = async (req, res) => {
         totalEarnings: updatedDriver.totalEarnings,
         rating: updatedDriver.rating
       }
-    }, 'Course achevée');
+    }, 'Course achevee');
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
