@@ -1,5 +1,5 @@
 // src/server.js
-// SERVEUR YÉLY - Mode Dev: Abonnement bypassé pour tests
+// SERVEUR YELY - Mode Dev: Abonnement bypasse pour tests
 // CSCSM Level: Bank Grade
 
 const http = require('http');
@@ -10,7 +10,7 @@ const jwt = require('jsonwebtoken');
 const Redis = require('ioredis');
 const { z } = require('zod'); 
 const User = require('./models/User');
-const Ride = require('./models/Ride'); // Requis pour le relais télémétrique
+const Ride = require('./models/Ride');
 const startRideWorker = require('./workers/rideWorker');
 const { env } = require('./config/env');
 const logger = require('./config/logger');
@@ -19,7 +19,7 @@ const server = http.createServer(app);
 
 const redis = new Redis(env.REDIS_URL);
 redis.on('error', (err) => logger.error('Redis Error:', err));
-redis.on('connect', () => logger.info('Redis connecté (Rate Limit & GEO)'));
+redis.on('connect', () => logger.info('Redis connecte (Rate Limit & GEO)'));
 
 const checkSocketRateLimit = async (userId) => {
   const key = `ratelimit:socket:${userId}`;
@@ -47,7 +47,8 @@ const io = new Server(server, {
     credentials: true
   },
   transports: ['websocket'],
-  pingTimeout: 60000,
+  pingInterval: 25000,
+  pingTimeout: 120000,
   maxHttpBufferSize: 5000 
 });
 
@@ -157,7 +158,6 @@ io.on('connection', (socket) => {
         await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());
         await redis.expire('active_drivers', 120);
 
-        // RELAIS TÉLÉMÉTRIQUE : Si le chauffeur est en course, on envoie la position au client
         const activeRide = await Ride.findOne({
           driver: user._id,
           status: { $in: ['accepted', 'ongoing'] }
@@ -187,10 +187,10 @@ io.on('connection', (socket) => {
 const startServer = async () => {
   try {
     await mongoose.connect(env.MONGO_URI);
-    logger.info('MongoDB connecté');
+    logger.info('MongoDB connecte');
     
     server.listen(env.PORT, () => {
-      logger.info(`Serveur Yély actif sur port ${env.PORT}`);
+      logger.info(`Serveur Yely actif sur port ${env.PORT}`);
     });
   } catch (err) {
     process.exit(1);
