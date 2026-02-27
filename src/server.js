@@ -1,5 +1,5 @@
 // src/server.js
-// SERVEUR YELY - Mode Dev: Abonnement bypasse pour tests
+// SERVEUR YELY - Mode Dev & Production
 // CSCSM Level: Bank Grade
 
 const http = require('http');
@@ -111,9 +111,11 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const isDev = process.env.NODE_ENV !== 'production';
+
     const parseResult = coordsSchema.safeParse(rawData);
     if (!parseResult.success) {
-      if (__DEV__) console.error('[SOCKET] Erreur validation position:', parseResult.error);
+      if (isDev) console.error('[SOCKET] Erreur validation position:', parseResult.error);
       return; 
     }
     
@@ -130,16 +132,20 @@ io.on('connection', (socket) => {
       const distanceKm = getDistKm(prevLat, prevLng, coords.latitude, coords.longitude);
       const speedKmH = distanceKm / (timeDiffSeconds / 3600);
 
+      // En production, si la vitesse est superieure a 200 km/h, on bloque. 
+      // En developpement, on autorise les sauts de teleportation.
       if (speedKmH > 200) {
-        socket.spoofStrikes += 1;
-        if (socket.spoofStrikes >= 3) {
-          if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
-          socket.emit('force_disconnect', { reason: 'SPOOFING_DETECTED' });
-          socket.disconnect(true);
-          return;
+        if (!isDev) {
+          socket.spoofStrikes += 1;
+          if (socket.spoofStrikes >= 3) {
+            if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
+            socket.emit('force_disconnect', { reason: 'SPOOFING_DETECTED' });
+            socket.disconnect(true);
+            return;
+          }
+          socket.lastLocTime = now; 
+          return; 
         }
-        socket.lastLocTime = now; 
-        return; 
       } else {
         socket.spoofStrikes = 0;
       }
