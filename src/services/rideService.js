@@ -397,6 +397,42 @@ const releaseStuckNegotiations = async (io, rideId) => {
   }
 };
 
+const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
+  try {
+    const ride = await Ride.findOne({
+      driver: driverId,
+      status: { $in: ['accepted', 'ongoing'] }
+    });
+
+    if (!ride) return;
+
+    if (ride.status === 'accepted') {
+      const distToPickup = calculateHaversineDistance(coordinates, ride.origin.coordinates);
+      
+      if (distToPickup <= 0.05) {
+        ride.status = 'arrived';
+        await ride.save();
+        io.to(ride.rider.toString()).emit('ride_status_update', { status: 'arrived', ride });
+        io.to(driverId.toString()).emit('ride_status_update', { status: 'arrived', ride });
+        logger.info(`[GEOFENCING] Driver ${driverId} arrive chez le client pour la course ${ride._id}`);
+      }
+    }
+
+    if (ride.status === 'ongoing') {
+      const distToDropoff = calculateHaversineDistance(coordinates, ride.destination.coordinates);
+      
+      if (distToDropoff <= 0.05) {
+        const completedRide = await completeRideSession(driverId, ride._id);
+        io.to(ride.rider.toString()).emit('ride_status_update', { status: 'completed', ride: completedRide });
+        io.to(driverId.toString()).emit('ride_status_update', { status: 'completed', ride: completedRide });
+        logger.info(`[GEOFENCING] Course ${ride._id} automatiquement terminee par proximite`);
+      }
+    }
+  } catch (error) {
+    logger.error(`[GEOFENCING ERROR] Echec de la verification de proximite: ${error.message}`);
+  }
+};
+
 module.exports = {
   createRideRequest,
   cancelRideAction,
@@ -408,5 +444,6 @@ module.exports = {
   completeRideSession,
   getRouteDistance,
   cancelSearchTimeout,
-  releaseStuckNegotiations
+  releaseStuckNegotiations,
+  checkRideProgressOnLocationUpdate
 };
