@@ -1,3 +1,7 @@
+// src/services/rideService.js
+// SERVICE METIER - Gestion des courses
+// CSCSM Level: Bank Grade
+
 const mongoose = require('mongoose');
 const axios = require('axios');
 const { Queue } = require('bullmq');
@@ -24,7 +28,7 @@ const calculateHaversineDistance = (coords1, coords2) => {
             Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
             Math.sin(dLng/2) * Math.sin(dLng/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return parseFloat((R * c).toFixed(2));
+  return parseFloat((R * c).toFixed(3));
 };
 
 const getRouteDistance = async (originCoords, destCoords) => {
@@ -293,7 +297,7 @@ const startRideSession = async (driverId, rideId) => {
     );
     if (dist > 0.1) {
       logger.warn(`[SECURITY] Fraude evitee (Start Ride). Driver: ${driverId}, Dist: ${dist}km`);
-      throw new AppError("Securite : Vous etes trop loin du point de rencontre (Tolerance : 100m).", 403);
+      throw new AppError(`Securite : Vous etes trop loin du point de rencontre (${(dist * 1000).toFixed(0)}m). Tolerance : 100m.`, 403);
     }
   }
 
@@ -336,7 +340,7 @@ const completeRideSession = async (driverId, rideId) => {
       );
       if (dist > 0.1) {
         logger.warn(`[SECURITY] Fraude evitee (Complete Ride). Driver: ${driverId}, Dist: ${dist}km`);
-        throw new AppError("Securite : Vous etes trop loin de la destination (Tolerance : 100m).", 403);
+        throw new AppError(`Securite : Vous etes trop loin de la destination (${(dist * 1000).toFixed(0)}m). Tolerance : 100m.`, 403);
       }
     }
 
