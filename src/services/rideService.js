@@ -285,6 +285,18 @@ const startRideSession = async (driverId, rideId) => {
     throw new AppError("Action impossible a ce stade de la course.", 403);
   }
 
+  const driver = await User.findById(driverId);
+  if (driver?.currentLocation?.coordinates) {
+    const dist = calculateHaversineDistance(
+      driver.currentLocation.coordinates,
+      ride.origin.coordinates
+    );
+    if (dist > 0.1) {
+      logger.warn(`[SECURITY] Fraude evitee (Start Ride). Driver: ${driverId}, Dist: ${dist}km`);
+      throw new AppError("Securite : Vous etes trop loin du point de rencontre (Tolerance : 100m).", 403);
+    }
+  }
+
   ride.status = 'ongoing';
   ride.startedAt = new Date();
   await ride.save();
@@ -314,6 +326,18 @@ const completeRideSession = async (driverId, rideId) => {
     if (ride.status !== 'ongoing') {
       logger.warn(`[SECURITY] Tentative de cloture de course invalide. Driver: ${driverId}, Ride: ${rideId}, Status: ${ride.status}`);
       throw new AppError("Action impossible a ce stade de la course.", 403);
+    }
+
+    const driver = await User.findById(driverId).session(session);
+    if (driver?.currentLocation?.coordinates) {
+      const dist = calculateHaversineDistance(
+        driver.currentLocation.coordinates,
+        ride.destination.coordinates
+      );
+      if (dist > 0.1) {
+        logger.warn(`[SECURITY] Fraude evitee (Complete Ride). Driver: ${driverId}, Dist: ${dist}km`);
+        throw new AppError("Securite : Vous etes trop loin de la destination (Tolerance : 100m).", 403);
+      }
     }
 
     ride.status = 'completed';
