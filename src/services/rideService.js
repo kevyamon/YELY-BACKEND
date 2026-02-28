@@ -409,7 +409,8 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
     if (ride.status === 'accepted') {
       const distToPickup = calculateHaversineDistance(coordinates, ride.origin.coordinates);
       
-      if (distToPickup <= 0.05) {
+      // 0.01 km = 10 metres
+      if (distToPickup <= 0.01) {
         ride.status = 'arrived';
         await ride.save();
         io.to(ride.rider.toString()).emit('ride_status_update', { status: 'arrived', ride });
@@ -421,7 +422,8 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
     if (ride.status === 'ongoing') {
       const distToDropoff = calculateHaversineDistance(coordinates, ride.destination.coordinates);
       
-      if (distToDropoff <= 0.05) {
+      // 0.01 km = 10 metres
+      if (distToDropoff <= 0.01) {
         const completedRide = await completeRideSession(driverId, ride._id);
         io.to(ride.rider.toString()).emit('ride_completed', { rideId: ride._id, finalPrice: completedRide.price });
         io.to(driverId.toString()).emit('ride_completed', { rideId: ride._id, finalPrice: completedRide.price });
