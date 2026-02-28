@@ -250,8 +250,15 @@ const completeRide = async (req, res) => {
     const ride = await rideService.completeRideSession(req.user._id, rideId);
     
     const updatedDriver = await User.findById(req.user._id).select('totalRides totalEarnings rating');
+    const io = req.app.get('socketio');
 
-    req.app.get('socketio').to(ride.rider.toString()).emit('ride_completed', { 
+    // 🛡️ CORRECTION SÉCURITÉ : Notifier le RIDER ET le DRIVER
+    io.to(ride.rider.toString()).emit('ride_completed', { 
+      rideId: ride._id, 
+      finalPrice: ride.price 
+    });
+
+    io.to(req.user._id.toString()).emit('ride_completed', { 
       rideId: ride._id, 
       finalPrice: ride.price 
     });
