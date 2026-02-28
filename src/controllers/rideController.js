@@ -2,6 +2,7 @@
 const rideService = require('../services/rideService');
 const userRepository = require('../repositories/userRepository');
 const User = require('../models/User');
+const Ride = require('../models/Ride');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
@@ -133,8 +134,8 @@ const submitPrice = async (req, res) => {
   try {
     const { rideId, amount } = req.body;
     
-    if (!rideId || amount == null) {
-      throw new AppError('Donnees incomplètes.', 400);
+    if (!rideId || !amount) {
+      throw new AppError('Donnees incompletes.', 400);
     }
 
     const ride = await rideService.submitPriceProposal(rideId, req.user._id, amount);
@@ -156,7 +157,7 @@ const finalizeRide = async (req, res) => {
     const { rideId, decision } = req.body;
     
     if (!rideId || !decision) {
-      throw new AppError('Donnees incomplètes.', 400);
+      throw new AppError('Donnees incompletes.', 400);
     }
 
     const result = await rideService.finalizeProposal(rideId, req.user._id, decision);
@@ -253,7 +254,6 @@ const completeRide = async (req, res) => {
     const updatedDriver = await User.findById(req.user._id).select('totalRides totalEarnings rating');
     const io = req.app.get('socketio');
 
-    // CORRECTION SECURITE : Notifier le RIDER ET le DRIVER
     io.to(ride.rider.toString()).emit('ride_completed', { 
       rideId: ride._id, 
       finalPrice: ride.price 
@@ -280,4 +280,37 @@ const completeRide = async (req, res) => {
   }
 };
 
-module.exports = { requestRide, cancelRide, emergencyCancel, lockRide, submitPrice, finalizeRide, startRide, completeRide, estimateRide };
+// 🛡️ NOUVEAU : Traitement securise des avis clients (Moyenne arithmetique)
+const rateRide = async (req, res) => {
+  try {
+    const rideId = req.params.id;
+    const { rating, comment } = req.body;
+    
+    if (!rideId) throw new AppError('ID de la course manquant.', 400);
+    if (!rating || rating < 1 || rating > 5) throw new AppError('Note invalide (1 a 5).', 400);
+
+    const ride = await Ride.findById(rideId);
+    if (!ride) throw new AppError('Course introuvable.', 404);
+
+    if (ride.driver) {
+      const driver = await User.findById(ride.driver);
+      if (driver) {
+        const currentRating = driver.rating || 5.0;
+        const currentCount = driver.ratingCount || 0;
+        
+        const newCount = currentCount + 1;
+        const newRating = ((currentRating * currentCount) + rating) / newCount;
+
+        driver.rating = parseFloat(newRating.toFixed(2));
+        driver.ratingCount = newCount;
+        await driver.save();
+      }
+    }
+
+    return successResponse(res, { status: 'rated' }, 'Note enregistree avec succes');
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500);
+  }
+};
+
+module.exports = { requestRide, cancelRide, emergencyCancel, lockRide, submitPrice, finalizeRide, startRide, completeRide, estimateRide, rateRide };
