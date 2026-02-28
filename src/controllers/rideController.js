@@ -1,3 +1,4 @@
+// src/controllers/rideController.js
 const rideService = require('../services/rideService');
 const userRepository = require('../repositories/userRepository');
 const User = require('../models/User');
@@ -132,7 +133,7 @@ const submitPrice = async (req, res) => {
   try {
     const { rideId, amount } = req.body;
     
-    if (!rideId || !amount) {
+    if (!rideId || amount == null) {
       throw new AppError('Donnees incomplètes.', 400);
     }
 
@@ -252,7 +253,7 @@ const completeRide = async (req, res) => {
     const updatedDriver = await User.findById(req.user._id).select('totalRides totalEarnings rating');
     const io = req.app.get('socketio');
 
-    // 🛡️ CORRECTION SÉCURITÉ : Notifier le RIDER ET le DRIVER
+    // CORRECTION SECURITE : Notifier le RIDER ET le DRIVER
     io.to(ride.rider.toString()).emit('ride_completed', { 
       rideId: ride._id, 
       finalPrice: ride.price 

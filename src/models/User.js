@@ -1,5 +1,5 @@
 // src/models/User.js
-// MODÈLE UTILISATEUR - Profils, Identités & Stats (Iron Dome)
+// MODELE UTILISATEUR - Profils, Identites & Stats (Iron Dome)
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
@@ -11,9 +11,9 @@ const userSchema = new mongoose.Schema({
     type: String, 
     required: [true, 'Le nom est obligatoire'],
     trim: true,
-    minlength: [2, 'Le nom doit faire au moins 2 caractères'],
-    maxlength: [50, 'Le nom ne peut dépasser 50 caractères'],
-    match: [/^[a-zA-Z\u00C0-\u00FF\s'-]+$/, 'Caractères non autorisés dans le nom']
+    minlength: [2, 'Le nom doit faire au moins 2 caracteres'],
+    maxlength: [50, 'Le nom ne peut depasser 50 caracteres'],
+    match: [/^[a-zA-Z\u00C0-\u00FF\s'-]+$/, 'Caracteres non autorises dans le nom']
   },
   email: { 
     type: String, 
@@ -26,10 +26,10 @@ const userSchema = new mongoose.Schema({
   },
   phone: { 
     type: String, 
-    required: [true, 'Le téléphone est obligatoire'],
+    required: [true, 'Le telephone est obligatoire'],
     unique: true,
     trim: true,
-    match: [/^\+?[0-9\s]{8,20}$/, 'Format téléphone invalide']
+    match: [/^\+?[0-9\s]{8,20}$/, 'Format telephone invalide']
   },
   password: { 
     type: String, 
@@ -41,7 +41,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     enum: {
       values: ['rider', 'driver', 'admin', 'superadmin'],
-      message: 'Rôle {VALUE} non autorisé'
+      message: 'Role {VALUE} non autorise'
     },
     default: 'rider'
   },
@@ -61,10 +61,11 @@ const userSchema = new mongoose.Schema({
   
   isAvailable: { type: Boolean, default: false, index: true },
 
-  // 🚀 STATS DASHBOARD : On les ajoute ici proprement
+  // STATS DASHBOARD : Suivi des performances
   totalRides: { type: Number, default: 0 },
   totalEarnings: { type: Number, default: 0 },
   rating: { type: Number, default: 5.0 },
+  ratingCount: { type: Number, default: 0 },
   
   vehicle: {
     category: { type: String, enum: ['ECHO', 'STANDARD', 'VIP'], default: null },
@@ -108,7 +109,7 @@ userSchema.pre('save', async function(next) {
     this.password = await bcrypt.hash(this.password, rounds);
     next();
   } catch (error) {
-    next(new Error('Erreur de sécurisation du mot de passe: ' + error.message));
+    next(new Error('Erreur de securisation du mot de passe: ' + error.message));
   }
 });
 
@@ -116,7 +117,7 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-// 🛡️ SÉCURITÉ RENDER : Empêche le crash OverwriteModelError
+// SECURITE RENDER : Empeche le crash OverwriteModelError
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 
 module.exports = User;
