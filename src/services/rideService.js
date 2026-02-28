@@ -423,8 +423,8 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
       
       if (distToDropoff <= 0.05) {
         const completedRide = await completeRideSession(driverId, ride._id);
-        io.to(ride.rider.toString()).emit('ride_status_update', { status: 'completed', ride: completedRide });
-        io.to(driverId.toString()).emit('ride_status_update', { status: 'completed', ride: completedRide });
+        io.to(ride.rider.toString()).emit('ride_completed', { rideId: ride._id, finalPrice: completedRide.price });
+        io.to(driverId.toString()).emit('ride_completed', { rideId: ride._id, finalPrice: completedRide.price });
         logger.info(`[GEOFENCING] Course ${ride._id} automatiquement terminee par proximite`);
       }
     }
