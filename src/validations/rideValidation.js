@@ -14,7 +14,10 @@ const coordinatesSchema = z.tuple([
 ]);
 
 const pointSchema = z.object({
-  address: z.string({ required_error: "Adresse requise" }).min(5, "Adresse trop courte").max(200, "Adresse trop longue").trim(),
+  address: z.string({ required_error: "Adresse requise" })
+    .min(5, "Adresse trop courte")
+    .max(200, "Adresse trop longue")
+    .trim(),
   coordinates: coordinatesSchema
 }); 
 
@@ -28,14 +31,18 @@ const rideActionSchema = z.object({
   rideId: z.string({
     required_error: "L'ID de la course est requis",
     invalid_type_error: "L'ID doit etre une chaine de caracteres"
-  }).regex(/^[0-9a-fA-F]{24}$/, 'ID de course invalide')
+  })
+  .trim()
+  .regex(/^[0-9a-fA-F]{24}$/, 'ID de course invalide')
 }); 
 
 const submitPriceSchema = z.object({
   rideId: z.string({
     required_error: "L'ID de la course est requis",
     invalid_type_error: "L'ID doit etre une chaine de caracteres"
-  }).regex(/^[0-9a-fA-F]{24}$/, 'ID de course invalide'),
+  })
+  .trim()
+  .regex(/^[0-9a-fA-F]{24}$/, 'ID de course invalide'),
   amount: z.number({
     required_error: "Le montant est requis",
     invalid_type_error: "Le montant doit etre un nombre"
@@ -46,7 +53,9 @@ const finalizeRideSchema = z.object({
   rideId: z.string({
     required_error: "L'ID de la course est requis",
     invalid_type_error: "L'ID doit etre une chaine de caracteres"
-  }).regex(/^[0-9a-fA-F]{24}$/, 'ID de course invalide'),
+  })
+  .trim()
+  .regex(/^[0-9a-fA-F]{24}$/, 'ID de course invalide'),
   decision: z.enum(['ACCEPTED', 'REJECTED'], {
     errorMap: () => ({ message: 'Decision invalide (ACCEPTED ou REJECTED)' })
   })
