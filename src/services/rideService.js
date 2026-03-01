@@ -64,11 +64,11 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
 
     const existingRide = await Ride.findOne({
       rider: riderId,
-      status: { $in: ['searching', 'negotiating', 'accepted', 'ongoing'] }
+      status: { $in: ['searching', 'negotiating', 'accepted', 'arrived', 'in_progress'] }
     });
     
     if (existingRide) {
-      if (['accepted', 'ongoing'].includes(existingRide.status)) {
+      if (['accepted', 'arrived', 'in_progress'].includes(existingRide.status)) {
         throw new AppError('Vous avez deja une course active. Veuillez l\'annuler ou la terminer d\'abord.', 409);
       } else {
         logger.info(`[DISPATCH] Requete interceptee : Renvoi de la course en cours (Idempotence) pour le passager ${riderId}`);
@@ -159,7 +159,7 @@ const cancelRideAction = async (rideId, userId, userRole, reason) => {
 const emergencyCancelUserRides = async (userId) => {
   const activeRides = await Ride.find({
     rider: userId,
-    status: { $in: ['searching', 'negotiating', 'accepted', 'ongoing'] }
+    status: { $in: ['searching', 'negotiating', 'accepted', 'arrived', 'in_progress'] }
   });
 
   if (activeRides.length === 0) {
@@ -272,6 +272,30 @@ const finalizeProposal = async (rideId, riderId, decision) => {
   return result;
 };
 
+const markRideAsArrived = async (driverId, rideId) => {
+  const ride = await Ride.findOne({ _id: rideId, driver: driverId });
+  
+  if (!ride) {
+    throw new AppError('Course introuvable ou non assignee a ce chauffeur.', 404);
+  }
+
+  if (ride.status === 'arrived') {
+    logger.info(`[IDEMPOTENCE] Course ${rideId} deja marquee comme arrivee.`);
+    return ride;
+  }
+
+  if (ride.status !== 'accepted') {
+    logger.warn(`[SECURITY] Tentative de passage au statut arrive invalide. Status: ${ride.status}`);
+    throw new AppError("Action impossible a ce stade de la course.", 403);
+  }
+
+  ride.status = 'arrived';
+  ride.arrivedAt = new Date();
+  await ride.save();
+  
+  return ride;
+};
+
 const startRideSession = async (driverId, rideId) => {
   const ride = await Ride.findOne({ _id: rideId, driver: driverId });
   
@@ -279,13 +303,14 @@ const startRideSession = async (driverId, rideId) => {
     throw new AppError('Course introuvable ou non assignee a ce chauffeur.', 404);
   }
   
-  if (ride.status === 'ongoing') {
+  if (ride.status === 'in_progress') {
     logger.info(`[IDEMPOTENCE] Course ${rideId} deja demarree. Renvoi silencieux du succes.`);
     return ride;
   }
 
-  if (ride.status !== 'accepted') {
-    logger.warn(`[SECURITY] Tentative de demarrage de course invalide. Driver: ${driverId}, Ride: ${rideId}, Status: ${ride.status}`);
+  // Securite : On autorise 'arrived' (ideal) ou 'accepted' (fallback si geofencing rate)
+  if (!['accepted', 'arrived'].includes(ride.status)) {
+    logger.warn(`[SECURITY] Tentative de demarrage de course invalide. Status: ${ride.status}`);
     throw new AppError("Action impossible a ce stade de la course.", 403);
   }
 
@@ -295,13 +320,14 @@ const startRideSession = async (driverId, rideId) => {
       driver.currentLocation.coordinates,
       ride.origin.coordinates
     );
-    if (dist > 0.1) {
+    // Tolerance elargie legerement (150m) pour permettre au chauffeur de lancer la course meme s'il est mal gare
+    if (dist > 0.15) {
       logger.warn(`[SECURITY] Fraude evitee (Start Ride). Driver: ${driverId}, Dist: ${dist}km`);
-      throw new AppError(`Securite : Vous etes trop loin du point de rencontre (${(dist * 1000).toFixed(0)}m). Tolerance : 100m.`, 403);
+      throw new AppError(`Securite : Vous etes trop loin du point de rencontre (${(dist * 1000).toFixed(0)}m). Tolerance : 150m.`, 403);
     }
   }
 
-  ride.status = 'ongoing';
+  ride.status = 'in_progress';
   ride.startedAt = new Date();
   await ride.save();
   
@@ -327,8 +353,8 @@ const completeRideSession = async (driverId, rideId) => {
       return ride;
     }
 
-    if (ride.status !== 'ongoing') {
-      logger.warn(`[SECURITY] Tentative de cloture de course invalide. Driver: ${driverId}, Ride: ${rideId}, Status: ${ride.status}`);
+    if (ride.status !== 'in_progress') {
+      logger.warn(`[SECURITY] Tentative de cloture de course invalide. Status: ${ride.status}`);
       throw new AppError("Action impossible a ce stade de la course.", 403);
     }
 
@@ -339,7 +365,6 @@ const completeRideSession = async (driverId, rideId) => {
         ride.destination.coordinates
       );
       // Tolerance assouplie a 50m (0.05km) uniquement pour la validation finale de securite
-      // afin de ne pas bloquer une course terminee par le Geofencing automatique.
       if (dist > 0.05) {
         logger.warn(`[SECURITY] Fraude evitee (Complete Ride). Driver: ${driverId}, Dist: ${dist}km`);
         throw new AppError(`Securite : Vous etes trop loin de la destination (${(dist * 1000).toFixed(0)}m). Tolerance : 50m.`, 403);
@@ -404,7 +429,7 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
   try {
     const ride = await Ride.findOne({
       driver: driverId,
-      status: { $in: ['accepted', 'ongoing'] }
+      status: { $in: ['accepted', 'in_progress'] }
     });
 
     if (!ride) return;
@@ -412,25 +437,26 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
     if (ride.status === 'accepted') {
       const distToPickup = calculateHaversineDistance(coordinates, ride.origin.coordinates);
       
-      // 0.03 km = 30 metres (Geofencing industriel pour garantir l'arrivee)
-      if (distToPickup <= 0.03) {
-        // Envoi d'une notification silencieuse, on ne modifie pas le statut "arrived" car il n'existe pas dans le schema
-        io.to(ride.rider.toString()).emit('driver_arrived', { rideId: ride._id });
-        io.to(driverId.toString()).emit('driver_arrived', { rideId: ride._id });
-        logger.info(`[GEOFENCING] Driver ${driverId} arrive chez le client pour la course ${ride._id}`);
+      // 0.015 km = 15 metres (Geofencing strict pour validation de l'arrivee)
+      if (distToPickup <= 0.015) {
+        ride.status = 'arrived';
+        ride.arrivedAt = new Date();
+        await ride.save();
+
+        io.to(ride.rider.toString()).emit('ride_arrived', { rideId: ride._id, arrivedAt: ride.arrivedAt });
+        io.to(driverId.toString()).emit('ride_arrived', { rideId: ride._id, arrivedAt: ride.arrivedAt });
+        logger.info(`[GEOFENCING] Driver ${driverId} arrive chez le client (15m). Statut MAJ vers 'arrived'`);
       }
     }
 
-    if (ride.status === 'ongoing') {
+    if (ride.status === 'in_progress') {
       const distToDropoff = calculateHaversineDistance(coordinates, ride.destination.coordinates);
       
-      // 0.02 km = 20 metres (Declencheur de nettoyage automatique)
+      // 0.02 km = 20 metres (Declencheur de la modale semi-automatique)
       if (distToDropoff <= 0.02) {
-        const completedRide = await completeRideSession(driverId, ride._id);
-        
-        io.to(ride.rider.toString()).emit('RIDE_COMPLETED', { rideId: ride._id, finalPrice: completedRide.price });
-        io.to(driverId.toString()).emit('RIDE_COMPLETED', { rideId: ride._id, finalPrice: completedRide.price });
-        logger.info(`[GEOFENCING] Course ${ride._id} automatiquement terminee par proximite (20m)`);
+        // Au lieu de cloturer, on declenche la demande de confirmation cote chauffeur
+        io.to(driverId.toString()).emit('prompt_arrival_confirm', { rideId: ride._id });
+        logger.info(`[GEOFENCING] Course ${ride._id} a 20m de la destination. Modale semi-automatique declenchee.`);
       }
     }
   } catch (error) {
@@ -445,6 +471,7 @@ module.exports = {
   lockRideForNegotiation,
   submitPriceProposal,
   finalizeProposal,
+  markRideAsArrived,
   startRideSession,
   completeRideSession,
   getRouteDistance,
