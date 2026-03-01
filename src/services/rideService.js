@@ -350,6 +350,7 @@ const completeRideSession = async (driverId, rideId) => {
     
     await userRepository.updateDriverAvailability(driverId, true, session);
     
+    // Mise a jour atomique des gains et statistiques du chauffeur
     await User.findByIdAndUpdate(driverId, {
       $inc: { 
         totalRides: 1, 
@@ -409,8 +410,8 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
     if (ride.status === 'accepted') {
       const distToPickup = calculateHaversineDistance(coordinates, ride.origin.coordinates);
       
-      // 0.01 km = 10 metres
-      if (distToPickup <= 0.01) {
+      // 0.03 km = 30 metres (Geofencing industriel pour garantir l'arrivee)
+      if (distToPickup <= 0.03) {
         ride.status = 'arrived';
         await ride.save();
         io.to(ride.rider.toString()).emit('ride_status_update', { status: 'arrived', ride });
@@ -422,12 +423,12 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
     if (ride.status === 'ongoing') {
       const distToDropoff = calculateHaversineDistance(coordinates, ride.destination.coordinates);
       
-      // 0.01 km = 10 metres
-      if (distToDropoff <= 0.01) {
+      // 0.03 km = 30 metres (Declencheur de nettoyage automatique)
+      if (distToDropoff <= 0.03) {
         const completedRide = await completeRideSession(driverId, ride._id);
         io.to(ride.rider.toString()).emit('ride_completed', { rideId: ride._id, finalPrice: completedRide.price });
         io.to(driverId.toString()).emit('ride_completed', { rideId: ride._id, finalPrice: completedRide.price });
-        logger.info(`[GEOFENCING] Course ${ride._id} automatiquement terminee par proximite`);
+        logger.info(`[GEOFENCING] Course ${ride._id} automatiquement terminee par proximite (30m)`);
       }
     }
   } catch (error) {

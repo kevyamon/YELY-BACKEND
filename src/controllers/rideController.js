@@ -1,4 +1,5 @@
 // src/controllers/rideController.js
+const mongoose = require('mongoose');
 const rideService = require('../services/rideService');
 const userRepository = require('../repositories/userRepository');
 const User = require('../models/User');
@@ -280,20 +281,29 @@ const completeRide = async (req, res) => {
   }
 };
 
-// 🛡️ NOUVEAU : Traitement securise des avis clients (Moyenne arithmetique)
 const rateRide = async (req, res) => {
+  const session = await mongoose.startSession();
   try {
+    session.startTransaction();
     const rideId = req.params.id;
     const { rating, comment } = req.body;
     
     if (!rideId) throw new AppError('ID de la course manquant.', 400);
     if (!rating || rating < 1 || rating > 5) throw new AppError('Note invalide (1 a 5).', 400);
 
-    const ride = await Ride.findById(rideId);
+    const ride = await Ride.findById(rideId).session(session);
     if (!ride) throw new AppError('Course introuvable.', 404);
 
+    if (ride.status !== 'completed') {
+      throw new AppError('La course doit etre terminee pour etre notee.', 400);
+    }
+
+    if (ride.ratingGiven) {
+      throw new AppError('Cette course a deja ete notee.', 400);
+    }
+
     if (ride.driver) {
-      const driver = await User.findById(ride.driver);
+      const driver = await User.findById(ride.driver).session(session);
       if (driver) {
         const currentRating = driver.rating || 5.0;
         const currentCount = driver.ratingCount || 0;
@@ -303,13 +313,20 @@ const rateRide = async (req, res) => {
 
         driver.rating = parseFloat(newRating.toFixed(2));
         driver.ratingCount = newCount;
-        await driver.save();
+        await driver.save({ session });
       }
     }
 
+    ride.ratingGiven = rating;
+    await ride.save({ session });
+
+    await session.commitTransaction();
     return successResponse(res, { status: 'rated' }, 'Note enregistree avec succes');
   } catch (error) {
+    await session.abortTransaction();
     return errorResponse(res, error.message, error.statusCode || 500);
+  } finally {
+    session.endSession();
   }
 };
 
