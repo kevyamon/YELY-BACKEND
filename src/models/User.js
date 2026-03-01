@@ -1,5 +1,5 @@
 // src/models/User.js
-// MODELE UTILISATEUR - Profils, Identites & Stats (Iron Dome)
+// MODELE UTILISATEUR - Profils, Identites & Stats
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');

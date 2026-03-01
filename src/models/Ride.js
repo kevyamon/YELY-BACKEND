@@ -1,5 +1,5 @@
-// backend/src/models/Ride.js
-// MODÈLE COURSE - Flux Gamifié & Sécurité Anti-Blocage (Iron Dome)
+// src/models/Ride.js
+// MODELE COURSE - Flux Gamifie & Securite Anti-Blocage
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
@@ -13,60 +13,54 @@ const rideSchema = new mongoose.Schema({
   driver: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'User' 
-    // Peut être null tant que la négo n'est pas finie
   },
   
-  // Géolocalisation : Format GeoJSON strict exigé pour le bon dispatch
+  // Geolocalisation : Format GeoJSON strict exige pour le bon dispatch
   origin: {
     address: { type: String, required: true },
-    coordinates: { type: [Number], required: true, index: '2dsphere' } // [Longitude, Latitude]
+    coordinates: { type: [Number], required: true, index: '2dsphere' } 
   },
   destination: {
     address: { type: String, required: true },
-    coordinates: { type: [Number], required: true, index: '2dsphere' } // [Longitude, Latitude]
+    coordinates: { type: [Number], required: true, index: '2dsphere' } 
   },
 
-  // Le choix du véhicule par le client
   forfait: { 
     type: String, 
     enum: ['ECHO', 'STANDARD', 'VIP'], 
     default: 'STANDARD' 
   },
 
-  // Moteur de Prix & Négociation
-  distance: { type: Number, required: true }, // En Km
+  // Moteur de Prix & Negociation
+  distance: { type: Number, required: true }, 
   
-  // Les options calculées par le serveur (Sécurité)
+  // Les options calculees par le serveur (Securite)
   priceOptions: [{
     label: { type: String, enum: ['ECO', 'STANDARD', 'PREMIUM'] },
     amount: { type: Number },
     description: { type: String }
   }],
 
-  // Le choix du chauffeur
   proposedPrice: { type: Number }, 
   
-  // Prix final validé
   price: { type: Number }, 
 
   status: {
     type: String,
     enum: [
-      'searching',    // Recherche en cours
-      'negotiating',  // Chauffeur a locké, attente accord prix
-      'accepted',     // Validé par client
-      'ongoing',      // En route
-      'completed',    // Fini
-      'cancelled'     // Annulé
+      'searching',
+      'negotiating',
+      'accepted',
+      'ongoing',
+      'completed',
+      'cancelled'
     ],
     default: 'searching'
   },
 
-  // Liste des chauffeurs qui ont ignoré ou été refusés (Soft Reject)
   rejectedDrivers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 
-  // 🛡️ SÉCURITÉ IRON DOME : Timer pour tuer les négos zombies
-  // Si ce champ est vieux de > 60s, le Cron libère le chauffeur
+  // SECURITE : Timer pour tuer les negos zombies (60s)
   negotiationStartedAt: { type: Date },
 
   // Dates
@@ -75,7 +69,6 @@ const rideSchema = new mongoose.Schema({
   startedAt: { type: Date },
   completedAt: { type: Date },
   
-  // Raisons
   cancellationReason: { type: String },
   rejectionReason: { type: String }
 });
@@ -84,8 +77,8 @@ const rideSchema = new mongoose.Schema({
 rideSchema.index({ status: 1 });
 rideSchema.index({ driver: 1 });
 
-// 🛡️ SÉCURITÉ IRON DOME : Index Composite
-// Optimise la vérification "Est-ce que ce rider a DÉJÀ une course active ?"
+// SECURITE : Index Composite
+// Optimise la verification "Est-ce que ce rider a DEJA une course active ?"
 rideSchema.index({ rider: 1, status: 1 });
 
 module.exports = mongoose.model('Ride', rideSchema);
