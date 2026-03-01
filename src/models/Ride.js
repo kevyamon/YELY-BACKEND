@@ -51,7 +51,8 @@ const rideSchema = new mongoose.Schema({
       'searching',
       'negotiating',
       'accepted',
-      'ongoing',
+      'arrived',
+      'in_progress',
       'completed',
       'cancelled'
     ],
@@ -63,9 +64,10 @@ const rideSchema = new mongoose.Schema({
   // SECURITE : Timer pour tuer les negos zombies (60s)
   negotiationStartedAt: { type: Date },
 
-  // Dates
+  // Dates et tracabilite absolue
   createdAt: { type: Date, default: Date.now },
   acceptedAt: { type: Date },
+  arrivedAt: { type: Date },
   startedAt: { type: Date },
   completedAt: { type: Date },
   

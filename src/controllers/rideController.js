@@ -219,6 +219,30 @@ const finalizeRide = async (req, res) => {
   }
 };
 
+const markAsArrived = async (req, res) => {
+  try {
+    const { rideId } = req.body;
+    
+    if (!rideId) {
+      throw new AppError('ID de la course manquant.', 400);
+    }
+
+    // Appel au service (qui sera mis a jour dans une prochaine vague)
+    const ride = await rideService.markRideAsArrived(req.user._id, rideId);
+    
+    req.app.get('socketio').to(ride.rider.toString()).emit('ride_arrived', { 
+      rideId: ride._id, 
+      arrivedAt: ride.arrivedAt 
+    });
+    
+    logger.info(`[RIDE EXECUTION] Course ${rideId} - Chauffeur sur place (Statut: arrived). Driver ID: ${req.user._id}`);
+    
+    return successResponse(res, { status: 'arrived' }, 'Chauffeur sur place');
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500);
+  }
+};
+
 const startRide = async (req, res) => {
   try {
     const { rideId } = req.body;
@@ -234,9 +258,9 @@ const startRide = async (req, res) => {
       startedAt: ride.startedAt 
     });
     
-    logger.info(`[RIDE EXECUTION] Course ${rideId} demarree (Statut: ongoing). Driver ID: ${req.user._id}`);
+    logger.info(`[RIDE EXECUTION] Course ${rideId} demarree (Statut: in_progress). Driver ID: ${req.user._id}`);
     
-    return successResponse(res, { status: 'ongoing' }, 'En route');
+    return successResponse(res, { status: 'in_progress' }, 'En route');
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -330,4 +354,16 @@ const rateRide = async (req, res) => {
   }
 };
 
-module.exports = { requestRide, cancelRide, emergencyCancel, lockRide, submitPrice, finalizeRide, startRide, completeRide, estimateRide, rateRide };
+module.exports = { 
+  requestRide, 
+  cancelRide, 
+  emergencyCancel, 
+  lockRide, 
+  submitPrice, 
+  finalizeRide, 
+  markAsArrived,
+  startRide, 
+  completeRide, 
+  estimateRide, 
+  rateRide 
+};
