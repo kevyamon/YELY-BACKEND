@@ -15,13 +15,14 @@ const {
 router.get('/estimate', protect, authorize('rider', 'superadmin'), rideController.estimateRide);
 router.post('/emergency-cancel', protect, authorize('rider', 'superadmin'), rideController.emergencyCancel);
 router.put('/:id/cancel', protect, authorize('rider', 'driver', 'superadmin'), rideController.cancelRide);
-router.put('/:id/rate', protect, authorize('rider', 'superadmin'), rideController.rateRide); // 🛡️ AJOUT DU ENDPOINT
+router.put('/:id/rate', protect, authorize('rider', 'superadmin'), rideController.rateRide);
 
 // ROUTES D'ACTION AVEC VALIDATION STRICTE DU BODY
 router.post('/request', protect, authorize('rider', 'superadmin'), validate(requestRideSchema), rideController.requestRide);
 router.post('/lock', protect, authorize('driver', 'superadmin'), validate(rideActionSchema), rideController.lockRide);
 router.post('/propose', protect, authorize('driver', 'superadmin'), validate(submitPriceSchema), rideController.submitPrice);
 router.post('/finalize', protect, authorize('rider', 'superadmin'), validate(finalizeRideSchema), rideController.finalizeRide);
+router.post('/arrived', protect, authorize('driver', 'superadmin'), validate(rideActionSchema), rideController.markAsArrived);
 router.post('/start', protect, authorize('driver', 'superadmin'), validate(rideActionSchema), rideController.startRide);
 router.post('/complete', protect, authorize('driver', 'superadmin'), validate(rideActionSchema), rideController.completeRide);
 

@@ -1,5 +1,7 @@
 // src/controllers/rideController.js
-const mongoose = require('mongoose');
+// CONTROLEUR RIDE - Couche d'exposition réseau (Péage)
+// CSCSM Level: Bank Grade
+
 const rideService = require('../services/rideService');
 const userRepository = require('../repositories/userRepository');
 const User = require('../models/User');
@@ -227,7 +229,6 @@ const markAsArrived = async (req, res) => {
       throw new AppError('ID de la course manquant.', 400);
     }
 
-    // Appel au service (qui sera mis a jour dans une prochaine vague)
     const ride = await rideService.markRideAsArrived(req.user._id, rideId);
     
     req.app.get('socketio').to(ride.rider.toString()).emit('ride_arrived', { 
@@ -306,51 +307,19 @@ const completeRide = async (req, res) => {
 };
 
 const rateRide = async (req, res) => {
-  const session = await mongoose.startSession();
   try {
-    session.startTransaction();
     const rideId = req.params.id;
     const { rating, comment } = req.body;
     
     if (!rideId) throw new AppError('ID de la course manquant.', 400);
     if (!rating || rating < 1 || rating > 5) throw new AppError('Note invalide (1 a 5).', 400);
 
-    const ride = await Ride.findById(rideId).session(session);
-    if (!ride) throw new AppError('Course introuvable.', 404);
+    // Delegation pure de la logique metier au Service (Niveau Industriel)
+    await rideService.submitRideRating(rideId, rating, comment);
 
-    if (ride.status !== 'completed') {
-      throw new AppError('La course doit etre terminee pour etre notee.', 400);
-    }
-
-    if (ride.ratingGiven) {
-      throw new AppError('Cette course a deja ete notee.', 400);
-    }
-
-    if (ride.driver) {
-      const driver = await User.findById(ride.driver).session(session);
-      if (driver) {
-        const currentRating = driver.rating || 5.0;
-        const currentCount = driver.ratingCount || 0;
-        
-        const newCount = currentCount + 1;
-        const newRating = ((currentRating * currentCount) + rating) / newCount;
-
-        driver.rating = parseFloat(newRating.toFixed(2));
-        driver.ratingCount = newCount;
-        await driver.save({ session });
-      }
-    }
-
-    ride.ratingGiven = rating;
-    await ride.save({ session });
-
-    await session.commitTransaction();
     return successResponse(res, { status: 'rated' }, 'Note enregistree avec succes');
   } catch (error) {
-    await session.abortTransaction();
     return errorResponse(res, error.message, error.statusCode || 500);
-  } finally {
-    session.endSession();
   }
 };
 
