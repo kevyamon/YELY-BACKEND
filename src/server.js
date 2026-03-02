@@ -164,9 +164,10 @@ io.on('connection', (socket) => {
         await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());
         await redis.expire('active_drivers', 120);
 
+        // REPARATION : Utilisation stricte du statut 'in_progress' au lieu de 'ongoing'
         const activeRide = await Ride.findOne({
           driver: user._id,
-          status: { $in: ['accepted', 'ongoing'] }
+          status: { $in: ['accepted', 'in_progress'] }
         }).select('rider').lean();
 
         if (activeRide) {
