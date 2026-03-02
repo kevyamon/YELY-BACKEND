@@ -31,6 +31,15 @@ const rideSchema = new mongoose.Schema({
     default: 'STANDARD' 
   },
 
+  // NOUNOUVEAU : Nombre de passagers (Par defaut 1, maximum la capacite d'un taxi)
+  passengersCount: { 
+    type: Number, 
+    required: true, 
+    default: 1, 
+    min: [1, 'Il faut au moins 1 passager'], 
+    max: [4, 'Maximum 4 passagers autorises'] 
+  },
+
   // Moteur de Prix & Negociation
   distance: { type: Number, required: true }, 
   

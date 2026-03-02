@@ -10,6 +10,8 @@ const { successResponse, errorResponse } = require('../../utils/responseHandler'
 
 const estimateRide = async (req, res) => {
   try {
+    // Note : L'estimation ici est basique. Pour une estimation reelle avec passagers,
+    // on l'ajustera plutot cote Frontend ou via une nouvelle route si necessaire.
     const { pickupLat, pickupLng, dropoffLat, dropoffLng } = req.query;
     
     if (!pickupLat || !pickupLng || !dropoffLat || !dropoffLng) {
@@ -39,7 +41,7 @@ const requestRide = async (req, res) => {
     const { ride, drivers } = await rideService.createRideRequest(req.user._id, req.body, redisClient);
     const io = req.app.get('socketio');
 
-    logger.info(`[DISPATCH] Course ${ride._id} creee. ${drivers.length} chauffeurs trouves.`);
+    logger.info(`[DISPATCH] Course ${ride._id} creee (${ride.passengersCount} passagers). ${drivers.length} chauffeurs trouves.`);
 
     drivers.forEach(driver => {
       io.to(driver._id.toString()).emit('new_ride_request', {
@@ -48,6 +50,7 @@ const requestRide = async (req, res) => {
         destination: ride.destination, 
         distance: ride.distance,
         forfait: ride.forfait,
+        passengersCount: ride.passengersCount, // <-- INJECTION DU NOMBRE DE PASSAGERS
         priceOptions: ride.priceOptions
       });
     });
@@ -208,6 +211,7 @@ const finalizeRide = async (req, res) => {
           destination: result.ride.destination,
           distance: result.ride.distance,
           forfait: result.ride.forfait,
+          passengersCount: result.ride.passengersCount, // <-- INJECTION ICI AUSSI (CRITIQUE)
           priceOptions: result.ride.priceOptions
         });
       });

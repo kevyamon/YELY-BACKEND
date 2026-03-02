@@ -75,17 +75,21 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       }
     }
 
-    const { origin, destination, forfait } = rideData; 
+    // EXTRACTION DU NOMBRE DE PASSAGERS AVEC FALLBACK A 1
+    const { origin, destination, forfait, passengersCount } = rideData; 
+    const count = Math.max(1, Math.min(4, Number(passengersCount) || 1));
+
     const originCoords = [parseFloat(origin.coordinates[0]), parseFloat(origin.coordinates[1])];
     const destCoords = [parseFloat(destination.coordinates[0]), parseFloat(destination.coordinates[1])];
     
-    logger.info(`[DISPATCH] Nouvelle demande. Recherche autour de Lng: ${originCoords[0]}, Lat: ${originCoords[1]}`);
+    logger.info(`[DISPATCH] Nouvelle demande. Recherche autour de Lng: ${originCoords[0]}, Lat: ${originCoords[1]} pour ${count} passager(s)`);
 
     const distance = await getRouteDistance(originCoords, destCoords);
 
     if (distance < 0.1) throw new AppError('Distance invalide.', 400);
 
-    const pricingResult = await pricingService.generatePriceOptions(originCoords, destCoords, distance);
+    // INJECTION DANS LE MOTEUR DE PRIX
+    const pricingResult = await pricingService.generatePriceOptions(originCoords, destCoords, distance, count);
 
     const ride = await Ride.create({
       rider: riderId,
@@ -93,6 +97,7 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       destination: { ...destination, coordinates: destCoords },
       distance,
       forfait: forfait || 'STANDARD',
+      passengersCount: count,
       priceOptions: pricingResult.options, 
       status: 'searching',
       rejectedDrivers: []
@@ -236,6 +241,7 @@ const finalizeProposal = async (rideId, riderId, decision) => {
   let result;
 
   try {
+    // UTILISATION DE LA TRANSACTION SECURISEE AVEC RETRY AUTOMATIQUE
     await session.withTransaction(async () => {
       const ride = await Ride.findOne({ _id: rideId, rider: riderId, status: 'negotiating' }).session(session);
       if (!ride) throw new AppError('Session invalide.', 404);
