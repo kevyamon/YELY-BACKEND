@@ -88,103 +88,98 @@ const completeRideSession = async (driverId, rideId) => {
   let result;
   
   try {
-    session.startTransaction();
-    
-    const ride = await Ride.findOne({ _id: rideId, driver: driverId }).session(session);
-    
-    if (!ride) {
-      throw new AppError('Course introuvable ou non assignee a ce chauffeur.', 404);
-    }
-    
-    if (ride.status === 'completed') {
-      logger.info(`[IDEMPOTENCE] Course ${rideId} deja cloturee. Renvoi silencieux du succes.`);
-      await session.abortTransaction();
-      return ride;
-    }
-
-    if (ride.status !== 'in_progress') {
-      logger.warn(`[SECURITY] Tentative de cloture de course invalide. Status: ${ride.status}`);
-      throw new AppError("Action impossible a ce stade de la course.", 403);
-    }
-
-    const driver = await User.findById(driverId).session(session);
-    if (driver?.currentLocation?.coordinates) {
-      const dist = calculateHaversineDistance(
-        driver.currentLocation.coordinates,
-        ride.destination.coordinates
-      );
-      if (dist > 0.05) {
-        logger.warn(`[SECURITY] Fraude evitee (Complete Ride). Driver: ${driverId}, Dist: ${dist}km`);
-        throw new AppError(`Securite : Vous etes trop loin de la destination (${(dist * 1000).toFixed(0)}m). Tolerance : 50m.`, 403);
+    // withTransaction gere automatiquement les retries en cas de WriteConflict (TransientTransactionError)
+    await session.withTransaction(async () => {
+      const ride = await Ride.findOne({ _id: rideId, driver: driverId }).session(session);
+      
+      if (!ride) {
+        throw new AppError('Course introuvable ou non assignee a ce chauffeur.', 404);
       }
-    }
-
-    ride.status = 'completed';
-    ride.completedAt = new Date();
-    await ride.save({ session });
-    
-    await userRepository.updateDriverAvailability(driverId, true, session);
-    
-    await User.findByIdAndUpdate(driverId, {
-      $inc: { 
-        totalRides: 1, 
-        totalEarnings: ride.price || 0
+      
+      if (ride.status === 'completed') {
+        logger.info(`[IDEMPOTENCE] Course ${rideId} deja cloturee. Renvoi silencieux du succes.`);
+        result = ride;
+        return; 
       }
-    }, { session });
-    
-    result = ride;
-    await session.commitTransaction();
-  } catch (error) {
-    await session.abortTransaction();
-    throw error;
+
+      if (ride.status !== 'in_progress') {
+        logger.warn(`[SECURITY] Tentative de cloture de course invalide. Status: ${ride.status}`);
+        throw new AppError("Action impossible a ce stade de la course.", 403);
+      }
+
+      const driver = await User.findById(driverId).session(session);
+      if (driver?.currentLocation?.coordinates) {
+        const dist = calculateHaversineDistance(
+          driver.currentLocation.coordinates,
+          ride.destination.coordinates
+        );
+        if (dist > 0.05) {
+          logger.warn(`[SECURITY] Fraude evitee (Complete Ride). Driver: ${driverId}, Dist: ${dist}km`);
+          throw new AppError(`Securite : Vous etes trop loin de la destination (${(dist * 1000).toFixed(0)}m). Tolerance : 50m.`, 403);
+        }
+      }
+
+      ride.status = 'completed';
+      ride.completedAt = new Date();
+      await ride.save({ session });
+      
+      await userRepository.updateDriverAvailability(driverId, true, session);
+      
+      await User.findByIdAndUpdate(driverId, {
+        $inc: { 
+          totalRides: 1, 
+          totalEarnings: ride.price || 0
+        }
+      }, { session });
+      
+      result = ride;
+    });
   } finally {
-    session.endSession();
+    await session.endSession();
   }
   return result;
 };
 
 const submitRideRating = async (rideId, rating, comment) => {
   const session = await mongoose.startSession();
+  let result;
+
   try {
-    session.startTransaction();
+    await session.withTransaction(async () => {
+      const ride = await Ride.findById(rideId).session(session);
+      if (!ride) throw new AppError('Course introuvable.', 404);
 
-    const ride = await Ride.findById(rideId).session(session);
-    if (!ride) throw new AppError('Course introuvable.', 404);
-
-    if (ride.status !== 'completed') {
-      throw new AppError('La course doit etre terminee pour etre notee.', 400);
-    }
-
-    if (ride.ratingGiven) {
-      throw new AppError('Cette course a deja ete notee.', 400);
-    }
-
-    if (ride.driver) {
-      const driver = await User.findById(ride.driver).session(session);
-      if (driver) {
-        const currentRating = driver.rating || 5.0;
-        const currentCount = driver.ratingCount || 0;
-        
-        const newCount = currentCount + 1;
-        const newRating = ((currentRating * currentCount) + rating) / newCount;
-
-        driver.rating = parseFloat(newRating.toFixed(2));
-        driver.ratingCount = newCount;
-        await driver.save({ session });
+      if (ride.status !== 'completed') {
+        throw new AppError('La course doit etre terminee pour etre notee.', 400);
       }
-    }
 
-    ride.ratingGiven = rating;
-    await ride.save({ session });
+      if (ride.ratingGiven) {
+        throw new AppError('Cette course a deja ete notee.', 400);
+      }
 
-    await session.commitTransaction();
-    return ride;
-  } catch (error) {
-    await session.abortTransaction();
-    throw error;
+      if (ride.driver) {
+        const driver = await User.findById(ride.driver).session(session);
+        if (driver) {
+          const currentRating = driver.rating || 5.0;
+          const currentCount = driver.ratingCount || 0;
+          
+          const newCount = currentCount + 1;
+          const newRating = ((currentRating * currentCount) + rating) / newCount;
+
+          driver.rating = parseFloat(newRating.toFixed(2));
+          driver.ratingCount = newCount;
+          await driver.save({ session });
+        }
+      }
+
+      ride.ratingGiven = rating;
+      await ride.save({ session });
+      result = ride;
+    });
   } finally {
-    session.endSession();
+    await session.endSession();
   }
+  return result;
 };
 
 const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {

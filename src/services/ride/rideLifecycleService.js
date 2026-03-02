@@ -236,36 +236,33 @@ const finalizeProposal = async (rideId, riderId, decision) => {
   let result;
 
   try {
-    session.startTransaction();
-    const ride = await Ride.findOne({ _id: rideId, rider: riderId, status: 'negotiating' }).session(session);
-    if (!ride) throw new AppError('Session invalide.', 404);
+    await session.withTransaction(async () => {
+      const ride = await Ride.findOne({ _id: rideId, rider: riderId, status: 'negotiating' }).session(session);
+      if (!ride) throw new AppError('Session invalide.', 404);
 
-    if (decision === 'ACCEPTED') {
-      ride.status = 'accepted';
-      ride.price = ride.proposedPrice;
-      ride.acceptedAt = new Date();
-      await ride.save({ session });
-      
-      await userRepository.updateDriverAvailability(ride.driver, false, session);
-      
-      result = { status: 'ACCEPTED', ride };
-    } else {
-      const rejectedDriverId = ride.driver;
-      ride.status = 'searching';
-      ride.driver = null;
-      ride.proposedPrice = null;
-      ride.negotiationStartedAt = null;
-      ride.rejectedDrivers.push(rejectedDriverId);
-      
-      await ride.save({ session });
-      result = { status: 'SEARCHING_AGAIN', ride, rejectedDriverId };
-    }
-    await session.commitTransaction();
-  } catch (error) {
-    await session.abortTransaction();
-    throw error;
+      if (decision === 'ACCEPTED') {
+        ride.status = 'accepted';
+        ride.price = ride.proposedPrice;
+        ride.acceptedAt = new Date();
+        await ride.save({ session });
+        
+        await userRepository.updateDriverAvailability(ride.driver, false, session);
+        
+        result = { status: 'ACCEPTED', ride };
+      } else {
+        const rejectedDriverId = ride.driver;
+        ride.status = 'searching';
+        ride.driver = null;
+        ride.proposedPrice = null;
+        ride.negotiationStartedAt = null;
+        ride.rejectedDrivers.push(rejectedDriverId);
+        
+        await ride.save({ session });
+        result = { status: 'SEARCHING_AGAIN', ride, rejectedDriverId };
+      }
+    });
   } finally {
-    session.endSession();
+    await session.endSession();
   }
   return result;
 };
