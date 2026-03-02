@@ -3,32 +3,16 @@
 // CSCSM Level: Bank Grade
 
 const User = require('../models/User');
+const authService = require('../services/authService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
-// CORRECTION : On importe exactement ce qui existe dans ton tokenService
-const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('../utils/tokenService'); 
+const { generateAccessToken, generateRefreshToken } = require('../utils/tokenService'); 
 const { env } = require('../config/env');
 
 const registerUser = async (req, res) => {
   try {
-    const { name, email, password, phone, role } = req.body;
+    // Delegation absolue au service : bloque l'usurpation du role admin
+    const user = await authService.register(req.body);
 
-    const userExists = await User.findOne({ 
-      $or: [{ email: email }, { phone: phone }] 
-    });
-    
-    if (userExists) {
-      return errorResponse(res, "Ce numero de telephone ou cet email est deja utilise.", 400);
-    }
-
-    const user = await User.create({
-      name,
-      email,
-      password,
-      phone,
-      role: role || 'rider'
-    });
-
-    // CORRECTION : On genere les tokens avec les bonnes fonctions
     const accessToken = generateAccessToken(user._id, user.role);
     const refreshTokenStr = generateRefreshToken(user._id);
 
@@ -52,12 +36,8 @@ const registerUser = async (req, res) => {
 
   } catch (error) {
     console.error("[REGISTER CRASH PROTECTED]:", error);
-    
-    if (error.code === 11000) {
-       return errorResponse(res, "Doublon detecte. Ce compte existe deja.", 400);
-    }
-
-    return errorResponse(res, "Erreur interne lors de l'inscription.", 500);
+    const statusCode = error.statusCode || 500;
+    return errorResponse(res, error.message || "Erreur interne lors de l'inscription.", statusCode);
   }
 };
 
@@ -69,15 +49,9 @@ const loginUser = async (req, res) => {
       return errorResponse(res, "Veuillez fournir un identifiant et un mot de passe.", 400);
     }
 
-    const user = await User.findOne({
-      $or: [{ email: identifier }, { phone: identifier }]
-    }).select('+password'); 
+    // Delegation absolue au service : active l'anti-bruteforce et l'anti-timing
+    const user = await authService.login(identifier, password);
 
-    if (!user || !(await user.comparePassword(password, user.password))) {
-      return errorResponse(res, "Identifiant ou mot de passe incorrect.", 401);
-    }
-
-    // CORRECTION : On genere les tokens avec les bonnes fonctions
     const accessToken = generateAccessToken(user._id, user.role);
     const refreshTokenStr = generateRefreshToken(user._id);
 
@@ -101,7 +75,8 @@ const loginUser = async (req, res) => {
 
   } catch (error) {
     console.error("[LOGIN ERROR]:", error);
-    return errorResponse(res, "Erreur interne lors de la connexion.", 500);
+    const statusCode = error.statusCode || 500;
+    return errorResponse(res, error.message || "Erreur interne lors de la connexion.", statusCode);
   }
 };
 
@@ -118,12 +93,9 @@ const refreshToken = async (req, res) => {
     const token = req.body.refreshToken;
     if (!token) return errorResponse(res, "Refresh token manquant", 401);
     
-    // CORRECTION CRITIQUE : Ajout du await manquant pour attendre la resolution de la base de donnees
-    const decoded = await verifyRefreshToken(token);
-    const user = await User.findById(decoded.userId);
-    if (!user) return errorResponse(res, "Utilisateur invalide", 401);
+    // Utilisation du service pour s'assurer que l'utilisateur n'a pas ete banni entre temps
+    const user = await authService.validateSessionForRefresh(token);
 
-    // CORRECTION : On genere les tokens avec les bonnes fonctions
     const newAccessToken = generateAccessToken(user._id, user.role);
     const newRefreshToken = generateRefreshToken(user._id);
 
@@ -139,10 +111,11 @@ const refreshToken = async (req, res) => {
 const updateAvailability = async (req, res) => {
   try {
     const { isAvailable } = req.body;
-    const user = await User.findByIdAndUpdate(req.user._id, { isAvailable }, { new: true });
+    const user = await authService.updateAvailability(req.user._id, isAvailable);
     return successResponse(res, { isAvailable: user.isAvailable }, "Disponibilite mise a jour", 200);
   } catch (error) {
-    return errorResponse(res, "Erreur de mise a jour", 500);
+    const statusCode = error.statusCode || 500;
+    return errorResponse(res, error.message || "Erreur de mise a jour", statusCode);
   }
 };
 
