@@ -96,7 +96,7 @@ const refreshToken = async (req, res) => {
     const newAccessToken = generateAccessToken(user._id, user.role);
     const newRefreshToken = generateRefreshToken(user._id);
 
-    // MISE A JOUR INDUSTRIELLE : On renvoie le profil complet a chaque refresh
+    // MISE A JOUR : On renvoie le profil utilisateur complet pour synchroniser le frontend
     const userData = {
       _id: user._id,
       name: user.name,
@@ -113,7 +113,7 @@ const refreshToken = async (req, res) => {
       user: userData,
       accessToken: newAccessToken, 
       refreshToken: newRefreshToken 
-    }, "Session actualisee avec succes", 200);
+    }, "Token rafraichi silencieusement", 200);
   } catch (error) {
     console.error("[REFRESH CRITICAL FAILURE]:", error.message || error);
     const statusCode = error.statusCode || 401;
