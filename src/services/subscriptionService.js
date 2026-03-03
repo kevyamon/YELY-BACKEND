@@ -1,5 +1,5 @@
 // src/services/subscriptionService.js
-// LOGIQUE ABONNEMENT - Round Robin & Gestion des Preuves
+// LOGIQUE ABONNEMENT - Assignation par lots (Lottery/Round Robin) & Gestion des Preuves
 // STANDARD: Industriel / Bank Grade
 
 const Transaction = require('../models/Transaction');
@@ -7,9 +7,23 @@ const User = require('../models/User');
 const Settings = require('../models/Settings');
 const cloudinary = require('../config/cloudinary');
 const AppError = require('../utils/AppError');
+const notificationService = require('./notificationService');
+
+const ASSIGNMENT_LOT_SIZE = 3;
+
+const PLAN_TYPES = {
+  WEEKLY: 'WEEKLY',
+  MONTHLY: 'MONTHLY'
+};
+
+const COLLECTOR_TYPES = {
+  SUPERADMIN: 'SUPERADMIN',
+  PARTNER: 'PARTNER'
+};
 
 /**
- * Gere la distribution equitable des validations entre les admins (Round Robin).
+ * Gere la distribution des validations entre les admins par lots.
+ * Chaque admin disponible recoit ASSIGNMENT_LOT_SIZE validations a la suite.
  */
 const getNextValidator = async () => {
   const admins = await User.find({ 
@@ -21,40 +35,70 @@ const getNextValidator = async () => {
 
   let settings = await Settings.findOne();
   if (!settings) {
-    settings = await Settings.create({ lastAssignedAdminIndex: 0 });
+    settings = await Settings.create({ lastAssignedAdminIndex: 0, validationCounter: 0 });
   }
 
-  const nextIndex = (settings.lastAssignedAdminIndex + 1) % admins.length;
-  settings.lastAssignedAdminIndex = nextIndex;
+  if (typeof settings.validationCounter === 'undefined') {
+    settings.validationCounter = 0;
+  }
+
+  const currentAdminIndex = Math.floor(settings.validationCounter / ASSIGNMENT_LOT_SIZE) % admins.length;
+  
+  settings.validationCounter += 1;
   await settings.save();
 
-  return admins[nextIndex]._id;
+  return admins[currentAdminIndex];
 };
 
 /**
- * Soumission d'une preuve de paiement.
+ * Recupere la configuration tarifaire et les liens de paiement depuis l'environnement.
+ */
+const getSubscriptionPricing = () => {
+  const isPromo = process.env.IS_PROMO_ACTIVE === 'true';
+  return {
+    isPromoActive: isPromo,
+    weekly: {
+      price: isPromo ? parseInt(process.env.PROMO_PRICE_WEEKLY || '500', 10) : 1000,
+      link: process.env.WAVE_LINK_WEEKLY || ''
+    },
+    monthly: {
+      price: isPromo ? parseInt(process.env.PROMO_PRICE_MONTHLY || '4000', 10) : 6000,
+      link: process.env.WAVE_LINK_MONTHLY || ''
+    }
+  };
+};
+
+/**
+ * Soumission d'une preuve de paiement avec notification de l'administrateur.
  */
 const submitProof = async (userId, data, file) => {
-  // 1. Verifier si une transaction est deja en attente
   const existingPending = await Transaction.findOne({ user: userId, status: 'PENDING' });
   if (existingPending) {
     throw new AppError("Une validation est deja en cours pour votre compte.", 400);
   }
 
-  // 2. Determination du collecteur selon le forfait
-  const collectorType = data.planId === 'WEEKLY' ? 'SUPERADMIN' : 'PARTNER';
-  const amount = data.planId === 'WEEKLY' ? 1000 : 6000;
+  const pricingConfig = getSubscriptionPricing();
+  let amount = 0;
+  let collectorType = '';
 
-  // 3. Upload vers Cloudinary dans le dossier temporaire
+  if (data.planId === PLAN_TYPES.WEEKLY) {
+    amount = pricingConfig.weekly.price;
+    collectorType = COLLECTOR_TYPES.SUPERADMIN;
+  } else if (data.planId === PLAN_TYPES.MONTHLY) {
+    amount = pricingConfig.monthly.price;
+    collectorType = COLLECTOR_TYPES.PARTNER;
+  } else {
+    throw new AppError("Type de forfait invalide.", 400);
+  }
+
   const result = await cloudinary.uploader.upload(file.path, {
     folder: 'yely/pending_proofs',
     resource_type: 'image'
   });
 
-  // 4. Assignation via Round Robin
-  const validatorId = await getNextValidator();
+  const validator = await getNextValidator();
+  const validatorId = validator ? validator._id : null;
 
-  // 5. Creation de la transaction
   const transaction = await Transaction.create({
     user: userId,
     planId: data.planId,
@@ -66,9 +110,22 @@ const submitProof = async (userId, data, file) => {
     assignedTo: validatorId,
     auditLog: [{
       action: 'SUBMISSION',
-      note: `Preuve soumise pour le forfait ${data.planId}`
+      note: `Preuve soumise pour le forfait ${data.planId} (Montant theorique: ${amount}F CFA)`
     }]
   });
+
+  if (validator && validator.fcmToken) {
+    try {
+      await notificationService.sendPushNotification(
+        validator.fcmToken,
+        "Nouvelle capture a verifier",
+        "Un chauffeur vient de soumettre un paiement. Verification requise.",
+        { transactionId: transaction._id.toString(), type: 'VALIDATION_REQUEST' }
+      );
+    } catch (error) {
+      console.error("[NOTIFICATION ERROR]: Echec de l'envoi du Push au validateur", error.message);
+    }
+  }
 
   return transaction;
 };
@@ -85,5 +142,6 @@ const checkSubscriptionStatus = async (userId) => {
 module.exports = {
   submitProof,
   checkSubscriptionStatus,
-  getNextValidator
+  getNextValidator,
+  getSubscriptionPricing
 };

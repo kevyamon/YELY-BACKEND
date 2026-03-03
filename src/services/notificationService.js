@@ -1,5 +1,5 @@
 // src/services/notificationService.js
-// SERVICE DE NOTIFICATIONS PUSH - Réveil Driver
+// SERVICE DE NOTIFICATIONS PUSH - React Native (Expo) Optimise
 // CSCSM Level: Bank Grade
 
 const admin = require('../config/firebase');
@@ -7,54 +7,68 @@ const User = require('../models/User');
 const logger = require('../config/logger');
 
 /**
- * 🚀 ENVOI DE NOTIFICATION PUSH
- * @param {string} userId - L'ID du destinataire
- * @param {string} title - Titre de la notif (ex: "Nouvelle Course !")
+ * ENVOI DE NOTIFICATION PUSH
+ * @param {string} target - L'ID de l'utilisateur OU directement son token FCM
+ * @param {string} title - Titre de la notif
  * @param {string} body - Corps du texte
- * @param {object} data - Données invisibles pour le code front-end (ex: ID de la course)
+ * @param {object} data - Donnees invisibles pour le routing React Navigation
  */
-const sendPushNotification = async (userId, title, body, data = {}) => {
+const sendPushNotification = async (target, title, body, data = {}) => {
   try {
-    // Si Firebase n'est pas configuré, on annule sans faire planter l'app
     if (!admin.apps || !admin.apps.length) return false; 
 
-    // 1. Récupérer le token du destinataire
-    const user = await User.findById(userId).select('fcmToken name');
-    
-    if (!user || !user.fcmToken) {
-      logger.info(`[PUSH IGNORÉ] Aucun token FCM pour ${user ? user.name : userId}`);
-      return false;
+    let fcmToken = target;
+    let userId = null;
+
+    // Detection automatique: Si ce n'est pas un token (qui est generalement long), c'est un ObjectId
+    if (target && target.length < 50) {
+      userId = target;
+      const user = await User.findById(userId).select('fcmToken name');
+      
+      if (!user || !user.fcmToken) {
+        logger.info(`[PUSH IGNORE] Aucun token FCM pour ${user ? user.name : userId}`);
+        return false;
+      }
+      fcmToken = user.fcmToken;
     }
 
-    // 2. Préparer le missile (Priorité Haute obligatoire pour les apps de VTC/Livreurs)
+    // Configuration specifique pour React Native / Expo
     const message = {
       notification: { title, body },
       data: {
-        ...data,
-        click_action: 'FLUTTER_NOTIFICATION_CLICK' // Standard si tu utilises Flutter
+        ...data
       },
-      token: user.fcmToken,
+      token: fcmToken,
       android: {
-        priority: 'high', // 🔥 LE SECRET EST ICI : Réveille le téléphone en veille
+        priority: 'high',
         notification: {
           sound: 'default',
-          channelId: 'yely_rides' // À configurer aussi côté Front-end
+          channelId: 'yely_rides'
+        }
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+            contentAvailable: true
+          }
         }
       }
     };
 
-    // 3. Tir !
     const response = await admin.messaging().send(message);
-    logger.info(`[PUSH SUCCÈS] Envoyé à ${user.name}: ${response}`);
+    logger.info(`[PUSH SUCCES] Envoye au token se terminant par ...${fcmToken.slice(-5)}: ${response}`);
     return true;
 
   } catch (error) {
-    logger.error(`[PUSH ERREUR] Échec pour ${userId}: ${error.message}`);
+    logger.error(`[PUSH ERREUR] Echec de l'envoi: ${error.message}`);
     
-    // Auto-nettoyage : Si l'app a été désinstallée, on supprime le token mort
     if (error.code === 'messaging/invalid-registration-token' || error.code === 'messaging/registration-token-not-registered') {
-       await User.findByIdAndUpdate(userId, { fcmToken: null });
-       logger.info(`[PUSH CLEANUP] Token mort supprimé pour ${userId}`);
+       // Si on a l'ID utilisateur, on nettoie son profil
+       if (target && target.length < 50) {
+         await User.findByIdAndUpdate(target, { fcmToken: null });
+         logger.info(`[PUSH CLEANUP] Token mort supprime pour l'utilisateur ${target}`);
+       }
     }
     return false;
   }

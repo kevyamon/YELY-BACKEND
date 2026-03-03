@@ -15,6 +15,7 @@ const redis = require('./config/redis');
 const User = require('./models/User');
 const Ride = require('./models/Ride');
 const startRideWorker = require('./workers/rideWorker');
+const startCloudinaryCleanupWorker = require('./workers/cloudinaryCleanupWorker');
 const { env } = require('./config/env');
 const logger = require('./config/logger');
 
@@ -56,7 +57,9 @@ io.adapter(createAdapter(redis.pubClient, redis.subClient));
 app.set('socketio', io);
 app.set('redis', redis);
 
+// Initialisation des Workers (Taches de fond)
 startRideWorker(io);
+startCloudinaryCleanupWorker();
 
 const getDistKm = (lat1, lon1, lat2, lon2) => {
   const R = 6371; 
@@ -104,12 +107,10 @@ io.on('connection', (socket) => {
   if (user.role === 'driver') socket.join('drivers');
 
   socket.on('update_location', async (rawData) => {
-    // 🛡️ REPARATION: ROLLING SESSION (Le vaccin contre la deconnexion brutale)
     const cacheKey = `auth:user:${user._id}`;
     const isSessionValid = await redis.exists(cacheKey);
     
     if (!isSessionValid) {
-      // Le cache a expire, mais le socket est toujours la. On verifie la BDD pour eviter les faux positifs.
       const dbUser = await User.findById(user._id).select('-password -__v').lean();
       if (!dbUser || dbUser.isBanned) {
         if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
@@ -117,10 +118,8 @@ io.on('connection', (socket) => {
         socket.disconnect(true);
         return;
       }
-      // Restauration silencieuse du cache
       await redis.setex(cacheKey, 900, JSON.stringify(dbUser));
     } else {
-      // Prolongation automatique du cache : un chauffeur qui roule ne sera jamais deconnecte
       await redis.expire(cacheKey, 900);
     }
 

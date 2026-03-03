@@ -1,80 +1,68 @@
 // src/middleware/uploadMiddleware.js
-// UPLOAD SÉCURISÉ - Inspection Binaire en RAM (Magic Bytes) & Zéro Écriture Disque
+// MIDDLEWARE UPLOAD - Anti-Spoofing & Magic Numbers
 // CSCSM Level: Bank Grade
 
 const multer = require('multer');
-const FileType = require('file-type');
-const path = require('path');
-const AppError = require('../utils/AppError');
-const logger = require('../config/logger');
+const fs = require('fs');
+const { errorResponse } = require('../utils/responseHandler');
 
-const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
-const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
-
-// 🔒 SÉCURITÉ : Limite stricte à 2 Mo pour protéger la RAM
-const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
-
-// 1. Configuration du stockage en RAM (Memory Storage) 
-// Évite la saturation du disque (Disk Exhaustion DoS) et accélère le transfert vers Cloudinary.
-const storage = multer.memoryStorage();
-
-// 2. Filtre superficiel (Extension & MIME déclaré)
-const fileFilter = (req, file, cb) => {
-  const ext = path.extname(file.originalname).toLowerCase();
-  
-  if (!ALLOWED_EXTENSIONS.includes(ext)) {
-    return cb(new AppError(`Extension ${ext} non autorisée.`, 400), false);
+// Stockage temporaire local avant l'envoi vers Cloudinary
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = 'uploads/temp';
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'proof-' + uniqueSuffix + '-' + file.originalname.replace(/[^a-zA-Z0-9.]/g, ''));
   }
-
-  if (!ALLOWED_MIMES.includes(file.mimetype)) {
-    return cb(new AppError('Type MIME déclaré invalide.', 400), false);
-  }
-
-  cb(null, true);
-};
-
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: MAX_FILE_SIZE, files: 1 }
 });
 
+// Limite de taille stricte : 5MB maximum
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
+
+const uploadSingle = upload.single('proofImage');
+
 /**
- * 🛡️ MIDDLEWARE DE VALIDATION BINAIRE (Magic Bytes)
- * Inspecte la signature réelle du fichier directement dans le buffer (RAM).
+ * Validation par "Magic Numbers" (ADN du fichier)
+ * Empêche un hacker de renommer un script.exe en image.png
  */
-const validateFileSignature = async (req, res, next) => {
-  if (!req.file) return next();
+const validateFileSignature = (req, res, next) => {
+  if (!req.file) {
+    return next(); // Laisse le validateur Zod ou le Controller gérer l'absence de fichier
+  }
 
   try {
-    // Lecture des premiers octets depuis la mémoire vive
-    const type = await FileType.fromBuffer(req.file.buffer);
-
-    // Si le type est indéterminé ou non autorisé, on rejette purement et simplement
-    if (!type || !ALLOWED_MIMES.includes(type.mime)) {
-      logger.warn(`[SECURITY] Tentative d'upload de fichier malveillant bloquée. Type réel: ${type?.mime || 'inconnu'}`);
-      return next(new AppError('Contenu du fichier invalide ou corrompu (Échec Magic Bytes).', 400));
-    }
-
-    // Cohérence : Le type réel doit correspondre à l'extension
-    const extFromType = `.${type.ext}`;
-    const currentExt = path.extname(req.file.originalname).toLowerCase(); 
+    // Lecture des 4 premiers octets du fichier
+    const buffer = Buffer.alloc(4);
+    const fd = fs.openSync(req.file.path, 'r');
+    fs.readSync(fd, buffer, 0, 4, 0);
+    fs.closeSync(fd);
     
-    // On autorise .jpg pour image/jpeg
-    const isJpegMatch = (type.ext === 'jpg' || type.ext === 'jpeg') && (currentExt === '.jpg' || currentExt === '.jpeg');
-    
-    if (!isJpegMatch && extFromType !== currentExt) {
-       return next(new AppError('Incohérence entre l\'extension et le contenu réel.', 400));
-    }
+    const hex = buffer.toString('hex').toUpperCase();
 
-    next();
+    // Signatures hexadécimales standard
+    // JPEG commence par FFD8
+    // PNG commence par 89504E47
+    if (hex.startsWith('FFD8') || hex === '89504E47') {
+      return next();
+    } else {
+      // Destruction immédiate du fichier malveillant
+      fs.unlinkSync(req.file.path);
+      console.warn(`[SECURITY] Tentative de spoofing MIME détectée par l'utilisateur ${req.user?._id || 'Inconnu'}`);
+      return errorResponse(res, "Fichier corrompu ou format non autorisé. Seules les vraies images JPEG/PNG sont acceptées.", 400);
+    }
   } catch (error) {
-    logger.error(`[UPLOAD ERROR] Erreur lors de la validation binaire: ${error.message}`);
-    next(new AppError('Erreur lors du traitement de la sécurité du fichier.', 500));
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    return errorResponse(res, "Erreur lors de l'analyse sécuritaire du fichier.", 500);
   }
 };
 
 module.exports = {
-  uploadSingle: upload.single('file'), 
+  uploadSingle,
   validateFileSignature
 };

@@ -4,6 +4,25 @@
 
 const subscriptionService = require('../services/subscriptionService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
+const Transaction = require('../models/Transaction');
+
+/**
+ * Expose la configuration des paiements (Tarifs, Promo, Liens Wave) au Frontend.
+ */
+const getConfig = async (req, res) => {
+  try {
+    const config = subscriptionService.getSubscriptionPricing();
+    
+    if (!config.weekly.link || !config.monthly.link) {
+      console.warn("[CONFIG WARNING]: Liens Wave manquants dans les variables d'environnement.");
+    }
+
+    return successResponse(res, config, "Configuration de souscription recuperee avec succes.", 200);
+  } catch (error) {
+    console.error("[CONFIG ERROR]:", error.message);
+    return errorResponse(res, "Erreur interne lors de la recuperation de la configuration tarifaire.", 500);
+  }
+};
 
 /**
  * Recoit la capture d'ecran et les infos du depot.
@@ -13,7 +32,7 @@ const submitProof = async (req, res) => {
     const { planId, senderPhone } = req.body;
     
     if (!planId || !senderPhone || !req.file) {
-      return errorResponse(res, "Donnees ou capture manquante.", 400);
+      return errorResponse(res, "Donnees ou capture manquante. Requete rejetee.", 400);
     }
 
     const transaction = await subscriptionService.submitProof(
@@ -22,28 +41,27 @@ const submitProof = async (req, res) => {
       req.file
     );
 
-    // Message court et simple pour le chauffeur
     return successResponse(
       res, 
       { transactionId: transaction._id }, 
-      "Recu ! Un administrateur verifie votre paiement. Acces sous 15 minutes.", 
+      "Preuve recue. Un administrateur verifie votre paiement. Acces prevu sous 15 minutes.", 
       201
     );
 
   } catch (error) {
     console.error("[SUBMISSION ERROR]:", error.message);
     const statusCode = error.statusCode || 500;
-    return errorResponse(res, error.message || "Erreur lors de l'envoi de la preuve.", statusCode);
+    return errorResponse(res, error.message || "Erreur systeme lors de l'enregistrement de la preuve.", statusCode);
   }
 };
 
 /**
- * Recupere le statut actuel de l'abonnement pour l'UI.
+ * Recupere le statut actuel de l'abonnement pour l'interface utilisateur.
  */
 const getStatus = async (req, res) => {
   try {
     const isActive = await subscriptionService.checkSubscriptionStatus(req.user._id);
-    const pendingTransaction = await require('../models/Transaction').findOne({ 
+    const pendingTransaction = await Transaction.findOne({ 
       user: req.user._id, 
       status: 'PENDING' 
     });
@@ -51,14 +69,16 @@ const getStatus = async (req, res) => {
     return successResponse(res, {
       isActive,
       isPending: !!pendingTransaction,
-      expiresAt: req.user.subscriptionExpiresAt
+      expiresAt: req.user.subscriptionExpiresAt || null
     });
   } catch (error) {
-    return errorResponse(res, "Erreur lors de la recuperation du statut.", 500);
+    console.error("[STATUS ERROR]:", error.message);
+    return errorResponse(res, "Erreur lors de la lecture du statut d'abonnement.", 500);
   }
 };
 
 module.exports = {
+  getConfig,
   submitProof,
   getStatus
 };
