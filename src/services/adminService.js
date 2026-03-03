@@ -96,37 +96,55 @@ const updateMapSettings = async (data, requesterId) => {
   }
 };
 
+/**
+ * REPARATION SECURITE : Gestion par Dates et non par Heures
+ */
 const approveTransaction = async (transactionId, validatorId, session) => {
   const transaction = await Transaction.findOne({ _id: transactionId, status: 'PENDING' }).session(session);
-  if (!transaction) throw new AppError('Transaction invalide ou deja traitee.', 404);
+  if (!transaction) throw new AppError('Transaction invalide, introuvable ou deja traitee.', 404);
 
-  const driver = await User.findById(transaction.driver).session(session);
+  const driver = await User.findById(transaction.user).session(session);
   if (!driver) throw new AppError('Chauffeur introuvable.', 404);
 
-  const hoursToAdd = transaction.type === 'WEEKLY' ? 168 : 720;
-  driver.subscription.isActive = true;
-  driver.subscription.hoursRemaining += hoursToAdd;
+  const daysToAdd = transaction.planId === 'WEEKLY' ? 7 : 30;
+  
+  let newExpiryDate = new Date();
+  if (driver.subscriptionExpiresAt && driver.subscriptionExpiresAt > new Date()) {
+    newExpiryDate = new Date(driver.subscriptionExpiresAt);
+  }
+  newExpiryDate.setDate(newExpiryDate.getDate() + daysToAdd);
+
+  driver.subscriptionExpiresAt = newExpiryDate;
   await driver.save({ session });
 
   transaction.status = 'APPROVED';
   transaction.validatedBy = validatorId;
+  transaction.auditLog.push({
+    action: 'APPROVAL',
+    note: `Preuve validee par l'admin ${validatorId}. Acces prolonge de ${daysToAdd} jours.`
+  });
   await transaction.save({ session });
 
-  await logSystemAction(validatorId, 'APPROVE_PAYMENT', transaction._id, `+${hoursToAdd}h pour ${driver.email}`, session);
-  return { transaction, driver, hoursToAdd };
+  await logSystemAction(validatorId, 'APPROVE_PAYMENT', transaction._id, `+${daysToAdd} jours pour ${driver.email}`, session);
+  return { transaction, driver, daysToAdd, newExpiryDate };
 };
 
 const rejectTransaction = async (transactionId, reason, validatorId, session) => {
   const transaction = await Transaction.findOne({ _id: transactionId, status: 'PENDING' }).session(session);
-  if (!transaction) throw new AppError('Transaction invalide ou deja traitee.', 404);
+  if (!transaction) throw new AppError('Transaction invalide, introuvable ou deja traitee.', 404);
 
   transaction.status = 'REJECTED';
-  transaction.rejectionReason = reason;
   transaction.validatedBy = validatorId;
+  transaction.auditLog.push({
+    action: 'REJECTION',
+    note: `Preuve rejetee par l'admin ${validatorId}. Motif: ${reason}`
+  });
   await transaction.save({ session });
 
   await logSystemAction(validatorId, 'REJECT_PAYMENT', transaction._id, `Raison: ${reason}`, session);
-  return { transaction };
+  
+  const driver = await User.findById(transaction.user).session(session);
+  return { transaction, driver };
 };
 
 const getDashboardStats = async () => {
@@ -151,7 +169,7 @@ const getDashboardStats = async () => {
 const getFinanceData = async (period) => {
   const pipeline = [
     { $match: { status: 'APPROVED' } },
-    { $group: { _id: '$type', totalAmount: { $sum: '$amount' }, count: { $sum: 1 } } }
+    { $group: { _id: '$planId', totalAmount: { $sum: '$amount' }, count: { $sum: 1 } } }
   ];
   return await Transaction.aggregate(pipeline);
 };

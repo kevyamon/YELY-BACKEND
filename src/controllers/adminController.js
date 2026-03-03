@@ -1,16 +1,14 @@
 // src/controllers/adminController.js
-// CONTRÔLEUR ADMIN - Intégration Temps Réel & Restauration Complète
+// CONTROLEUR ADMIN - Integration Temps Reel & Restauration Complete
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
 const adminService = require('../services/adminService');
-const subscriptionService = require('../services/subscriptionService');
+const notificationService = require('../services/notificationService');
+const Transaction = require('../models/Transaction');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const logger = require('../config/logger');
 
-/**
- * @desc Promouvoir/Rétrograder (SuperAdmin)
- */
 const updateAdminStatus = async (req, res) => {
   const session = await mongoose.startSession();
   try {
@@ -20,14 +18,13 @@ const updateAdminStatus = async (req, res) => {
       return await adminService.updateUserRole(userId, action, req.user._id, session);
     });
 
-    // NOTIFICATION TEMPS RÉEL (DÉCONNEXION/MISE À JOUR FORCÉE)
     const io = req.app.get('socketio');
     if (io) {
       io.to(userId.toString()).emit('user_role_updated', { newRole: result.newRole });
     }
 
     logger.warn(`[AUDIT ROLE] ${req.user.email} changed ${result.email} -> ${result.newRole}`);
-    return successResponse(res, result, 'Rôle mis à jour.');
+    return successResponse(res, result, 'Role mis a jour.');
 
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
@@ -36,43 +33,36 @@ const updateAdminStatus = async (req, res) => {
   }
 };
 
-/**
- * @desc Toggle Ban
- */
 const toggleUserBan = async (req, res) => {
   try {
     const { userId, reason } = req.body;
     const user = await adminService.toggleUserBan(userId, reason, req.user._id);
     
-    // NOTIFICATION TEMPS RÉEL (KICK UTILISATEUR)
     const io = req.app.get('socketio');
     if (io) {
       io.to(userId.toString()).emit(user.isBanned ? 'user_banned' : 'user_unbanned', { reason });
     }
 
     logger.warn(`[AUDIT BAN] ${req.user.email} toggled ban on ${user.email}.`);
-    return successResponse(res, { isBanned: user.isBanned }, user.isBanned ? 'Utilisateur banni.' : 'Bannissement levé.');
+    return successResponse(res, { isBanned: user.isBanned }, user.isBanned ? 'Utilisateur banni.' : 'Bannissement leve.');
 
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
 };
 
-/**
- * @desc Map Settings
- */
 const updateMapSettings = async (req, res) => {
   try {
     const settings = await adminService.updateMapSettings(req.body, req.user._id);
     logger.info(`[AUDIT MAP] Settings updated by ${req.user.email}`);
-    return successResponse(res, settings, 'Paramètres mis à jour.');
+    return successResponse(res, settings, 'Parametres mis a jour.');
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
 };
 
 /**
- * @desc Approve Transaction
+ * @desc Approve Transaction (Securise : Conservation des traces & Push Notifs)
  */
 const approveTransaction = async (req, res) => {
   const session = await mongoose.startSession();
@@ -81,20 +71,23 @@ const approveTransaction = async (req, res) => {
       return await adminService.approveTransaction(req.params.id, req.user._id, session);
     });
 
-    if (result.transaction.proofPublicId) {
-      await subscriptionService.deleteProof(result.transaction.proofPublicId);
-    }
-
     const io = req.app.get('socketio');
     if (io) {
       io.to(result.driver._id.toString()).emit('subscription_validated', {
-        hoursAdded: result.hoursToAdd,
-        totalHours: result.driver.subscription.hoursRemaining
+        daysAdded: result.daysToAdd,
+        expiresAt: result.newExpiryDate
       });
     }
 
+    await notificationService.sendPushNotification(
+      result.driver._id.toString(),
+      "Abonnement Active",
+      "Votre preuve de paiement a ete validee. Vous pouvez reprendre les courses.",
+      { type: 'SUBSCRIPTION_APPROVED' }
+    );
+
     logger.info(`[AUDIT FINANCE] Transaction ${result.transaction._id} approved by ${req.user.email}`);
-    return successResponse(res, { status: 'APPROVED' }, 'Transaction approuvée.');
+    return successResponse(res, { status: 'APPROVED' }, 'Transaction approuvee.');
 
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
@@ -104,101 +97,123 @@ const approveTransaction = async (req, res) => {
 };
 
 /**
- * @desc Reject Transaction
+ * @desc Reject Transaction (Securise : Conservation des traces & Push Notifs)
  */
 const rejectTransaction = async (req, res) => {
+  const session = await mongoose.startSession();
   try {
     const { reason } = req.body;
-    const result = await adminService.rejectTransaction(req.params.id, reason, req.user._id);
-
-    if (result.transaction && result.transaction.proofPublicId) {
-      await subscriptionService.deleteProof(result.transaction.proofPublicId);
-    }
+    
+    const result = await session.withTransaction(async () => {
+      return await adminService.rejectTransaction(req.params.id, reason, req.user._id, session);
+    });
 
     const io = req.app.get('socketio');
     if (io) {
-      io.to(result.transaction.driver.toString()).emit('subscription_rejected', { reason });
+      io.to(result.driver._id.toString()).emit('subscription_rejected', { reason });
     }
 
+    await notificationService.sendPushNotification(
+      result.driver._id.toString(),
+      "Paiement Rejete",
+      `Votre preuve a ete refusee: ${reason}. Veuillez soumettre une image valide.`,
+      { type: 'SUBSCRIPTION_REJECTED' }
+    );
+
     logger.info(`[AUDIT FINANCE] Transaction ${result.transaction._id} rejected by ${req.user.email}`);
-    return successResponse(res, { status: 'REJECTED' }, 'Transaction rejetée.');
+    return successResponse(res, { status: 'REJECTED' }, 'Transaction rejetee.');
 
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
+  } finally {
+    session.endSession();
   }
 };
 
 /**
- * @desc Get Validation Queue
+ * @desc Get Validation Queue (STRICTEMENT LES DOSSIERS ASSIGNES - ROUND ROBIN)
  */
 const getValidationQueue = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const data = await subscriptionService.getPendingTransactions(req.user.role, page);
-    return successResponse(res, data, "File d'attente récupérée.");
+    const limit = 10;
+    const skip = (page - 1) * limit;
+
+    const filter = { status: 'PENDING', assignedTo: req.user._id };
+
+    if (req.user.role === 'superadmin' && req.query.viewAll === 'true') {
+      delete filter.assignedTo; 
+    }
+
+    const [transactions, total] = await Promise.all([
+      Transaction.find(filter)
+        .populate('user', 'name phone email currentLocation')
+        .sort({ createdAt: 1 }) 
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Transaction.countDocuments(filter)
+    ]);
+
+    const data = {
+      transactions,
+      pagination: {
+        page,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    };
+
+    return successResponse(res, data, "File d'attente recuperee.");
   } catch (error) {
-    return errorResponse(res, error.message, 500);
+    console.error("[VALIDATION QUEUE ERROR]:", error);
+    return errorResponse(res, "Erreur lors de la recuperation des dossiers.", 500);
   }
 };
 
-/**
- * @desc Dashboard Stats
- */
 const getDashboardStats = async (req, res) => {
   try {
     const stats = await adminService.getDashboardStats();
-    return successResponse(res, stats, "Statistiques récupérées.");
+    return successResponse(res, stats, "Statistiques recuperees.");
   } catch (error) {
     logger.error(`[ADMIN STATS] Erreur: ${error.message}`);
-    return errorResponse(res, "Impossible de récupérer les statistiques.", 500);
+    return errorResponse(res, "Impossible de recuperer les statistiques.", 500);
   }
 };
 
-/**
- * @desc Get All Users
- */
 const getAllUsers = async (req, res) => {
   try {
     const result = await adminService.getAllUsers(req.query, req.user.role);
-    return successResponse(res, { users: result.users, pagination: result.pagination }, "Utilisateurs récupérés.");
+    return successResponse(res, { users: result.users, pagination: result.pagination }, "Utilisateurs recuperes.");
   } catch (error) {
     logger.error(`[ADMIN USERS] Erreur: ${error.message}`);
-    return errorResponse(res, "Impossible de récupérer les utilisateurs.", 500);
+    return errorResponse(res, "Impossible de recuperer les utilisateurs.", 500);
   }
 };
 
-/**
- * @desc Finance Data
- */
 const getFinanceData = async (req, res) => {
   try {
     const data = await adminService.getFinanceData(req.query.period);
-    return successResponse(res, data, "Données financières récupérées.");
+    return successResponse(res, data, "Donnees financieres recuperees.");
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
 };
 
-/**
- * @desc Toggle Promo
- */
 const togglePromo = async (req, res) => {
   try {
     const result = await adminService.togglePromo(req.body.isActive, req.user._id);
-    return successResponse(res, result, "Statut promo mis à jour.");
+    return successResponse(res, result, "Statut promo mis a jour.");
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
 };
 
-/**
- * @desc Update Wave Links
- */
 const updateWaveLinks = async (req, res) => {
   try {
     const { weeklyLink, monthlyLink } = req.body;
     const result = await adminService.updateWaveLinks(weeklyLink, monthlyLink, req.user._id);
-    return successResponse(res, result, "Liens Wave mis à jour.");
+    return successResponse(res, result, "Liens Wave mis a jour.");
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
