@@ -25,13 +25,14 @@ const rideSchema = new mongoose.Schema({
     coordinates: { type: [Number], required: true, index: '2dsphere' } 
   },
 
+  // Historique conservant le type de vehicule pour la facturation ou les statistiques
   forfait: { 
     type: String, 
     enum: ['ECHO', 'STANDARD', 'VIP'], 
     default: 'STANDARD' 
   },
 
-  // NOUNOUVEAU : Nombre de passagers (Par defaut 1, maximum la capacite d'un taxi)
+  // Capacite de transport (1 par defaut, 4 maximum)
   passengersCount: { 
     type: Number, 
     required: true, 
@@ -40,10 +41,10 @@ const rideSchema = new mongoose.Schema({
     max: [4, 'Maximum 4 passagers autorises'] 
   },
 
-  // Moteur de Prix & Negociation
+  // Tarification et distance
   distance: { type: Number, required: true }, 
   
-  // Les options calculees par le serveur (Securite)
+  // Options de tarification pre-calculees par le moteur de prix
   priceOptions: [{
     label: { type: String, enum: ['ECO', 'STANDARD', 'PREMIUM'] },
     amount: { type: Number },
@@ -70,10 +71,10 @@ const rideSchema = new mongoose.Schema({
 
   rejectedDrivers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 
-  // SECURITE : Timer pour tuer les negos zombies (60s)
+  // Securite : Nettoyage automatique des sessions de negociation orphelines
   negotiationStartedAt: { type: Date },
 
-  // Dates et tracabilite absolue
+  // Tracabilite des etapes de la course
   createdAt: { type: Date, default: Date.now },
   acceptedAt: { type: Date },
   arrivedAt: { type: Date },
@@ -84,12 +85,11 @@ const rideSchema = new mongoose.Schema({
   rejectionReason: { type: String }
 });
 
-// Index Simples
+// Index de performance simples
 rideSchema.index({ status: 1 });
 rideSchema.index({ driver: 1 });
 
-// SECURITE : Index Composite
-// Optimise la verification "Est-ce que ce rider a DEJA une course active ?"
+// Index de performance composite pour la verification d'unicite des courses actives
 rideSchema.index({ rider: 1, status: 1 });
 
 module.exports = mongoose.model('Ride', rideSchema);

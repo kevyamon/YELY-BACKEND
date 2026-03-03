@@ -24,7 +24,15 @@ const pointSchema = z.object({
 const requestRideSchema = z.object({
   origin: pointSchema,
   destination: pointSchema,
-  forfait: z.enum(['ECHO', 'STANDARD', 'VIP']).optional().default('STANDARD')
+  // Le forfait est conserve pour la retrocompatibilite mais rendu passif
+  forfait: z.enum(['ECHO', 'STANDARD', 'VIP']).optional().default('STANDARD'),
+  // Ajout strict du nombre de passagers pour eviter la suppression silencieuse par Zod
+  passengersCount: z.number({ invalid_type_error: "Le nombre de passagers doit etre un nombre" })
+    .int("Le nombre de passagers doit etre un entier")
+    .min(1, "Il faut au moins 1 passager")
+    .max(4, "Maximum 4 passagers autorises")
+    .optional()
+    .default(1)
 }); 
 
 const rideActionSchema = z.object({

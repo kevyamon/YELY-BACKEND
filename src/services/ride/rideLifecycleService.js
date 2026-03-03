@@ -75,9 +75,9 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       }
     }
 
-    // EXTRACTION DU NOMBRE DE PASSAGERS AVEC FALLBACK A 1
+    // Extraction securisee post-validation Zod
     const { origin, destination, forfait, passengersCount } = rideData; 
-    const count = Math.max(1, Math.min(4, Number(passengersCount) || 1));
+    const count = passengersCount || 1;
 
     const originCoords = [parseFloat(origin.coordinates[0]), parseFloat(origin.coordinates[1])];
     const destCoords = [parseFloat(destination.coordinates[0]), parseFloat(destination.coordinates[1])];
@@ -88,7 +88,7 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
 
     if (distance < 0.1) throw new AppError('Distance invalide.', 400);
 
-    // INJECTION DANS LE MOTEUR DE PRIX
+    // Injection dans le moteur de prix
     const pricingResult = await pricingService.generatePriceOptions(originCoords, destCoords, distance, count);
 
     const ride = await Ride.create({
@@ -241,7 +241,7 @@ const finalizeProposal = async (rideId, riderId, decision) => {
   let result;
 
   try {
-    // UTILISATION DE LA TRANSACTION SECURISEE AVEC RETRY AUTOMATIQUE
+    // Utilisation de la transaction securisee avec retry automatique
     await session.withTransaction(async () => {
       const ride = await Ride.findOne({ _id: rideId, rider: riderId, status: 'negotiating' }).session(session);
       if (!ride) throw new AppError('Session invalide.', 404);
