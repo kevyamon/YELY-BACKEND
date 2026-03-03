@@ -51,7 +51,6 @@ const userSchema = new mongoose.Schema({
   loginAttempts: { type: Number, required: true, default: 0 },
   lockUntil: { type: Date },
   
-  // RETRAIT DE LA VALIDATION TROP STRICTE QUI BLOQUAIT LE $NEAR
   currentLocation: {
     type: { type: String, enum: ['Point'], default: 'Point' },
     coordinates: { type: [Number], default: [0, 0] }
@@ -91,16 +90,6 @@ const userSchema = new mongoose.Schema({
 });
 
 userSchema.index({ currentLocation: '2dsphere' });
-
-// ISOLATION DU SUPERADMIN (Ghost Mode Mongoose)
-// Intercepte toutes les requetes find() pour masquer l'email central
-userSchema.pre(/^find/, function(next) {
-  const adminMail = process.env.ADMIN_MAIL;
-  if (adminMail) {
-    this.find({ email: { $ne: adminMail } });
-  }
-  next();
-});
 
 userSchema.pre('validate', function(next) {
   if (this.email) this.email = this.email.toLowerCase().trim();
