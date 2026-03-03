@@ -109,9 +109,24 @@ const rateRide = async (req, res) => {
   }
 };
 
+// 🚀 NOUVEAU : getRideHistory
+const getRideHistory = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    
+    const result = await rideService.getRideHistory(req.user, page, limit);
+    
+    return successResponse(res, result, 'Historique recupere');
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500);
+  }
+};
+
 module.exports = {
   markAsArrived,
   startRide,
   completeRide,
-  rateRide
+  rateRide,
+  getRideHistory // <-- Exporté ici
 };

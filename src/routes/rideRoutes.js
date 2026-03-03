@@ -17,6 +17,9 @@ router.post('/emergency-cancel', protect, authorize('rider', 'superadmin'), ride
 router.put('/:id/cancel', protect, authorize('rider', 'driver', 'superadmin'), rideController.cancelRide);
 router.put('/:id/rate', protect, authorize('rider', 'superadmin'), rideController.rateRide);
 
+// NOUVELLE ROUTE : Historique
+router.get('/history', protect, rideController.getRideHistory);
+
 // ROUTES D'ACTION AVEC VALIDATION STRICTE DU BODY
 router.post('/request', protect, authorize('rider', 'superadmin'), validate(requestRideSchema), rideController.requestRide);
 router.post('/lock', protect, authorize('driver', 'superadmin'), validate(rideActionSchema), rideController.lockRide);

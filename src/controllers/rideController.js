@@ -19,5 +19,6 @@ module.exports = {
   markAsArrived: rideExecutionController.markAsArrived,
   startRide: rideExecutionController.startRide,
   completeRide: rideExecutionController.completeRide,
-  rateRide: rideExecutionController.rateRide
+  rateRide: rideExecutionController.rateRide,
+  getRideHistory: rideExecutionController.getRideHistory // <-- Ajouté ici
 };

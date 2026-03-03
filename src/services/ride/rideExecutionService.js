@@ -88,7 +88,6 @@ const completeRideSession = async (driverId, rideId) => {
   let result;
   
   try {
-    // withTransaction gere automatiquement les retries en cas de WriteConflict (TransientTransactionError)
     await session.withTransaction(async () => {
       const ride = await Ride.findOne({ _id: rideId, driver: driverId }).session(session);
       
@@ -218,10 +217,47 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
   }
 };
 
+// 🚀 NOUVEAU : Récupération de l'historique paginé
+const getRideHistory = async (user, page = 1, limit = 20) => {
+  const skip = (page - 1) * limit;
+  
+  // Le filtre dépend du rôle
+  const filter = {};
+  if (user.role === 'rider') {
+    filter.rider = user._id;
+  } else if (user.role === 'driver') {
+    filter.driver = user._id;
+  }
+
+  // On exclut les courses pending/searching qui ne sont pas pertinentes dans l'historique
+  filter.status = { $nin: ['pending', 'searching'] };
+
+  const rides = await Ride.find(filter)
+    .populate('rider', 'name profilePicture')
+    .populate('driver', 'name profilePicture vehicle')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+  const total = await Ride.countDocuments(filter);
+
+  return {
+    rides,
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit)
+    }
+  };
+};
+
 module.exports = {
   markRideAsArrived,
   startRideSession,
   completeRideSession,
   submitRideRating,
-  checkRideProgressOnLocationUpdate
+  checkRideProgressOnLocationUpdate,
+  getRideHistory // <-- Exporté ici
 };
