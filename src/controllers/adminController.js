@@ -61,9 +61,6 @@ const updateMapSettings = async (req, res) => {
   }
 };
 
-/**
- * @desc Approve Transaction (Securise : Conservation des traces & Push Notifs)
- */
 const approveTransaction = async (req, res) => {
   const session = await mongoose.startSession();
   try {
@@ -96,9 +93,6 @@ const approveTransaction = async (req, res) => {
   }
 };
 
-/**
- * @desc Reject Transaction (Securise : Conservation des traces & Push Notifs)
- */
 const rejectTransaction = async (req, res) => {
   const session = await mongoose.startSession();
   try {
@@ -131,7 +125,7 @@ const rejectTransaction = async (req, res) => {
 };
 
 /**
- * @desc Get Validation Queue (STRICTEMENT LES DOSSIERS ASSIGNES - ROUND ROBIN)
+ * @desc Get Validation Queue (Correction Filtres et Population)
  */
 const getValidationQueue = async (req, res) => {
   try {
@@ -139,15 +133,17 @@ const getValidationQueue = async (req, res) => {
     const limit = 10;
     const skip = (page - 1) * limit;
 
-    const filter = { status: 'PENDING', assignedTo: req.user._id };
+    const filter = { status: 'PENDING' };
 
-    if (req.user.role === 'superadmin' && req.query.viewAll === 'true') {
-      delete filter.assignedTo; 
+    // Isolation stricte: Un simple admin ne voit que ses assignations
+    if (req.user.role !== 'superadmin') {
+      filter.assignedTo = req.user._id;
     }
 
     const [transactions, total] = await Promise.all([
       Transaction.find(filter)
         .populate('user', 'name phone email currentLocation')
+        .populate('assignedTo', 'name email') // Extraction du nom du moderateur en charge
         .sort({ createdAt: 1 }) 
         .skip(skip)
         .limit(limit)
@@ -166,7 +162,7 @@ const getValidationQueue = async (req, res) => {
 
     return successResponse(res, data, "File d'attente recuperee.");
   } catch (error) {
-    console.error("[VALIDATION QUEUE ERROR]:", error);
+    logger.error(`[VALIDATION QUEUE ERROR]: ${error.message}`);
     return errorResponse(res, "Erreur lors de la recuperation des dossiers.", 500);
   }
 };

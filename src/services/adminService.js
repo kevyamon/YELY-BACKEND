@@ -97,7 +97,7 @@ const updateMapSettings = async (data, requesterId) => {
 };
 
 /**
- * REPARATION SECURITE : Gestion par Dates et Journalisation stricte
+ * REPARATION SECURITE : Gestion par Dates, MAJ du statut strict et Invalidation Cache
  */
 const approveTransaction = async (transactionId, validatorId, session) => {
   const transaction = await Transaction.findOne({ _id: transactionId, status: 'PENDING' }).session(session);
@@ -114,7 +114,12 @@ const approveTransaction = async (transactionId, validatorId, session) => {
   }
   newExpiryDate.setDate(newExpiryDate.getDate() + daysToAdd);
 
+  // MAJ critique du statut pour liberer le Gatekeeper
   driver.subscriptionExpiresAt = newExpiryDate;
+  driver.subscriptionStatus = 'active'; 
+  if (driver.subscription) {
+    driver.subscription.status = 'active';
+  }
   await driver.save({ session });
 
   transaction.status = 'APPROVED';
@@ -129,6 +134,9 @@ const approveTransaction = async (transactionId, validatorId, session) => {
   const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA validee. +${daysToAdd} jours ajoutes pour ${driver.email}`;
   await logSystemAction(validatorId, 'APPROVE_SUBSCRIPTION', driver._id, details, session);
   
+  // Invalidation du cache pour forcer le rafraichissement des donnees Redux
+  await redisClient.del(`auth:user:${driver._id}`);
+
   return { transaction, driver, daysToAdd, newExpiryDate };
 };
 
@@ -145,10 +153,24 @@ const rejectTransaction = async (transactionId, reason, validatorId, session) =>
   await transaction.save({ session });
 
   const driver = await User.findById(transaction.user).session(session);
+  
+  if (driver) {
+    // MAJ critique du statut pour liberer le Gatekeeper et permettre une nouvelle tentative
+    driver.subscriptionStatus = 'inactive';
+    if (driver.subscription) {
+        driver.subscription.status = 'inactive';
+    }
+    await driver.save({ session });
 
-  // Log systeme stricte cible sur le chauffeur
-  const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA rejetee. Motif: ${reason}`;
-  await logSystemAction(validatorId, 'REJECT_SUBSCRIPTION', driver ? driver._id : transaction.user, details, session);
+    // Log systeme stricte cible sur le chauffeur
+    const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA rejetee. Motif: ${reason}`;
+    await logSystemAction(validatorId, 'REJECT_SUBSCRIPTION', driver._id, details, session);
+    
+    // Invalidation du cache
+    await redisClient.del(`auth:user:${driver._id}`);
+  } else {
+    await logSystemAction(validatorId, 'REJECT_SUBSCRIPTION', transaction.user, `Transaction [${transaction._id}] rejetee (Chauffeur introuvable). Motif: ${reason}`, session);
+  }
   
   return { transaction, driver };
 };
