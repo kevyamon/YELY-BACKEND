@@ -40,7 +40,6 @@ const updateUserRole = async (userId, action, requesterId, session) => {
   await user.save({ session });
 
   await logSystemAction(requesterId, `${action}_USER`, user._id, `De ${oldRole} vers ${user.role}`, session);
-  
   await redisClient.del(`auth:user:${user._id}`);
   
   return { email: user.email, newRole: user.role };
@@ -60,7 +59,6 @@ const toggleUserBan = async (userId, reason, requesterId) => {
 
     await logSystemAction(requesterId, user.isBanned ? 'BAN_USER' : 'UNBAN_USER', user._id, reason, session);
     await session.commitTransaction();
-    
     await redisClient.del(`auth:user:${user._id}`);
     
     return user;
@@ -134,7 +132,7 @@ const rejectTransaction = async (transactionId, reason, validatorId, session) =>
 const getDashboardStats = async () => {
   const [totalUsers, activeDrivers, pendingValidations, revenueData] = await Promise.all([
     User.countDocuments({ role: { $in: ['rider', 'driver'] } }),
-    User.countDocuments({ role: 'driver', 'subscription.isActive': true }),
+    User.countDocuments({ role: 'driver', isAvailable: true }),
     Transaction.countDocuments({ status: 'PENDING' }),
     Transaction.aggregate([
       { $match: { status: 'APPROVED' } },
@@ -155,8 +153,7 @@ const getFinanceData = async (period) => {
     { $match: { status: 'APPROVED' } },
     { $group: { _id: '$type', totalAmount: { $sum: '$amount' }, count: { $sum: 1 } } }
   ];
-  const stats = await Transaction.aggregate(pipeline);
-  return stats;
+  return await Transaction.aggregate(pipeline);
 };
 
 const togglePromo = async (isActive, requesterId) => {
@@ -175,13 +172,13 @@ const updateWaveLinks = async (weeklyLink, monthlyLink, requesterId) => {
   let settings = await Settings.findOne();
   if (!settings) settings = new Settings();
   
-  if (weeklyLink) settings.waveWeeklyLink = weeklyLink;
-  if (monthlyLink) settings.waveMonthlyLink = monthlyLink;
+  if (weeklyLink) settings.waveLinkWeekly = weeklyLink;
+  if (monthlyLink) settings.waveLinkMonthly = monthlyLink;
   settings.updatedBy = requesterId;
   
   await settings.save();
-  await logSystemAction(requesterId, 'UPDATE_WAVE_LINKS', settings._id, 'Mise a jour des liens de paiement');
-  return { waveWeeklyLink: settings.waveWeeklyLink, waveMonthlyLink: settings.waveMonthlyLink };
+  await logSystemAction(requesterId, 'UPDATE_WAVE_LINKS', settings._id, 'Mise a jour liens Wave');
+  return { waveLinkWeekly: settings.waveLinkWeekly, waveLinkMonthly: settings.waveLinkMonthly };
 };
 
 const getAllUsers = async (query, userRole) => {
