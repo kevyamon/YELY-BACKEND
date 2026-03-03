@@ -1,21 +1,17 @@
 // src/config/logger.js
-// SYSTÈME DE LOGS CENTRALISÉ - Masquage PII (RGPD Compliant) & Stack Traces
-// CSCSM Level: Bank Grade
+// SYSTEME DE LOGS CENTRALISE - Masquage PII (RGPD Compliant) & Stack Traces
+// STANDARD: Industriel / Bank Grade
 
 const winston = require('winston');
 const path = require('path');
 const { env } = require('./env');
 
-// 🛡️ SÉCURITÉ RGPD & PCI-DSS : Liste des champs sensibles (Credentials + PII)
+// SECURITE RGPD & PCI-DSS : Liste des champs sensibles (Credentials + PII)
 const SENSITIVE_FIELDS = [
   'password', 'token', 'accessToken', 'refreshToken', 'currentPassword', 'newPassword',
-  'email', 'phone', 'idCard', 'license', 'insurance', 'fcmToken' // 🚨 Ajout des PII Critiques
+  'email', 'phone', 'idCard', 'license', 'insurance', 'fcmToken' 
 ];
 
-/**
- * Format de masquage (Redaction)
- * Remplace rigoureusement les valeurs sensibles par [MASKED] dans les logs
- */
 const redactFormat = winston.format((info) => {
   const mask = (obj) => {
     if (!obj || typeof obj !== 'object') return;
@@ -28,12 +24,10 @@ const redactFormat = winston.format((info) => {
     }
   };
 
-  // Masquage du message principal s'il s'agit d'un objet JSON
   if (info.message && typeof info.message === 'object') {
     mask(info.message);
   }
   
-  // Masquage des métadonnées injectées (comme des requêtes brutes ou objets DB)
   for (const sym of Object.getOwnPropertySymbols(info)) {
     if (typeof info[sym] === 'object') {
       mask(info[sym]);
@@ -49,9 +43,9 @@ winston.addColors(colors);
 
 const baseFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
-  winston.format.errors({ stack: true }), // 🚀 Doit être placé AVANT JSON pour extraire la stack proprement
-  redactFormat(), // Application du masquage avant formatage final
-  winston.format.json() // Format JSON pour une meilleure analyse (Datadog/ELK)
+  winston.format.errors({ stack: true }), 
+  redactFormat(), 
+  winston.format.json() 
 );
 
 const consoleFormat = winston.format.combine(
@@ -68,19 +62,28 @@ const logger = winston.createLogger({
   format: baseFormat,
   transports: [
     new winston.transports.Console({ format: consoleFormat }),
-    // Fichier Erreurs (Rotation gérée par maxsize/maxFiles)
     new winston.transports.File({
       filename: path.join('logs', 'error.log'),
       level: 'error',
-      maxsize: 5242880, // 5MB
+      maxsize: 5242880, 
       maxFiles: 5,
     }),
     new winston.transports.File({
       filename: path.join('logs', 'all.log'),
-      maxsize: 10485760, // 10MB
+      maxsize: 10485760, 
       maxFiles: 7,
     }),
   ],
+  // CAPTURE DES CRASHS FATALS (Nouveau filet de securite)
+  exceptionHandlers: [
+    new winston.transports.Console({ format: consoleFormat }),
+    new winston.transports.File({ filename: path.join('logs', 'exceptions.log') })
+  ],
+  rejectionHandlers: [
+    new winston.transports.Console({ format: consoleFormat }),
+    new winston.transports.File({ filename: path.join('logs', 'rejections.log') })
+  ],
+  exitOnError: false // Permet a Winston de loguer l'erreur avant que le processus ne soit tue
 });
 
 module.exports = logger;
