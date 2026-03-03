@@ -1,6 +1,6 @@
 // src/models/User.js
 // MODELE UTILISATEUR - Profils, Identites & Stats
-// CSCSM Level: Bank Grade
+// STANDARD: Industriel / Bank Grade
 
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
@@ -48,20 +48,29 @@ const userSchema = new mongoose.Schema({
   isBanned: { type: Boolean, default: false, index: true },
   banReason: { type: String, default: '', maxlength: 500 },
   
-  // Securite Anti-Bruteforce
   loginAttempts: { type: Number, required: true, default: 0 },
   lockUntil: { type: Date },
   
   currentLocation: {
     type: { type: String, enum: ['Point'], default: 'Point' },
-    coordinates: { type: [Number], default: [0, 0] }
+    coordinates: { 
+      type: [Number], 
+      default: [0, 0],
+      validate: {
+        validator: function(v) {
+          if (!Array.isArray(v) || v.length !== 2) return false;
+          const [lng, lat] = v;
+          return lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90;
+        },
+        message: 'Coordonnees GPS invalides (Longitude: [-180, 180], Latitude: [-90, 90])'
+      }
+    }
   },
 
-  fcmToken: { type: String, default: null },
+  fcmToken: { type: String, default: null, select: false },
   
   isAvailable: { type: Boolean, default: false, index: true },
 
-  // STATS DASHBOARD : Suivi des performances
   totalRides: { type: Number, default: 0 },
   totalEarnings: { type: Number, default: 0 },
   rating: { type: Number, default: 5.0 },
@@ -87,13 +96,13 @@ const userSchema = new mongoose.Schema({
   }
 }, { 
   timestamps: true,
+  strict: true,
   toJSON: { virtuals: true },
   toObject: { virtuals: true }
 });
 
 userSchema.index({ currentLocation: '2dsphere' });
 
-// Normalisation avant validation
 userSchema.pre('validate', function(next) {
   if (this.email) this.email = this.email.toLowerCase().trim();
   if (this.phone) this.phone = this.phone.replace(/[\s-]/g, '');
@@ -101,7 +110,6 @@ userSchema.pre('validate', function(next) {
   next();
 });
 
-// Hashage du mot de passe
 userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
   try {
@@ -117,7 +125,6 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-// SECURITE RENDER : Empeche le crash OverwriteModelError
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 
 module.exports = User;

@@ -1,6 +1,6 @@
 // src/services/ride/rideLifecycleService.js
 // SERVICE METIER - Cycle de vie, creation, annulation et negociation
-// CSCSM Level: Bank Grade
+// STANDARD: Industriel / Bank Grade
 
 const mongoose = require('mongoose');
 const axios = require('axios');
@@ -50,6 +50,31 @@ const getRouteDistance = async (originCoords, destCoords) => {
   }
 };
 
+const dispatchToNearbyDrivers = async (ride) => {
+  const maxDistanceInMeters = 5000;
+  const originCoords = ride.origin.coordinates;
+
+  const drivers = await userRepository.findAvailableDriversNear(
+    originCoords,
+    maxDistanceInMeters,
+    ride.forfait,
+    ride.rejectedDrivers
+  );
+
+  logger.info(`[DISPATCH] ${drivers.length} chauffeurs trouves dans un rayon de ${maxDistanceInMeters}m pour la course ${ride._id}.`);
+
+  drivers.forEach(driver => {
+    sendPushNotification(
+      driver._id,
+      'Nouvelle demande de course',
+      `Course de ${ride.distance} km disponible a proximite.`,
+      { rideId: ride._id.toString(), type: 'NEW_RIDE_REQUEST' }
+    ).catch(err => logger.error(`[PUSH ERROR] Echec d'envoi au chauffeur ${driver._id}: ${err.message}`));
+  });
+
+  return drivers;
+};
+
 const createRideRequest = async (riderId, rideData, redisClient) => {
   const lockKey = `lock:ride_req:${riderId}`;
   let lockAcquired = false;
@@ -75,7 +100,6 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       }
     }
 
-    // Extraction securisee post-validation Zod
     const { origin, destination, forfait, passengersCount } = rideData; 
     const count = passengersCount || 1;
 
@@ -88,7 +112,6 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
 
     if (distance < 0.1) throw new AppError('Distance invalide.', 400);
 
-    // Injection dans le moteur de prix
     const pricingResult = await pricingService.generatePriceOptions(originCoords, destCoords, distance, count);
 
     const ride = await Ride.create({
@@ -109,24 +132,7 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       { delay: 90000, removeOnComplete: true }
     );
 
-    const maxDistanceInMeters = 5000;
-    const drivers = await userRepository.findAvailableDriversNear(
-      originCoords,
-      maxDistanceInMeters,
-      null, 
-      []
-    );
-    
-    logger.info(`[DISPATCH] ${drivers.length} chauffeurs trouves dans un rayon de ${maxDistanceInMeters}m.`);
-
-    drivers.forEach(driver => {
-      sendPushNotification(
-        driver._id,
-        'Nouvelle demande de course',
-        `Course de ${distance} km disponible a proximite.`,
-        { rideId: ride._id.toString(), type: 'NEW_RIDE_REQUEST' }
-      ).catch(err => logger.error(`[PUSH ERROR] ${err.message}`));
-    });
+    const drivers = await dispatchToNearbyDrivers(ride);
 
     return { ride, drivers };
   } finally {
@@ -241,7 +247,6 @@ const finalizeProposal = async (rideId, riderId, decision) => {
   let result;
 
   try {
-    // Utilisation de la transaction securisee avec retry automatique
     await session.withTransaction(async () => {
       const ride = await Ride.findOne({ _id: rideId, rider: riderId, status: 'negotiating' }).session(session);
       if (!ride) throw new AppError('Session invalide.', 404);
@@ -284,7 +289,8 @@ const cancelSearchTimeout = async (io, rideId) => {
       message: "Aucun chauffeur n'est disponible pour le moment."
     });
     
-    io.to('drivers').emit('ride_taken_by_other', { rideId });
+    // Protection: On n'emet plus à tous les chauffeurs, mais au moins on libère l'état global
+    io.emit('ride_taken_by_other', { rideId }); 
   }
 };
 
@@ -298,7 +304,14 @@ const releaseStuckNegotiations = async (io, rideId) => {
     ride.negotiationStartedAt = null;
     ride.rejectedDrivers.push(rejectedDriverId);
     await ride.save();
+    
     io.to(rejectedDriverId.toString()).emit('ride_taken_by_other', { rideId });
+
+    // RELANCE AUTOMATIQUE : On cherche les prochains chauffeurs
+    const nextDrivers = await dispatchToNearbyDrivers(ride);
+    nextDrivers.forEach(driver => {
+      io.to(driver._id.toString()).emit('new_ride_request', { ride });
+    });
   }
 };
 
@@ -312,5 +325,6 @@ module.exports = {
   submitPriceProposal,
   finalizeProposal,
   cancelSearchTimeout,
-  releaseStuckNegotiations
+  releaseStuckNegotiations,
+  dispatchToNearbyDrivers
 };

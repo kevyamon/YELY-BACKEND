@@ -1,63 +1,75 @@
 // src/repositories/userRepository.js
 // DATA ACCESS OBJECT (DAO) - Utilisateurs
-// CSCSM Level: Bank Grade
+// STANDARD: Industriel / Bank Grade
 
 const User = require('../models/User');
+const AppError = require('../utils/AppError');
 
-/**
- * Recherche des chauffeurs disponibles par proximité géospatiale
- * Exclut ceux qui sont bannis, inactifs.
- * Permet aussi d'exclure les chauffeurs ayant déjà refusé la course.
- */
 const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait, rejectedDriverIds = []) => {
-  // SECURITE: Formatage strict [longitude, latitude] en Float pour MongoDB 2dsphere
+  if (!Array.isArray(coordinates) || coordinates.length !== 2) {
+    throw new AppError('Format de coordonnees invalide pour la recherche geospatiale.', 400);
+  }
+
   const safeLng = parseFloat(coordinates[0]);
   const safeLat = parseFloat(coordinates[1]);
+
+  if (isNaN(safeLng) || isNaN(safeLat)) {
+    throw new AppError('Les coordonnees doivent etre des nombres valides.', 400);
+  }
+
+  const safeMaxDistance = Math.min(Math.max(parseFloat(maxDistanceMeters), 0), 50000);
 
   const query = {
     role: 'driver',
     isAvailable: true,
     isBanned: false,
-    // 'subscription.isActive': true, ---> DESACTIVE POUR LES TESTS (Phase 9)
     currentLocation: {
       $near: {
         $geometry: { type: "Point", coordinates: [safeLng, safeLat] },
-        $maxDistance: maxDistanceMeters
+        $maxDistance: safeMaxDistance
       }
     }
   };
 
-  // Exclusion des chauffeurs ayant déjà refusé
-  if (rejectedDriverIds && rejectedDriverIds.length > 0) {
-    query._id = { $nin: rejectedDriverIds };
+  if (Array.isArray(rejectedDriverIds) && rejectedDriverIds.length > 0) {
+    const validRejectedIds = rejectedDriverIds.filter(id => id);
+    if (validRejectedIds.length > 0) {
+      query._id = { $nin: validRejectedIds };
+    }
   }
 
-  // Filtrage par catégorie de véhicule si spécifié
   if (forfait) {
     query['vehicle.category'] = forfait;
   }
 
-  // SECURITE : Uniquement des inclusions pour éviter le crash MongoDB (exclusion de password implicite)
-  return User.find(query).select('name phone vehicle currentLocation rating fcmToken').limit(5);
+  return User.find(query)
+    .select('name phone vehicle currentLocation rating fcmToken')
+    .limit(10)
+    .lean()
+    .exec();
 };
 
-/**
- * Recherche des chauffeurs actifs à partir d'une liste d'IDs (Redis Geo)
- * Exclut les chauffeurs ayant déjà refusé la course
- */
 const findActiveDriversByIds = async (nearbyDriverIds, rejectedDriverIds = []) => {
-  return User.find({
-    _id: { $in: nearbyDriverIds, $nin: rejectedDriverIds },
+  if (!Array.isArray(nearbyDriverIds) || nearbyDriverIds.length === 0) return [];
+
+  const query = {
+    _id: { $in: nearbyDriverIds },
     role: 'driver',
     isAvailable: true,
     isBanned: false
-    // 'subscription.isActive': true ---> DESACTIVE ICI AUSSI POUR LES TESTS
-  }).select('name phone vehicle currentLocation rating fcmToken').limit(5);
+  };
+
+  if (Array.isArray(rejectedDriverIds) && rejectedDriverIds.length > 0) {
+    query._id.$nin = rejectedDriverIds.filter(id => id);
+  }
+
+  return User.find(query)
+    .select('name phone vehicle currentLocation rating fcmToken')
+    .limit(10)
+    .lean()
+    .exec();
 };
 
-/**
- * Met à jour la disponibilité d'un chauffeur (Supporte les transactions Mongoose)
- */
 const updateDriverAvailability = async (driverId, isAvailable, session = null) => {
   const options = session ? { session } : {};
   return User.findByIdAndUpdate(driverId, { isAvailable }, options);

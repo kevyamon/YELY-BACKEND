@@ -1,17 +1,14 @@
 // src/controllers/ride/rideLifecycleController.js
 // SOUS-CONTROLEUR - Cycle de vie : Estimation, Demande, Annulation, Negociation
-// CSCSM Level: Bank Grade
+// STANDARD: Industriel / Bank Grade
 
-const rideService = require('../../services/rideService');
-const userRepository = require('../../repositories/userRepository');
+const rideService = require('../../services/ride/rideLifecycleService'); // Lien direct vers le service cible
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 const { successResponse, errorResponse } = require('../../utils/responseHandler');
 
 const estimateRide = async (req, res) => {
   try {
-    // Note : L'estimation ici est basique. Pour une estimation reelle avec passagers,
-    // on l'ajustera plutot cote Frontend ou via une nouvelle route si necessaire.
     const { pickupLat, pickupLng, dropoffLat, dropoffLng } = req.query;
     
     if (!pickupLat || !pickupLng || !dropoffLat || !dropoffLng) {
@@ -21,6 +18,10 @@ const estimateRide = async (req, res) => {
     const origin = [parseFloat(pickupLng), parseFloat(pickupLat)];
     const destination = [parseFloat(dropoffLng), parseFloat(dropoffLat)];
     
+    if (origin.some(isNaN) || destination.some(isNaN)) {
+      throw new AppError('Format de coordonnees GPS invalide', 400);
+    }
+
     const distance = await rideService.getRouteDistance(origin, destination);
     
     const vehicles = [
@@ -38,10 +39,11 @@ const estimateRide = async (req, res) => {
 const requestRide = async (req, res) => {
   try {
     const redisClient = req.app.get('redis');
-    const { ride, drivers } = await rideService.createRideRequest(req.user._id, req.body, redisClient);
     const io = req.app.get('socketio');
+    
+    const { ride, drivers } = await rideService.createRideRequest(req.user._id, req.body, redisClient);
 
-    logger.info(`[DISPATCH] Course ${ride._id} creee (${ride.passengersCount} passagers). ${drivers.length} chauffeurs trouves.`);
+    logger.info(`[DISPATCH] Course ${ride._id} creee (${ride.passengersCount} passagers). ${drivers.length} chauffeurs cibles.`);
 
     drivers.forEach(driver => {
       io.to(driver._id.toString()).emit('new_ride_request', {
@@ -50,7 +52,7 @@ const requestRide = async (req, res) => {
         destination: ride.destination, 
         distance: ride.distance,
         forfait: ride.forfait,
-        passengersCount: ride.passengersCount, // <-- INJECTION DU NOMBRE DE PASSAGERS
+        passengersCount: ride.passengersCount,
         priceOptions: ride.priceOptions
       });
     });
@@ -79,7 +81,8 @@ const cancelRide = async (req, res) => {
        io.to(ride.rider.toString()).emit('ride_cancelled', { rideId });
     }
     
-    io.to('drivers').emit('ride_taken_by_other', { rideId });
+    // Suppression du broadcast global io.to('drivers').emit('ride_taken_by_other')
+    // Seuls les acteurs directs sont notifies pour des raisons de securite et d'optimisation reseau.
 
     return successResponse(res, { status: 'cancelled' }, 'Course annulee avec succes');
   } catch (error) {
@@ -122,7 +125,7 @@ const lockRide = async (req, res) => {
       vehicle: req.user.vehicle
     });
 
-    io.to('drivers').emit('ride_taken_by_other', { rideId });
+    // Broadcast global supprime ici egalement
 
     return successResponse(res, { 
       rideId: ride._id, 
@@ -194,15 +197,10 @@ const finalizeRide = async (req, res) => {
         message: 'Prix refuse'
       });
 
-      const maxDistance = 5000;
-      const newDrivers = await userRepository.findAvailableDriversNear(
-        result.ride.origin.coordinates,
-        maxDistance, 
-        null, 
-        result.ride.rejectedDrivers
-      );
+      // Remplacement de l'appel direct au repository par le service de dispatch
+      const newDrivers = await rideService.dispatchToNearbyDrivers(result.ride);
 
-      logger.info(`[DISPATCH-RETRY] Recherche relancee pour ${result.ride._id}. ${newDrivers.length} chauffeurs trouves.`);
+      logger.info(`[DISPATCH-RETRY] Recherche relancee pour ${result.ride._id}. ${newDrivers.length} nouveaux chauffeurs trouves.`);
 
       newDrivers.forEach(driver => {
         io.to(driver._id.toString()).emit('new_ride_request', {
@@ -211,7 +209,7 @@ const finalizeRide = async (req, res) => {
           destination: result.ride.destination,
           distance: result.ride.distance,
           forfait: result.ride.forfait,
-          passengersCount: result.ride.passengersCount, // <-- INJECTION ICI AUSSI (CRITIQUE)
+          passengersCount: result.ride.passengersCount,
           priceOptions: result.ride.priceOptions
         });
       });
