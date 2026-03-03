@@ -1,19 +1,22 @@
 // src/repositories/userRepository.js
 // DATA ACCESS OBJECT (DAO) - Utilisateurs
-// STANDARD: Industriel (Recherche assouplie et securisee)
+// STANDARD: Industriel (Sonde de diagnostic active)
 
 const User = require('../models/User');
+const logger = require('../config/logger');
 
 const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait, rejectedDriverIds = []) => {
-  // Tolérance : On cast directement sans faire de blocage de type array strict
   const safeLng = Number(coordinates[0]);
   const safeLat = Number(coordinates[1]);
 
   if (isNaN(safeLng) || isNaN(safeLat)) {
-    return []; // Fallback silencieux plutôt que de faire crasher la route
+    logger.error('[DAO-USER] Coordonnees GPS invalides (NaN) reçues pour la recherche.');
+    return []; 
   }
 
   const safeMaxDistance = Number(maxDistanceMeters) || 5000;
+
+  logger.info(`[DAO-USER] Execution recherche geospatiale : Lng=${safeLng}, Lat=${safeLat}, Rayon=${safeMaxDistance}m`);
 
   const query = {
     role: 'driver',
@@ -27,21 +30,37 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
     }
   };
 
-  // Filtrage robuste des chauffeurs ayant déjà refusé
   if (rejectedDriverIds && rejectedDriverIds.length > 0) {
     query._id = { $nin: rejectedDriverIds };
   }
 
-  // SECURITE CRITIQUE : On force la MAJUSCULE pour correspondre à l'Enum de User.js
-  if (forfait) {
-    query['vehicle.category'] = String(forfait).toUpperCase();
-  }
+  // DESACTIVATION TEMPORAIRE DU FILTRE VEHICULE POUR LE DIAGNOSTIC
+  // if (forfait) {
+  //   query['vehicle.category'] = String(forfait).toUpperCase();
+  // }
 
-  return User.find(query)
-    .select('name phone vehicle currentLocation rating fcmToken')
-    .limit(10)
-    .lean()
-    .exec();
+  try {
+    const drivers = await User.find(query)
+      .select('name phone vehicle currentLocation rating isAvailable')
+      .limit(10)
+      .lean()
+      .exec();
+
+    logger.info(`[DAO-USER] Recherche terminee. Chauffeurs trouves : ${drivers.length}`);
+    
+    if (drivers.length === 0) {
+      // SONDE DE SECOURS : Y a-t-il des chauffeurs en ligne sur toute la planete ?
+      const allActiveDrivers = await User.countDocuments({ role: 'driver', isAvailable: true, isBanned: false });
+      logger.warn(`[DAO-USER] 0 chauffeur dans le rayon. Chauffeurs totaux actuellement 'en ligne' en BDD : ${allActiveDrivers}`);
+    } else {
+      drivers.forEach(d => logger.info(`[DAO-USER] Chauffeur cible : ${d.name} (Dispo: ${d.isAvailable})`));
+    }
+
+    return drivers;
+  } catch (error) {
+    logger.error(`[DAO-USER] Erreur lors de la requete MongoDB : ${error.message}`);
+    return [];
+  }
 };
 
 const findActiveDriversByIds = async (nearbyDriverIds, rejectedDriverIds = []) => {
