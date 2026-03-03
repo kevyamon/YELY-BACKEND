@@ -1,5 +1,5 @@
 // src/server.js
-// SERVEUR YELY - Mode Dev & Production
+// SERVEUR YELY - Mode Dev & Production (Rolling Sessions Actives)
 // STANDARD: Industriel / Bank Grade
 
 const http = require('http');
@@ -10,7 +10,6 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const { z } = require('zod'); 
 
-// Remplacement de l'instanciation locale par le Singleton centralise
 const redis = require('./config/redis'); 
 
 const User = require('./models/User');
@@ -52,10 +51,7 @@ const io = new Server(server, {
   maxHttpBufferSize: 5000 
 });
 
-// --- BLINDAGE TEMPS REEL : Attachement de l'adaptateur Redis ---
-// Permet aux WebSockets de communiquer entre plusieurs serveurs (Scale-Out)
 io.adapter(createAdapter(redis.pubClient, redis.subClient));
-// ---------------------------------------------------------------
 
 app.set('socketio', io);
 app.set('redis', redis);
@@ -108,12 +104,24 @@ io.on('connection', (socket) => {
   if (user.role === 'driver') socket.join('drivers');
 
   socket.on('update_location', async (rawData) => {
-    const isSessionValid = await redis.exists(`auth:user:${user._id}`);
+    // 🛡️ REPARATION: ROLLING SESSION (Le vaccin contre la deconnexion brutale)
+    const cacheKey = `auth:user:${user._id}`;
+    const isSessionValid = await redis.exists(cacheKey);
+    
     if (!isSessionValid) {
-      if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
-      socket.emit('force_disconnect', { reason: 'SESSION_REVOKED' });
-      socket.disconnect(true);
-      return;
+      // Le cache a expire, mais le socket est toujours la. On verifie la BDD pour eviter les faux positifs.
+      const dbUser = await User.findById(user._id).select('-password -__v').lean();
+      if (!dbUser || dbUser.isBanned) {
+        if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
+        socket.emit('force_disconnect', { reason: 'SESSION_REVOKED' });
+        socket.disconnect(true);
+        return;
+      }
+      // Restauration silencieuse du cache
+      await redis.setex(cacheKey, 900, JSON.stringify(dbUser));
+    } else {
+      // Prolongation automatique du cache : un chauffeur qui roule ne sera jamais deconnecte
+      await redis.expire(cacheKey, 900);
     }
 
     const isDev = process.env.NODE_ENV !== 'production';
