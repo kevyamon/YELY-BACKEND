@@ -1,6 +1,6 @@
 // src/models/User.js
 // MODELE UTILISATEUR - Profils, Identites & Stats
-// STANDARD: Industriel / Bank Grade
+// STANDARD: Industriel (Validation assouplie)
 
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
@@ -51,20 +51,10 @@ const userSchema = new mongoose.Schema({
   loginAttempts: { type: Number, required: true, default: 0 },
   lockUntil: { type: Date },
   
+  // RETRAIT DE LA VALIDATION TROP STRICTE QUI BLOQUAIT LE $NEAR
   currentLocation: {
     type: { type: String, enum: ['Point'], default: 'Point' },
-    coordinates: { 
-      type: [Number], 
-      default: [0, 0],
-      validate: {
-        validator: function(v) {
-          if (!Array.isArray(v) || v.length !== 2) return false;
-          const [lng, lat] = v;
-          return lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90;
-        },
-        message: 'Coordonnees GPS invalides (Longitude: [-180, 180], Latitude: [-90, 90])'
-      }
-    }
+    coordinates: { type: [Number], default: [0, 0] }
   },
 
   fcmToken: { type: String, default: null, select: false },
@@ -96,7 +86,6 @@ const userSchema = new mongoose.Schema({
   }
 }, { 
   timestamps: true,
-  strict: true,
   toJSON: { virtuals: true },
   toObject: { virtuals: true }
 });

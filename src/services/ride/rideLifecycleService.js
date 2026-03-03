@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const axios = require('axios');
 const { Queue } = require('bullmq');
 const Ride = require('../../models/Ride');
+const Settings = require('../../models/Settings');
 const userRepository = require('../../repositories/userRepository');
 const pricingService = require('../pricingService');
 const AppError = require('../../utils/AppError');
@@ -51,7 +52,9 @@ const getRouteDistance = async (originCoords, destCoords) => {
 };
 
 const dispatchToNearbyDrivers = async (ride) => {
-  const maxDistanceInMeters = 5000;
+  const appSettings = await Settings.findOne().lean();
+  const maxDistanceInMeters = appSettings?.searchRadiusMeters || 5000;
+  
   const originCoords = ride.origin.coordinates;
 
   const drivers = await userRepository.findAvailableDriversNear(
@@ -289,7 +292,6 @@ const cancelSearchTimeout = async (io, rideId) => {
       message: "Aucun chauffeur n'est disponible pour le moment."
     });
     
-    // Protection: On n'emet plus à tous les chauffeurs, mais au moins on libère l'état global
     io.emit('ride_taken_by_other', { rideId }); 
   }
 };
@@ -307,7 +309,6 @@ const releaseStuckNegotiations = async (io, rideId) => {
     
     io.to(rejectedDriverId.toString()).emit('ride_taken_by_other', { rideId });
 
-    // RELANCE AUTOMATIQUE : On cherche les prochains chauffeurs
     const nextDrivers = await dispatchToNearbyDrivers(ride);
     nextDrivers.forEach(driver => {
       io.to(driver._id.toString()).emit('new_ride_request', { ride });
