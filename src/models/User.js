@@ -37,6 +37,10 @@ const userSchema = new mongoose.Schema({
     minlength: [8, 'Mot de passe trop court'],
     select: false 
   },
+  profilePicture: { 
+    type: String, 
+    default: '' 
+  },
   role: {
     type: String,
     enum: {
@@ -47,6 +51,9 @@ const userSchema = new mongoose.Schema({
   },
   isBanned: { type: Boolean, default: false, index: true },
   banReason: { type: String, default: '', maxlength: 500 },
+  
+  // SOFT DELETE (Anonymisation)
+  isDeleted: { type: Boolean, default: false, index: true },
   
   loginAttempts: { type: Number, required: true, default: 0 },
   lockUntil: { type: Date },
@@ -94,7 +101,9 @@ userSchema.index({ currentLocation: '2dsphere' });
 userSchema.pre('validate', function(next) {
   if (this.email) this.email = this.email.toLowerCase().trim();
   if (this.phone) this.phone = this.phone.replace(/[\s-]/g, '');
-  if (this.name) this.name = this.name.replace(/\s+/g, ' ').trim();
+  if (this.name && this.name !== 'Utilisateur Supprimé') {
+    this.name = this.name.replace(/\s+/g, ' ').trim();
+  }
   next();
 });
 
