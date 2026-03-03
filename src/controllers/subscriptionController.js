@@ -1,40 +1,64 @@
 // src/controllers/subscriptionController.js
-// CONTROLLEUR SOUSCRIPTION - Orchestration & Cleanup
-// CSCSM Level: Bank Grade
+// CONTROLEUR ABONNEMENT - Orchestration des Preuves de Paiement
+// STANDARD: Industriel / Bank Grade
 
 const subscriptionService = require('../services/subscriptionService');
-const fsPromises = require('fs').promises;
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
+/**
+ * Recoit la capture d'ecran et les infos du depot.
+ */
 const submitProof = async (req, res) => {
-  if (!req.file) {
-    return errorResponse(res, "Capture d'écran manquante.", 400);
-  }
-
   try {
-    // Le service gère l'intelligence métier et Cloudinary
-    const transaction = await subscriptionService.processPaymentProof(
-      req.user._id,
-      req.user.email,
-      req.body,
-      req.file.path
+    const { planId, senderPhone } = req.body;
+    
+    if (!planId || !senderPhone || !req.file) {
+      return errorResponse(res, "Donnees ou capture manquante.", 400);
+    }
+
+    const transaction = await subscriptionService.submitProof(
+      req.user._id, 
+      { planId, senderPhone }, 
+      req.file
     );
 
-    return successResponse(res, { 
-      transactionId: transaction._id 
-    }, "Preuve reçue ! Un administrateur va valider votre paiement.", 201);
+    // Message court et simple pour le chauffeur
+    return successResponse(
+      res, 
+      { transactionId: transaction._id }, 
+      "Recu ! Un administrateur verifie votre paiement. Acces sous 15 minutes.", 
+      201
+    );
 
   } catch (error) {
-    return errorResponse(res, error.message, error.status || 500);
-  } finally {
-    // 🧹 NETTOYAGE SYSTÉMATIQUE DU FICHIER LOCAL
-    // Important pour éviter la saturation du disque du serveur
-    if (req.file?.path) {
-      fsPromises.unlink(req.file.path).catch(err => 
-        console.error(`[CLEANUP ERROR] ${req.file.path}:`, err.message)
-      );
-    }
+    console.error("[SUBMISSION ERROR]:", error.message);
+    const statusCode = error.statusCode || 500;
+    return errorResponse(res, error.message || "Erreur lors de l'envoi de la preuve.", statusCode);
   }
 };
 
-module.exports = { submitProof };
+/**
+ * Recupere le statut actuel de l'abonnement pour l'UI.
+ */
+const getStatus = async (req, res) => {
+  try {
+    const isActive = await subscriptionService.checkSubscriptionStatus(req.user._id);
+    const pendingTransaction = await require('../models/Transaction').findOne({ 
+      user: req.user._id, 
+      status: 'PENDING' 
+    });
+
+    return successResponse(res, {
+      isActive,
+      isPending: !!pendingTransaction,
+      expiresAt: req.user.subscriptionExpiresAt
+    });
+  } catch (error) {
+    return errorResponse(res, "Erreur lors de la recuperation du statut.", 500);
+  }
+};
+
+module.exports = {
+  submitProof,
+  getStatus
+};

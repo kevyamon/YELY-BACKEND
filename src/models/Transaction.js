@@ -1,50 +1,68 @@
 // src/models/Transaction.js
-// MODELE TRANSACTION - Bank Grade & Haute Performance (Index & Contraintes)
-// CSCSM Level: Bank Grade
+// MODELE TRANSACTION - Audit Grade & Tracabilite Multi-Admin
+// STANDARD: Industriel / Bank Grade
 
 const mongoose = require('mongoose');
 
 const transactionSchema = new mongoose.Schema({
-  driver: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  
-  // SECURITE : Contrainte financiere absolue pour eviter les falsifications
+  user: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true,
+    index: true
+  },
+  planId: { 
+    type: String, 
+    enum: ['WEEKLY', 'MONTHLY'], 
+    required: true 
+  },
   amount: { 
     type: Number, 
-    required: true,
-    min: [1, 'Le montant doit etre strictement positif'] 
+    required: true 
   },
-  
-  type: { type: String, enum: ['WEEKLY', 'MONTHLY'], required: true },
-  
-  // PERFORMANCE : Index pour la rapidite d'affichage du Dashboard Admin
+  senderPhone: { 
+    type: String, 
+    required: true 
+  },
+  proofUrl: { 
+    type: String, 
+    required: true 
+  },
+  proofPublicId: { 
+    type: String, 
+    required: true 
+  },
+  collectorType: { 
+    type: String, 
+    enum: ['SUPERADMIN', 'PARTNER'], 
+    required: true 
+  },
   status: { 
     type: String, 
     enum: ['PENDING', 'APPROVED', 'REJECTED'], 
     default: 'PENDING',
-    index: true 
+    index: true
   },
-  
-  // Isolation financiere avec Index
   assignedTo: { 
-    type: String, 
-    enum: ['SUPERADMIN', 'ADMIN'], 
-    required: true,
-    index: true 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User',
+    index: true
   },
-  
-  // Preuve Cloudinary
-  proofImageUrl: String,
-  proofPublicId: String, 
-  
-  senderPhone: String,
-  rejectionReason: String,
-  
-  // Tracabilite et Override (Surclassement)
-  validatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  intendedFor: { type: String, enum: ['SUPERADMIN', 'ADMIN'] }
-}, { timestamps: true });
+  rejectionReason: {
+    type: String
+  },
+  auditLog: [{
+    action: String,
+    adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    timestamp: { type: Date, default: Date.now },
+    note: String
+  }]
+}, { 
+  timestamps: true 
+});
 
-// PERFORMANCE : Index compose pour optimiser au maximum la file d'attente
-transactionSchema.index({ status: 1, assignedTo: 1, createdAt: -1 });
+// Index pour les recherches de performance admin
+transactionSchema.index({ status: 1, assignedTo: 1 });
+transactionSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Transaction', transactionSchema);
