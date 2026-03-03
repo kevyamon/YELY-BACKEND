@@ -1,14 +1,18 @@
 // src/server.js
 // SERVEUR YELY - Mode Dev & Production
-// CSCSM Level: Bank Grade
+// STANDARD: Industriel / Bank Grade
 
 const http = require('http');
 const app = require('./app');
 const { Server } = require('socket.io');
+const { createAdapter } = require('@socket.io/redis-adapter');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
-const Redis = require('ioredis');
 const { z } = require('zod'); 
+
+// Remplacement de l'instanciation locale par le Singleton centralise
+const redis = require('./config/redis'); 
+
 const User = require('./models/User');
 const Ride = require('./models/Ride');
 const startRideWorker = require('./workers/rideWorker');
@@ -16,10 +20,6 @@ const { env } = require('./config/env');
 const logger = require('./config/logger');
 
 const server = http.createServer(app);
-
-const redis = new Redis(env.REDIS_URL);
-redis.on('error', (err) => logger.error('Redis Error:', err));
-redis.on('connect', () => logger.info('Redis connecte (Rate Limit & GEO)'));
 
 const checkSocketRateLimit = async (userId) => {
   const key = `ratelimit:socket:${userId}`;
@@ -51,6 +51,11 @@ const io = new Server(server, {
   pingTimeout: 120000,
   maxHttpBufferSize: 5000 
 });
+
+// --- BLINDAGE TEMPS REEL : Attachement de l'adaptateur Redis ---
+// Permet aux WebSockets de communiquer entre plusieurs serveurs (Scale-Out)
+io.adapter(createAdapter(redis.pubClient, redis.subClient));
+// ---------------------------------------------------------------
 
 app.set('socketio', io);
 app.set('redis', redis);
@@ -132,8 +137,6 @@ io.on('connection', (socket) => {
       const distanceKm = getDistKm(prevLat, prevLng, coords.latitude, coords.longitude);
       const speedKmH = distanceKm / (timeDiffSeconds / 3600);
 
-      // En production, si la vitesse est superieure a 200 km/h, on bloque. 
-      // En developpement, on autorise les sauts de teleportation.
       if (speedKmH > 200) {
         if (!isDev) {
           socket.spoofStrikes += 1;
@@ -164,7 +167,6 @@ io.on('connection', (socket) => {
         await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());
         await redis.expire('active_drivers', 120);
 
-        // REPARATION : Utilisation stricte du statut 'in_progress' au lieu de 'ongoing'
         const activeRide = await Ride.findOne({
           driver: user._id,
           status: { $in: ['accepted', 'in_progress'] }
@@ -194,12 +196,13 @@ io.on('connection', (socket) => {
 const startServer = async () => {
   try {
     await mongoose.connect(env.MONGO_URI);
-    logger.info('MongoDB connecte');
+    logger.info('[MONGODB] Base de donnees connectee');
     
     server.listen(env.PORT, () => {
-      logger.info(`Serveur Yely actif sur port ${env.PORT}`);
+      logger.info(`[SERVER] Serveur Yely actif sur port ${env.PORT}`);
     });
   } catch (err) {
+    logger.error(`[SERVER] Echec critique au demarrage : ${err.message}`);
     process.exit(1);
   }
 };
