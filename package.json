@@ -17,6 +17,7 @@
   "author": "Yély Tech Team",
   "license": "ISC",
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
     "axios": "^1.13.5",
     "bcrypt": "^6.0.0",
     "bullmq": "^5.69.2",
