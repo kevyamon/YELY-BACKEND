@@ -97,7 +97,7 @@ const updateMapSettings = async (data, requesterId) => {
 };
 
 /**
- * REPARATION SECURITE : Gestion par Dates et non par Heures
+ * REPARATION SECURITE : Gestion par Dates et Journalisation stricte
  */
 const approveTransaction = async (transactionId, validatorId, session) => {
   const transaction = await Transaction.findOne({ _id: transactionId, status: 'PENDING' }).session(session);
@@ -125,7 +125,10 @@ const approveTransaction = async (transactionId, validatorId, session) => {
   });
   await transaction.save({ session });
 
-  await logSystemAction(validatorId, 'APPROVE_PAYMENT', transaction._id, `+${daysToAdd} jours pour ${driver.email}`, session);
+  // Log systeme stricte cible sur le chauffeur
+  const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA validee. +${daysToAdd} jours ajoutes pour ${driver.email}`;
+  await logSystemAction(validatorId, 'APPROVE_SUBSCRIPTION', driver._id, details, session);
+  
   return { transaction, driver, daysToAdd, newExpiryDate };
 };
 
@@ -141,9 +144,12 @@ const rejectTransaction = async (transactionId, reason, validatorId, session) =>
   });
   await transaction.save({ session });
 
-  await logSystemAction(validatorId, 'REJECT_PAYMENT', transaction._id, `Raison: ${reason}`, session);
-  
   const driver = await User.findById(transaction.user).session(session);
+
+  // Log systeme stricte cible sur le chauffeur
+  const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA rejetee. Motif: ${reason}`;
+  await logSystemAction(validatorId, 'REJECT_SUBSCRIPTION', driver ? driver._id : transaction.user, details, session);
+  
   return { transaction, driver };
 };
 
