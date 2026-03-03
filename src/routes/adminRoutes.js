@@ -15,7 +15,7 @@ const {
   rejectTransactionSchema
 } = require('../validations/adminValidation');
 
-// ACCÈS ADMIN & SUPERADMIN
+// ACCES ADMIN & SUPERADMIN
 router.get('/users', protect, authorize('admin', 'superadmin'), adminController.getAllUsers);
 router.get('/validations', protect, authorize('admin', 'superadmin'), adminController.getValidationQueue);
 
@@ -34,7 +34,7 @@ router.post('/reject/:id',
   adminController.rejectTransaction
 );
 
-// ACCÈS SUPERADMIN ONLY
+// ACCES SUPERADMIN ONLY
 router.post('/update-role', protect, authorize('superadmin'), validate(updateRoleSchema), adminController.updateAdminStatus);
 router.post('/toggle-ban', protect, authorize('superadmin'), validate(toggleBanSchema), adminController.toggleUserBan);
 router.post('/map-lock', protect, authorize('superadmin'), validate(mapSettingsSchema), adminController.updateMapSettings);

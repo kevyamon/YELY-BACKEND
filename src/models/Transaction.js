@@ -1,5 +1,5 @@
 // src/models/Transaction.js
-// MODÈLE TRANSACTION - Bank Grade & Haute Performance (Index & Contraintes)
+// MODELE TRANSACTION - Bank Grade & Haute Performance (Index & Contraintes)
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
@@ -7,16 +7,16 @@ const mongoose = require('mongoose');
 const transactionSchema = new mongoose.Schema({
   driver: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   
-  // 🛡️ SÉCURITÉ : Contrainte financière absolue pour éviter les falsifications
+  // SECURITE : Contrainte financiere absolue pour eviter les falsifications
   amount: { 
     type: Number, 
     required: true,
-    min: [1, 'Le montant doit être strictement positif'] 
+    min: [1, 'Le montant doit etre strictement positif'] 
   },
   
   type: { type: String, enum: ['WEEKLY', 'MONTHLY'], required: true },
   
-  // 🚀 PERFORMANCE : Index pour la rapidité d'affichage du Dashboard Admin
+  // PERFORMANCE : Index pour la rapidite d'affichage du Dashboard Admin
   status: { 
     type: String, 
     enum: ['PENDING', 'APPROVED', 'REJECTED'], 
@@ -24,10 +24,10 @@ const transactionSchema = new mongoose.Schema({
     index: true 
   },
   
-  // Isolation financière avec Index
+  // Isolation financiere avec Index
   assignedTo: { 
     type: String, 
-    enum: ['SUPERADMIN', 'PARTNER'], 
+    enum: ['SUPERADMIN', 'ADMIN'], 
     required: true,
     index: true 
   },
@@ -39,10 +39,12 @@ const transactionSchema = new mongoose.Schema({
   senderPhone: String,
   rejectionReason: String,
   
-  validatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+  // Tracabilite et Override (Surclassement)
+  validatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  intendedFor: { type: String, enum: ['SUPERADMIN', 'ADMIN'] }
 }, { timestamps: true });
 
-// 🚀 PERFORMANCE : Index composé pour optimiser au maximum la file d'attente (getValidationQueue)
+// PERFORMANCE : Index compose pour optimiser au maximum la file d'attente
 transactionSchema.index({ status: 1, assignedTo: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Transaction', transactionSchema);
