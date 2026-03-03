@@ -11,12 +11,17 @@ const mongoose = require('mongoose');
 const redisClient = require('../config/redis');
 
 const logSystemAction = async (actorId, action, targetId, details) => {
-  await AuditLog.create({
-    actor: actorId,
-    action,
-    target: targetId,
-    details
-  });
+  try {
+    await AuditLog.create({
+      actor: actorId,
+      action,
+      target: targetId,
+      details
+    });
+  } catch (error) {
+    console.error(`[AUDIT ERROR] Echec d'ecriture du log (${action}):`, error.message);
+    // On ne jette pas d'erreur ici pour ne pas bloquer le flux principal
+  }
 };
 
 const updateUserRole = async (userId, action, requesterId) => {
@@ -118,6 +123,8 @@ const approveTransaction = async (transactionId, validatorId) => {
   await transaction.save();
 
   const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA validee. +${daysToAdd} jours ajoutes pour ${driver.email}`;
+  
+  // Cette ligne ne fera plus jamais crasher le système grâce au try/catch ajouté plus haut
   await logSystemAction(validatorId, 'APPROVE_SUBSCRIPTION', driver._id, details);
   
   try { await redisClient.del(`auth:user:${driver._id}`); } catch(e) {}

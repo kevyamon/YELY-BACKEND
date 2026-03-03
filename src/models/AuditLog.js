@@ -13,7 +13,21 @@ const auditLogSchema = new mongoose.Schema({
   action: { 
     type: String, 
     required: true,
-    enum: ['PROMOTE_USER', 'REVOKE_USER', 'BAN_USER', 'UNBAN_USER', 'UPDATE_SETTINGS', 'APPROVE_TRANSACTION', 'REJECT_TRANSACTION']
+    // On élargit l'enum pour autoriser toutes les actions du système Admin
+    enum: [
+      'PROMOTE_USER', 
+      'REVOKE_USER', 
+      'BAN_USER', 
+      'UNBAN_USER', 
+      'UPDATE_SETTINGS',
+      'UPDATE_MAP_SETTINGS',
+      'APPROVE_TRANSACTION', 
+      'REJECT_TRANSACTION',
+      'APPROVE_SUBSCRIPTION',
+      'REJECT_SUBSCRIPTION',
+      'TOGGLE_PROMO',
+      'UPDATE_WAVE_LINKS'
+    ]
   },
   target: { 
     type: mongoose.Schema.Types.ObjectId, 
