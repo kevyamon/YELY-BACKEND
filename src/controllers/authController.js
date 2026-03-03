@@ -96,12 +96,25 @@ const refreshToken = async (req, res) => {
     const newAccessToken = generateAccessToken(user._id, user.role);
     const newRefreshToken = generateRefreshToken(user._id);
 
+    // MISE A JOUR INDUSTRIELLE : On renvoie le profil complet a chaque refresh
+    const userData = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      isAvailable: user.isAvailable,
+      rating: user.rating,
+      totalRides: user.totalRides,
+      totalEarnings: user.totalEarnings
+    };
+
     return successResponse(res, { 
+      user: userData,
       accessToken: newAccessToken, 
       refreshToken: newRefreshToken 
-    }, "Token rafraichi silencieusement", 200);
+    }, "Session actualisee avec succes", 200);
   } catch (error) {
-    // LE VACCIN : Fini le trou noir. On logue la vraie raison de l'echec.
     console.error("[REFRESH CRITICAL FAILURE]:", error.message || error);
     const statusCode = error.statusCode || 401;
     return errorResponse(res, error.message || "Session definitivement invalide", statusCode);
