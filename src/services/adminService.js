@@ -1,5 +1,5 @@
 // src/services/adminService.js
-// LOGIQUE DE GOUVERNANCE - Transactions ACID & Invalidation Cache Dynamique
+// LOGIQUE DE GOUVERNANCE - Invalidation Cache Dynamique & Degradation Gracieuse
 // CSCSM Level: Bank Grade
 
 const User = require('../models/User');
@@ -10,19 +10,19 @@ const AppError = require('../utils/AppError');
 const mongoose = require('mongoose');
 const redisClient = require('../config/redis');
 
-const logSystemAction = async (actorId, action, targetId, details, session) => {
-  await AuditLog.create([{
+const logSystemAction = async (actorId, action, targetId, details) => {
+  await AuditLog.create({
     actor: actorId,
     action,
     target: targetId,
     details
-  }], { session });
+  });
 };
 
-const updateUserRole = async (userId, action, requesterId, session) => {
+const updateUserRole = async (userId, action, requesterId) => {
   if (userId === requesterId.toString()) throw new AppError('Auto-promotion interdite.', 403);
 
-  const user = await User.findById(userId).session(session);
+  const user = await User.findById(userId);
   if (!user) throw new AppError('Utilisateur introuvable.', 404);
   if (user.role === 'superadmin') throw new AppError('Le SuperAdmin est intouchable.', 403);
 
@@ -37,73 +37,53 @@ const updateUserRole = async (userId, action, requesterId, session) => {
 
   const oldRole = user.role;
   user.role = transitions[action].to;
-  await user.save({ session });
+  await user.save();
 
-  await logSystemAction(requesterId, `${action}_USER`, user._id, `De ${oldRole} vers ${user.role}`, session);
+  await logSystemAction(requesterId, `${action}_USER`, user._id, `De ${oldRole} vers ${user.role}`);
   await redisClient.del(`auth:user:${user._id}`);
   
   return { email: user.email, newRole: user.role };
 };
 
 const toggleUserBan = async (userId, reason, requesterId) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  try {
-    const user = await User.findById(userId).session(session);
-    if (!user || user.role === 'superadmin') throw new AppError('Action impossible.', 403);
+  const user = await User.findById(userId);
+  if (!user || user.role === 'superadmin') throw new AppError('Action impossible.', 403);
 
-    user.isBanned = !user.isBanned;
-    user.banReason = user.isBanned ? reason : '';
-    if (user.isBanned) user.isAvailable = false;
-    await user.save({ session });
+  user.isBanned = !user.isBanned;
+  user.banReason = user.isBanned ? reason : '';
+  if (user.isBanned) user.isAvailable = false;
+  await user.save();
 
-    await logSystemAction(requesterId, user.isBanned ? 'BAN_USER' : 'UNBAN_USER', user._id, reason, session);
-    await session.commitTransaction();
-    await redisClient.del(`auth:user:${user._id}`);
-    
-    return user;
-  } catch (error) {
-    await session.abortTransaction();
-    throw error;
-  } finally {
-    session.endSession();
-  }
+  await logSystemAction(requesterId, user.isBanned ? 'BAN_USER' : 'UNBAN_USER', user._id, reason);
+  await redisClient.del(`auth:user:${user._id}`);
+  
+  return user;
 };
 
 const updateMapSettings = async (data, requesterId) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  try {
-    let settings = await Settings.findOne().session(session);
-    if (!settings) settings = new Settings();
+  let settings = await Settings.findOne();
+  if (!settings) settings = new Settings();
 
-    settings.isMapLocked = data.isMapLocked;
-    settings.serviceCity = data.serviceCity;
-    settings.allowedRadiusKm = data.radius;
-    settings.allowedCenter = { type: 'Point', coordinates: data.allowedCenter.coordinates };
-    settings.updatedBy = requesterId;
+  settings.isMapLocked = data.isMapLocked;
+  settings.serviceCity = data.serviceCity;
+  settings.allowedRadiusKm = data.radius;
+  settings.allowedCenter = { type: 'Point', coordinates: data.allowedCenter.coordinates };
+  settings.updatedBy = requesterId;
 
-    await settings.save({ session });
-    await logSystemAction(requesterId, 'UPDATE_MAP_SETTINGS', settings._id, `Ville: ${data.serviceCity}`, session);
-    
-    await session.commitTransaction();
-    return settings;
-  } catch (error) {
-    await session.abortTransaction();
-    throw error;
-  } finally {
-    session.endSession();
-  }
+  await settings.save();
+  await logSystemAction(requesterId, 'UPDATE_MAP_SETTINGS', settings._id, `Ville: ${data.serviceCity}`);
+  
+  return settings;
 };
 
 /**
  * REPARATION SECURITE : Gestion par Dates, MAJ du statut strict et Invalidation Cache
  */
-const approveTransaction = async (transactionId, validatorId, session) => {
-  const transaction = await Transaction.findOne({ _id: transactionId, status: 'PENDING' }).session(session);
+const approveTransaction = async (transactionId, validatorId) => {
+  const transaction = await Transaction.findOne({ _id: transactionId, status: 'PENDING' });
   if (!transaction) throw new AppError('Transaction invalide, introuvable ou deja traitee.', 404);
 
-  const driver = await User.findById(transaction.user).session(session);
+  const driver = await User.findById(transaction.user);
   if (!driver) throw new AppError('Chauffeur introuvable.', 404);
 
   const daysToAdd = transaction.planId === 'WEEKLY' ? 7 : 30;
@@ -120,7 +100,7 @@ const approveTransaction = async (transactionId, validatorId, session) => {
   if (driver.subscription) {
     driver.subscription.status = 'active';
   }
-  await driver.save({ session });
+  await driver.save();
 
   transaction.status = 'APPROVED';
   transaction.validatedBy = validatorId;
@@ -128,11 +108,11 @@ const approveTransaction = async (transactionId, validatorId, session) => {
     action: 'APPROVAL',
     note: `Preuve validee par l'admin ${validatorId}. Acces prolonge de ${daysToAdd} jours.`
   });
-  await transaction.save({ session });
+  await transaction.save();
 
   // Log systeme stricte cible sur le chauffeur
   const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA validee. +${daysToAdd} jours ajoutes pour ${driver.email}`;
-  await logSystemAction(validatorId, 'APPROVE_SUBSCRIPTION', driver._id, details, session);
+  await logSystemAction(validatorId, 'APPROVE_SUBSCRIPTION', driver._id, details);
   
   // Invalidation du cache pour forcer le rafraichissement des donnees Redux
   await redisClient.del(`auth:user:${driver._id}`);
@@ -140,8 +120,8 @@ const approveTransaction = async (transactionId, validatorId, session) => {
   return { transaction, driver, daysToAdd, newExpiryDate };
 };
 
-const rejectTransaction = async (transactionId, reason, validatorId, session) => {
-  const transaction = await Transaction.findOne({ _id: transactionId, status: 'PENDING' }).session(session);
+const rejectTransaction = async (transactionId, reason, validatorId) => {
+  const transaction = await Transaction.findOne({ _id: transactionId, status: 'PENDING' });
   if (!transaction) throw new AppError('Transaction invalide, introuvable ou deja traitee.', 404);
 
   transaction.status = 'REJECTED';
@@ -150,9 +130,9 @@ const rejectTransaction = async (transactionId, reason, validatorId, session) =>
     action: 'REJECTION',
     note: `Preuve rejetee par l'admin ${validatorId}. Motif: ${reason}`
   });
-  await transaction.save({ session });
+  await transaction.save();
 
-  const driver = await User.findById(transaction.user).session(session);
+  const driver = await User.findById(transaction.user);
   
   if (driver) {
     // MAJ critique du statut pour liberer le Gatekeeper et permettre une nouvelle tentative
@@ -160,16 +140,16 @@ const rejectTransaction = async (transactionId, reason, validatorId, session) =>
     if (driver.subscription) {
         driver.subscription.status = 'inactive';
     }
-    await driver.save({ session });
+    await driver.save();
 
     // Log systeme stricte cible sur le chauffeur
     const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA rejetee. Motif: ${reason}`;
-    await logSystemAction(validatorId, 'REJECT_SUBSCRIPTION', driver._id, details, session);
+    await logSystemAction(validatorId, 'REJECT_SUBSCRIPTION', driver._id, details);
     
     // Invalidation du cache
     await redisClient.del(`auth:user:${driver._id}`);
   } else {
-    await logSystemAction(validatorId, 'REJECT_SUBSCRIPTION', transaction.user, `Transaction [${transaction._id}] rejetee (Chauffeur introuvable). Motif: ${reason}`, session);
+    await logSystemAction(validatorId, 'REJECT_SUBSCRIPTION', transaction.user, `Transaction [${transaction._id}] rejetee (Chauffeur introuvable). Motif: ${reason}`);
   }
   
   return { transaction, driver };

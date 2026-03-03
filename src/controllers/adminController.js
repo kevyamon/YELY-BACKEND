@@ -1,5 +1,5 @@
 // src/controllers/adminController.js
-// CONTROLEUR ADMIN - Integration Temps Reel & Restauration Complete
+// CONTROLEUR ADMIN - Integration Temps Reel & Degradation Gracieuse (Sans Session MongoDB)
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
@@ -10,13 +10,10 @@ const { successResponse, errorResponse } = require('../utils/responseHandler');
 const logger = require('../config/logger');
 
 const updateAdminStatus = async (req, res) => {
-  const session = await mongoose.startSession();
   try {
     const { userId, action } = req.body;
     
-    const result = await session.withTransaction(async () => {
-      return await adminService.updateUserRole(userId, action, req.user._id, session);
-    });
+    const result = await adminService.updateUserRole(userId, action, req.user._id);
 
     const io = req.app.get('socketio');
     if (io) {
@@ -28,8 +25,6 @@ const updateAdminStatus = async (req, res) => {
 
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
-  } finally {
-    session.endSession();
   }
 };
 
@@ -62,11 +57,8 @@ const updateMapSettings = async (req, res) => {
 };
 
 const approveTransaction = async (req, res) => {
-  const session = await mongoose.startSession();
   try {
-    const result = await session.withTransaction(async () => {
-      return await adminService.approveTransaction(req.params.id, req.user._id, session);
-    });
+    const result = await adminService.approveTransaction(req.params.id, req.user._id);
 
     const io = req.app.get('socketio');
     if (io) {
@@ -88,19 +80,14 @@ const approveTransaction = async (req, res) => {
 
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
-  } finally {
-    session.endSession();
   }
 };
 
 const rejectTransaction = async (req, res) => {
-  const session = await mongoose.startSession();
   try {
     const { reason } = req.body;
     
-    const result = await session.withTransaction(async () => {
-      return await adminService.rejectTransaction(req.params.id, reason, req.user._id, session);
-    });
+    const result = await adminService.rejectTransaction(req.params.id, reason, req.user._id);
 
     const io = req.app.get('socketio');
     if (io) {
@@ -119,8 +106,6 @@ const rejectTransaction = async (req, res) => {
 
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
-  } finally {
-    session.endSession();
   }
 };
 
