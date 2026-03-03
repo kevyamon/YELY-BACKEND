@@ -1,5 +1,5 @@
 // src/controllers/adminController.js
-// CONTROLEUR ADMIN - Integration Temps Reel & Degradation Gracieuse (Sans Session MongoDB)
+// CONTROLEUR ADMIN - Degradation Gracieuse & Tolerance aux Pannes (Isolations Push)
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
@@ -12,17 +12,15 @@ const logger = require('../config/logger');
 const updateAdminStatus = async (req, res) => {
   try {
     const { userId, action } = req.body;
-    
     const result = await adminService.updateUserRole(userId, action, req.user._id);
 
-    const io = req.app.get('socketio');
-    if (io) {
-      io.to(userId.toString()).emit('user_role_updated', { newRole: result.newRole });
-    }
+    try {
+      const io = req.app.get('socketio');
+      if (io) io.to(userId.toString()).emit('user_role_updated', { newRole: result.newRole });
+    } catch (e) { logger.warn(`[SOCKET] Echec non-critique: ${e.message}`); }
 
     logger.warn(`[AUDIT ROLE] ${req.user.email} changed ${result.email} -> ${result.newRole}`);
     return successResponse(res, result, 'Role mis a jour.');
-
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -33,14 +31,13 @@ const toggleUserBan = async (req, res) => {
     const { userId, reason } = req.body;
     const user = await adminService.toggleUserBan(userId, reason, req.user._id);
     
-    const io = req.app.get('socketio');
-    if (io) {
-      io.to(userId.toString()).emit(user.isBanned ? 'user_banned' : 'user_unbanned', { reason });
-    }
+    try {
+      const io = req.app.get('socketio');
+      if (io) io.to(userId.toString()).emit(user.isBanned ? 'user_banned' : 'user_unbanned', { reason });
+    } catch (e) { logger.warn(`[SOCKET] Echec non-critique: ${e.message}`); }
 
     logger.warn(`[AUDIT BAN] ${req.user.email} toggled ban on ${user.email}.`);
     return successResponse(res, { isBanned: user.isBanned }, user.isBanned ? 'Utilisateur banni.' : 'Bannissement leve.');
-
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -60,23 +57,27 @@ const approveTransaction = async (req, res) => {
   try {
     const result = await adminService.approveTransaction(req.params.id, req.user._id);
 
-    const io = req.app.get('socketio');
-    if (io) {
-      io.to(result.driver._id.toString()).emit('subscription_validated', {
-        daysAdded: result.daysToAdd,
-        expiresAt: result.newExpiryDate
-      });
+    // BLOC DE SÉCURITÉ : On ne laisse pas une erreur Push/Socket annuler un succès en DB
+    try {
+      const io = req.app.get('socketio');
+      if (io) {
+        io.to(result.driver._id.toString()).emit('subscription_validated', {
+          daysAdded: result.daysToAdd,
+          expiresAt: result.newExpiryDate
+        });
+      }
+      await notificationService.sendPushNotification(
+        result.driver._id.toString(),
+        "Abonnement Active",
+        "Votre preuve de paiement a ete validee. Vous pouvez reprendre les courses.",
+        { type: 'SUBSCRIPTION_APPROVED' }
+      );
+    } catch (notifError) {
+      logger.error(`[NON-CRITIQUE] Echec notification apres approbation: ${notifError.message}`);
     }
 
-    await notificationService.sendPushNotification(
-      result.driver._id.toString(),
-      "Abonnement Active",
-      "Votre preuve de paiement a ete validee. Vous pouvez reprendre les courses.",
-      { type: 'SUBSCRIPTION_APPROVED' }
-    );
-
     logger.info(`[AUDIT FINANCE] Transaction ${result.transaction._id} approved by ${req.user.email}`);
-    return successResponse(res, { status: 'APPROVED' }, 'Transaction approuvee.');
+    return successResponse(res, { status: 'APPROVED' }, 'Transaction approuvee avec succes.');
 
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
@@ -86,32 +87,32 @@ const approveTransaction = async (req, res) => {
 const rejectTransaction = async (req, res) => {
   try {
     const { reason } = req.body;
-    
     const result = await adminService.rejectTransaction(req.params.id, reason, req.user._id);
 
-    const io = req.app.get('socketio');
-    if (io) {
-      io.to(result.driver._id.toString()).emit('subscription_rejected', { reason });
+    // BLOC DE SÉCURITÉ : Isolement des notifications
+    try {
+      const io = req.app.get('socketio');
+      if (io) {
+        io.to(result.driver._id.toString()).emit('subscription_rejected', { reason });
+      }
+      await notificationService.sendPushNotification(
+        result.driver._id.toString(),
+        "Paiement Rejete",
+        `Votre preuve a ete refusee: ${reason}. Veuillez soumettre une image valide.`,
+        { type: 'SUBSCRIPTION_REJECTED' }
+      );
+    } catch (notifError) {
+      logger.error(`[NON-CRITIQUE] Echec notification apres rejet: ${notifError.message}`);
     }
 
-    await notificationService.sendPushNotification(
-      result.driver._id.toString(),
-      "Paiement Rejete",
-      `Votre preuve a ete refusee: ${reason}. Veuillez soumettre une image valide.`,
-      { type: 'SUBSCRIPTION_REJECTED' }
-    );
-
     logger.info(`[AUDIT FINANCE] Transaction ${result.transaction._id} rejected by ${req.user.email}`);
-    return successResponse(res, { status: 'REJECTED' }, 'Transaction rejetee.');
+    return successResponse(res, { status: 'REJECTED' }, 'Transaction rejetee avec succes.');
 
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
 };
 
-/**
- * @desc Get Validation Queue (Correction Filtres et Population)
- */
 const getValidationQueue = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -120,7 +121,6 @@ const getValidationQueue = async (req, res) => {
 
     const filter = { status: 'PENDING' };
 
-    // Isolation stricte: Un simple admin ne voit que ses assignations
     if (req.user.role !== 'superadmin') {
       filter.assignedTo = req.user._id;
     }
@@ -128,7 +128,7 @@ const getValidationQueue = async (req, res) => {
     const [transactions, total] = await Promise.all([
       Transaction.find(filter)
         .populate('user', 'name phone email currentLocation')
-        .populate('assignedTo', 'name email') // Extraction du nom du moderateur en charge
+        .populate('assignedTo', 'name email')
         .sort({ createdAt: 1 }) 
         .skip(skip)
         .limit(limit)

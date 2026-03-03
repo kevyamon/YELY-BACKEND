@@ -1,5 +1,5 @@
 // src/services/adminService.js
-// LOGIQUE DE GOUVERNANCE - Invalidation Cache Dynamique & Degradation Gracieuse
+// LOGIQUE DE GOUVERNANCE - Diagnostics d'erreurs stricts et precis
 // CSCSM Level: Bank Grade
 
 const User = require('../models/User');
@@ -40,7 +40,7 @@ const updateUserRole = async (userId, action, requesterId) => {
   await user.save();
 
   await logSystemAction(requesterId, `${action}_USER`, user._id, `De ${oldRole} vers ${user.role}`);
-  await redisClient.del(`auth:user:${user._id}`);
+  try { await redisClient.del(`auth:user:${user._id}`); } catch(e) {}
   
   return { email: user.email, newRole: user.role };
 };
@@ -55,7 +55,7 @@ const toggleUserBan = async (userId, reason, requesterId) => {
   await user.save();
 
   await logSystemAction(requesterId, user.isBanned ? 'BAN_USER' : 'UNBAN_USER', user._id, reason);
-  await redisClient.del(`auth:user:${user._id}`);
+  try { await redisClient.del(`auth:user:${user._id}`); } catch(e) {}
   
   return user;
 };
@@ -77,11 +77,19 @@ const updateMapSettings = async (data, requesterId) => {
 };
 
 /**
- * REPARATION SECURITE : Gestion par Dates, MAJ du statut strict et Invalidation Cache
+ * REPARATION SECURITE : Diagnostic des erreurs separe pour le frontend
  */
 const approveTransaction = async (transactionId, validatorId) => {
-  const transaction = await Transaction.findOne({ _id: transactionId, status: 'PENDING' });
-  if (!transaction) throw new AppError('Transaction invalide, introuvable ou deja traitee.', 404);
+  const cleanId = transactionId.toString().trim();
+  const transaction = await Transaction.findById(cleanId);
+  
+  if (!transaction) {
+    throw new AppError('Transaction introuvable dans la base de donnees.', 404);
+  }
+
+  if (transaction.status !== 'PENDING') {
+    throw new AppError(`Action impossible : Cette transaction est deja ${transaction.status}. Veuillez rafraichir.`, 400);
+  }
 
   const driver = await User.findById(transaction.user);
   if (!driver) throw new AppError('Chauffeur introuvable.', 404);
@@ -94,7 +102,6 @@ const approveTransaction = async (transactionId, validatorId) => {
   }
   newExpiryDate.setDate(newExpiryDate.getDate() + daysToAdd);
 
-  // MAJ critique du statut pour liberer le Gatekeeper
   driver.subscriptionExpiresAt = newExpiryDate;
   driver.subscriptionStatus = 'active'; 
   if (driver.subscription) {
@@ -110,19 +117,25 @@ const approveTransaction = async (transactionId, validatorId) => {
   });
   await transaction.save();
 
-  // Log systeme stricte cible sur le chauffeur
   const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA validee. +${daysToAdd} jours ajoutes pour ${driver.email}`;
   await logSystemAction(validatorId, 'APPROVE_SUBSCRIPTION', driver._id, details);
   
-  // Invalidation du cache pour forcer le rafraichissement des donnees Redux
-  await redisClient.del(`auth:user:${driver._id}`);
+  try { await redisClient.del(`auth:user:${driver._id}`); } catch(e) {}
 
   return { transaction, driver, daysToAdd, newExpiryDate };
 };
 
 const rejectTransaction = async (transactionId, reason, validatorId) => {
-  const transaction = await Transaction.findOne({ _id: transactionId, status: 'PENDING' });
-  if (!transaction) throw new AppError('Transaction invalide, introuvable ou deja traitee.', 404);
+  const cleanId = transactionId.toString().trim();
+  const transaction = await Transaction.findById(cleanId);
+  
+  if (!transaction) {
+    throw new AppError('Transaction introuvable dans la base de donnees.', 404);
+  }
+
+  if (transaction.status !== 'PENDING') {
+    throw new AppError(`Action impossible : Cette transaction est deja ${transaction.status}. Veuillez rafraichir.`, 400);
+  }
 
   transaction.status = 'REJECTED';
   transaction.validatedBy = validatorId;
@@ -135,19 +148,16 @@ const rejectTransaction = async (transactionId, reason, validatorId) => {
   const driver = await User.findById(transaction.user);
   
   if (driver) {
-    // MAJ critique du statut pour liberer le Gatekeeper et permettre une nouvelle tentative
     driver.subscriptionStatus = 'inactive';
     if (driver.subscription) {
         driver.subscription.status = 'inactive';
     }
     await driver.save();
 
-    // Log systeme stricte cible sur le chauffeur
     const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA rejetee. Motif: ${reason}`;
     await logSystemAction(validatorId, 'REJECT_SUBSCRIPTION', driver._id, details);
     
-    // Invalidation du cache
-    await redisClient.del(`auth:user:${driver._id}`);
+    try { await redisClient.del(`auth:user:${driver._id}`); } catch(e) {}
   } else {
     await logSystemAction(validatorId, 'REJECT_SUBSCRIPTION', transaction.user, `Transaction [${transaction._id}] rejetee (Chauffeur introuvable). Motif: ${reason}`);
   }
