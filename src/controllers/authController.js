@@ -1,6 +1,6 @@
 // src/controllers/authController.js
 // CONTROLEUR AUTHENTIFICATION - Alignement Parfait & Anti-Crash
-// CSCSM Level: Bank Grade
+// STANDARD: Industriel / Bank Grade
 
 const User = require('../models/User');
 const authService = require('../services/authService');
@@ -10,7 +10,6 @@ const { env } = require('../config/env');
 
 const registerUser = async (req, res) => {
   try {
-    // Delegation absolue au service : bloque l'usurpation du role admin
     const user = await authService.register(req.body);
 
     const accessToken = generateAccessToken(user._id, user.role);
@@ -35,7 +34,7 @@ const registerUser = async (req, res) => {
     }, 'Compte cree avec succes', 201);
 
   } catch (error) {
-    console.error("[REGISTER CRASH PROTECTED]:", error);
+    console.error("[REGISTER ERROR]:", error.message || error);
     const statusCode = error.statusCode || 500;
     return errorResponse(res, error.message || "Erreur interne lors de l'inscription.", statusCode);
   }
@@ -49,7 +48,6 @@ const loginUser = async (req, res) => {
       return errorResponse(res, "Veuillez fournir un identifiant et un mot de passe.", 400);
     }
 
-    // Delegation absolue au service : active l'anti-bruteforce et l'anti-timing
     const user = await authService.login(identifier, password);
 
     const accessToken = generateAccessToken(user._id, user.role);
@@ -74,7 +72,7 @@ const loginUser = async (req, res) => {
     }, 'Connexion reussie', 200);
 
   } catch (error) {
-    console.error("[LOGIN ERROR]:", error);
+    console.error("[LOGIN ERROR]:", error.message || error);
     const statusCode = error.statusCode || 500;
     return errorResponse(res, error.message || "Erreur interne lors de la connexion.", statusCode);
   }
@@ -91,9 +89,8 @@ const logoutUser = async (req, res) => {
 const refreshToken = async (req, res) => {
   try {
     const token = req.body.refreshToken;
-    if (!token) return errorResponse(res, "Refresh token manquant", 401);
+    if (!token) return errorResponse(res, "Refresh token manquant dans la requete", 401);
     
-    // Utilisation du service pour s'assurer que l'utilisateur n'a pas ete banni entre temps
     const user = await authService.validateSessionForRefresh(token);
 
     const newAccessToken = generateAccessToken(user._id, user.role);
@@ -102,9 +99,12 @@ const refreshToken = async (req, res) => {
     return successResponse(res, { 
       accessToken: newAccessToken, 
       refreshToken: newRefreshToken 
-    }, "Token rafraichi", 200);
+    }, "Token rafraichi silencieusement", 200);
   } catch (error) {
-    return errorResponse(res, "Token invalide ou expire", 401);
+    // LE VACCIN : Fini le trou noir. On logue la vraie raison de l'echec.
+    console.error("[REFRESH CRITICAL FAILURE]:", error.message || error);
+    const statusCode = error.statusCode || 401;
+    return errorResponse(res, error.message || "Session definitivement invalide", statusCode);
   }
 };
 

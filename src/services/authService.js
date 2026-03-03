@@ -1,6 +1,6 @@
 // src/services/authService.js
 // SERVICE AUTH - Anti-Bruteforce Actif & Mitigations Timing Attacks
-// CSCSM Level: Bank Grade
+// STANDARD: Industriel / Bank Grade
 
 const User = require('../models/User');
 const AppError = require('../utils/AppError');
@@ -8,31 +8,25 @@ const { verifyRefreshToken } = require('../utils/tokenService');
 const { SECURITY_CONSTANTS } = require('../config/env');
 
 const MAX_ATTEMPTS = SECURITY_CONSTANTS?.MAX_LOGIN_ATTEMPTS || 5;
-const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000; // 15 min par défaut
+const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000; // 15 min par defaut
 
-/**
- * Inscription utilisateur
- */
 const register = async (userData) => {
   const existing = await User.findOne({
     $or: [{ email: userData.email }, { phone: userData.phone }]
   });
 
   if (existing) {
-    throw new AppError('Cet email ou ce numéro est déjà utilisé.', 409);
+    throw new AppError('Cet email ou ce numero est deja utilise.', 409);
   }
 
   if (userData.role && ['admin', 'superadmin'].includes(userData.role)) {
-    throw new AppError('Action non autorisée.', 403);
+    throw new AppError('Action non autorisee.', 403);
   }
 
   const user = await User.create(userData);
   return user;
 };
 
-/**
- * Authentification sécurisée avec protection Brute-force & Anti-Timing
- */
 const login = async (identifier, password) => {
   const isEmail = identifier.includes('@');
   const normalizedId = isEmail ? identifier.toLowerCase().trim() : identifier.replace(/\s/g, '');
@@ -41,7 +35,7 @@ const login = async (identifier, password) => {
     $or: [{ email: normalizedId }, { phone: normalizedId }]
   }).select('+password +loginAttempts +lockUntil');
 
-  // 🛡️ SÉCURITÉ : Anti-Timing Attack (Délai constant artificiel pour masquer l'existence de l'utilisateur)
+  // SECURITE : Anti-Timing Attack 
   if (!user) {
     await new Promise(resolve => setTimeout(resolve, 500));
     throw new AppError('Identifiants incorrects.', 401);
@@ -51,34 +45,30 @@ const login = async (identifier, password) => {
     throw new AppError(`Compte suspendu: ${user.banReason}`, 403);
   }
 
-  // 1. Vérification Account Lockout
   if (user.lockUntil && user.lockUntil > Date.now()) {
     const minutesLeft = Math.ceil((user.lockUntil - Date.now()) / 60000);
-    throw new AppError(`Compte verrouillé pour raisons de sécurité. Réessayez dans ${minutesLeft} minutes.`, 429);
+    throw new AppError(`Compte verrouille pour raisons de securite. Reessayez dans ${minutesLeft} minutes.`, 429);
   }
 
-  // 2. Vérification Mot de passe
   const isMatch = await user.comparePassword(password);
 
   if (!isMatch) {
-    // 🛡️ SÉCURITÉ : Incrémentation Atomique du Bruteforce Counter
     const updates = { $inc: { loginAttempts: 1 } };
     
     if (user.loginAttempts + 1 >= MAX_ATTEMPTS) {
       updates.lockUntil = Date.now() + LOCK_WINDOW;
-      updates.loginAttempts = 0; // Reset pour le prochain cycle post-lock
+      updates.loginAttempts = 0; 
     }
     
     await User.updateOne({ _id: user._id }, updates);
     
     if (updates.lockUntil) {
-       throw new AppError(`Trop de tentatives échouées. Compte verrouillé pour ${LOCK_WINDOW / 60000} minutes.`, 429);
+       throw new AppError(`Trop de tentatives echouees. Compte verrouille pour ${LOCK_WINDOW / 60000} minutes.`, 429);
     }
     
     throw new AppError('Identifiants incorrects.', 401);
   }
 
-  // 3. Succès : Reset des compteurs de sécurité
   if (user.loginAttempts > 0 || user.lockUntil) {
     await User.updateOne({ _id: user._id }, { 
       loginAttempts: 0, 
@@ -90,13 +80,33 @@ const login = async (identifier, password) => {
 };
 
 const validateSessionForRefresh = async (token) => {
-  const decoded = await verifyRefreshToken(token);
-  const user = await User.findById(decoded.userId);
-  
-  if (!user || user.isBanned) {
-    throw new AppError('Session invalide ou utilisateur banni.', 403);
+  try {
+    const decoded = await verifyRefreshToken(token);
+    
+    // EXTRACTION ROBUSTE : On s'assure de trouver l'ID peu importe la structure du token
+    const userId = decoded.userId || decoded.id || decoded._id || (typeof decoded === 'string' ? decoded : null);
+    
+    if (!userId) {
+      throw new AppError('Structure du token illisible.', 401);
+    }
+
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      throw new AppError('L\'utilisateur lie a cette session n\'existe plus.', 401);
+    }
+    
+    if (user.isBanned) {
+      throw new AppError(`Session revoquee. Compte suspendu: ${user.banReason}`, 403);
+    }
+    
+    return user;
+  } catch (error) {
+    // Si c'est deja une AppError, on la fait remonter
+    if (error.isOperational) throw error;
+    // Sinon c'est une erreur native JWT (TokenExpiredError, JsonWebTokenError...)
+    throw new AppError(`Echec de validation de session: ${error.message}`, 401);
   }
-  return user;
 };
 
 const updateAvailability = async (userId, isAvailable) => {
