@@ -17,8 +17,8 @@ const {
 
 // ACCES ADMIN & SUPERADMIN
 router.get('/stats', protect, authorize('admin', 'superadmin'), adminController.getDashboardStats);
-router.get('/validations', protect, authorize('admin', 'superadmin'), adminController.getValidationQueue);
 router.get('/users', protect, authorize('admin', 'superadmin'), adminController.getAllUsers);
+router.get('/validations', protect, authorize('admin', 'superadmin'), adminController.getValidationQueue);
 
 router.post('/approve/:id', 
   protect, 
