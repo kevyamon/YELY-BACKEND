@@ -16,8 +16,9 @@ const {
 } = require('../validations/adminValidation');
 
 // ACCES ADMIN & SUPERADMIN
-router.get('/users', protect, authorize('admin', 'superadmin'), adminController.getAllUsers);
+router.get('/stats', protect, authorize('admin', 'superadmin'), adminController.getDashboardStats);
 router.get('/validations', protect, authorize('admin', 'superadmin'), adminController.getValidationQueue);
+router.get('/users', protect, authorize('admin', 'superadmin'), adminController.getAllUsers);
 
 router.post('/approve/:id', 
   protect, 
@@ -35,6 +36,10 @@ router.post('/reject/:id',
 );
 
 // ACCES SUPERADMIN ONLY
+router.get('/finance', protect, authorize('superadmin'), adminController.getFinanceData);
+router.put('/finance/links', protect, authorize('superadmin'), adminController.updateWaveLinks);
+router.put('/promo/toggle', protect, authorize('superadmin'), adminController.togglePromo);
+
 router.post('/update-role', protect, authorize('superadmin'), validate(updateRoleSchema), adminController.updateAdminStatus);
 router.post('/toggle-ban', protect, authorize('superadmin'), validate(toggleBanSchema), adminController.toggleUserBan);
 router.post('/map-lock', protect, authorize('superadmin'), validate(mapSettingsSchema), adminController.updateMapSettings);

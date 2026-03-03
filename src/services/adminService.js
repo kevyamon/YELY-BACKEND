@@ -8,7 +8,7 @@ const Settings = require('../models/Settings');
 const AuditLog = require('../models/AuditLog');
 const AppError = require('../utils/AppError');
 const mongoose = require('mongoose');
-const redisClient = require('../config/redis'); // 🔌 IMPORT REDIS POUR INVALIDATION
+const redisClient = require('../config/redis');
 
 const logSystemAction = async (actorId, action, targetId, details, session) => {
   await AuditLog.create([{
@@ -41,7 +41,6 @@ const updateUserRole = async (userId, action, requesterId, session) => {
 
   await logSystemAction(requesterId, `${action}_USER`, user._id, `De ${oldRole} vers ${user.role}`, session);
   
-  // 🛡️ SÉCURITÉ : Invalidation immédiate des permissions en cache
   await redisClient.del(`auth:user:${user._id}`);
   
   return { email: user.email, newRole: user.role };
@@ -62,7 +61,6 @@ const toggleUserBan = async (userId, reason, requesterId) => {
     await logSystemAction(requesterId, user.isBanned ? 'BAN_USER' : 'UNBAN_USER', user._id, reason, session);
     await session.commitTransaction();
     
-    // 🛡️ SÉCURITÉ : Kick immédiat du cache après validation transaction
     await redisClient.del(`auth:user:${user._id}`);
     
     return user;
@@ -102,7 +100,7 @@ const updateMapSettings = async (data, requesterId) => {
 
 const approveTransaction = async (transactionId, validatorId, session) => {
   const transaction = await Transaction.findOne({ _id: transactionId, status: 'PENDING' }).session(session);
-  if (!transaction) throw new AppError('Transaction invalide ou déjà traitée.', 404);
+  if (!transaction) throw new AppError('Transaction invalide ou deja traitee.', 404);
 
   const driver = await User.findById(transaction.driver).session(session);
   if (!driver) throw new AppError('Chauffeur introuvable.', 404);
@@ -118,6 +116,72 @@ const approveTransaction = async (transactionId, validatorId, session) => {
 
   await logSystemAction(validatorId, 'APPROVE_PAYMENT', transaction._id, `+${hoursToAdd}h pour ${driver.email}`, session);
   return { transaction, driver, hoursToAdd };
+};
+
+const rejectTransaction = async (transactionId, reason, validatorId, session) => {
+  const transaction = await Transaction.findOne({ _id: transactionId, status: 'PENDING' }).session(session);
+  if (!transaction) throw new AppError('Transaction invalide ou deja traitee.', 404);
+
+  transaction.status = 'REJECTED';
+  transaction.rejectionReason = reason;
+  transaction.validatedBy = validatorId;
+  await transaction.save({ session });
+
+  await logSystemAction(validatorId, 'REJECT_PAYMENT', transaction._id, `Raison: ${reason}`, session);
+  return { transaction };
+};
+
+const getDashboardStats = async () => {
+  const [totalUsers, activeDrivers, pendingValidations, revenueData] = await Promise.all([
+    User.countDocuments({ role: { $in: ['rider', 'driver'] } }),
+    User.countDocuments({ role: 'driver', 'subscription.isActive': true }),
+    Transaction.countDocuments({ status: 'PENDING' }),
+    Transaction.aggregate([
+      { $match: { status: 'APPROVED' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ])
+  ]);
+
+  return {
+    totalUsers,
+    activeDrivers,
+    pendingValidations,
+    totalRevenue: revenueData.length > 0 ? revenueData[0].total : 0
+  };
+};
+
+const getFinanceData = async (period) => {
+  const pipeline = [
+    { $match: { status: 'APPROVED' } },
+    { $group: { _id: '$type', totalAmount: { $sum: '$amount' }, count: { $sum: 1 } } }
+  ];
+  const stats = await Transaction.aggregate(pipeline);
+  return stats;
+};
+
+const togglePromo = async (isActive, requesterId) => {
+  let settings = await Settings.findOne();
+  if (!settings) settings = new Settings();
+  
+  settings.isPromoActive = isActive;
+  settings.updatedBy = requesterId;
+  await settings.save();
+  
+  await logSystemAction(requesterId, 'TOGGLE_PROMO', settings._id, `Statut promo: ${isActive}`);
+  return { isPromoActive: settings.isPromoActive };
+};
+
+const updateWaveLinks = async (weeklyLink, monthlyLink, requesterId) => {
+  let settings = await Settings.findOne();
+  if (!settings) settings = new Settings();
+  
+  if (weeklyLink) settings.waveWeeklyLink = weeklyLink;
+  if (monthlyLink) settings.waveMonthlyLink = monthlyLink;
+  settings.updatedBy = requesterId;
+  
+  await settings.save();
+  await logSystemAction(requesterId, 'UPDATE_WAVE_LINKS', settings._id, 'Mise a jour des liens de paiement');
+  return { waveWeeklyLink: settings.waveWeeklyLink, waveMonthlyLink: settings.waveMonthlyLink };
 };
 
 const getAllUsers = async (query, userRole) => {
@@ -149,5 +213,10 @@ module.exports = {
   toggleUserBan,
   updateMapSettings,
   approveTransaction,
+  rejectTransaction,
+  getDashboardStats,
+  getFinanceData,
+  togglePromo,
+  updateWaveLinks,
   getAllUsers
 };

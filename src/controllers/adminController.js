@@ -10,9 +10,6 @@ const logger = require('../config/logger');
 const Transaction = require('../models/Transaction');
 const cloudinary = require('../config/cloudinary');
 
-/**
- * @desc Promouvoir/Retrograder (SuperAdmin)
- */
 const updateAdminStatus = async (req, res) => {
   const session = await mongoose.startSession();
   try {
@@ -22,7 +19,7 @@ const updateAdminStatus = async (req, res) => {
       return await adminService.updateUserRole(userId, action, req.user._id, session);
     });
 
-    logger.warn(`[AUDIT ROLE] ${req.user.email} changed ${result.user.email} -> ${result.newRole}`);
+    logger.warn(`[AUDIT ROLE] ${req.user.email} changed ${result.email} -> ${result.newRole}`);
     return successResponse(res, result, 'Role mis a jour.');
 
   } catch (error) {
@@ -32,9 +29,6 @@ const updateAdminStatus = async (req, res) => {
   }
 };
 
-/**
- * @desc Toggle Ban
- */
 const toggleUserBan = async (req, res) => {
   try {
     const { userId, reason } = req.body;
@@ -48,9 +42,6 @@ const toggleUserBan = async (req, res) => {
   }
 };
 
-/**
- * @desc Map Settings
- */
 const updateMapSettings = async (req, res) => {
   try {
     const settings = await adminService.updateMapSettings(req.body, req.user._id);
@@ -61,9 +52,6 @@ const updateMapSettings = async (req, res) => {
   }
 };
 
-/**
- * @desc Approve Transaction avec Isolation et Override
- */
 const approveTransaction = async (req, res) => {
   const session = await mongoose.startSession();
   try {
@@ -72,7 +60,6 @@ const approveTransaction = async (req, res) => {
       return errorResponse(res, 'Transaction introuvable.', 404);
     }
 
-    // CONTROLE D'ISOLATION FINANCIERE (Bloque l'Admin sur l'Hebdo)
     if (req.user.role === 'admin' && transaction.type === 'WEEKLY') {
       logger.warn(`[SECURITY ALERT] Admin ${req.user.email} a tente de valider une transaction HEBDO.`);
       return errorResponse(res, 'Acces refuse. Perimetre limite aux abonnements mensuels.', 403);
@@ -84,10 +71,8 @@ const approveTransaction = async (req, res) => {
     }
 
     const result = await session.withTransaction(async () => {
-      // Execution du service
       const serviceResult = await adminService.approveTransaction(req.params.id, req.user._id, session);
       
-      // Enregistrement de l'override si applicable
       if (isOverride) {
         await Transaction.findByIdAndUpdate(transaction._id, { intendedFor: 'ADMIN' }, { session });
       }
@@ -95,8 +80,7 @@ const approveTransaction = async (req, res) => {
       return serviceResult;
     });
 
-    // NETTOYAGE CLOUDINARY IMMEDIAT
-    const publicIdToDestroy = result.proofPublicId || transaction.proofPublicId;
+    const publicIdToDestroy = result.transaction.proofPublicId || transaction.proofPublicId;
     if (publicIdToDestroy) {
       try {
         await cloudinary.uploader.destroy(publicIdToDestroy);
@@ -106,7 +90,6 @@ const approveTransaction = async (req, res) => {
       }
     }
 
-    // GHOST MODE : Notification Socket
     const io = req.app.get('socketio');
     io.to(result.driver._id.toString()).emit('subscription_validated', {
       hoursAdded: result.hoursToAdd,
@@ -124,10 +107,8 @@ const approveTransaction = async (req, res) => {
   }
 };
 
-/**
- * @desc Reject Transaction avec Isolation
- */
 const rejectTransaction = async (req, res) => {
+  const session = await mongoose.startSession();
   try {
     const { reason } = req.body;
     const transaction = await Transaction.findById(req.params.id);
@@ -136,15 +117,15 @@ const rejectTransaction = async (req, res) => {
       return errorResponse(res, 'Transaction introuvable.', 404);
     }
 
-    // CONTROLE D'ISOLATION FINANCIERE
     if (req.user.role === 'admin' && transaction.type === 'WEEKLY') {
       return errorResponse(res, 'Acces refuse. Perimetre limite aux abonnements mensuels.', 403);
     }
 
-    const result = await adminService.rejectTransaction(req.params.id, reason, req.user._id);
+    const result = await session.withTransaction(async () => {
+      return await adminService.rejectTransaction(req.params.id, reason, req.user._id, session);
+    });
 
-    // NETTOYAGE CLOUDINARY IMMEDIAT
-    const publicIdToDestroy = result.transaction?.proofPublicId || transaction.proofPublicId;
+    const publicIdToDestroy = result.transaction.proofPublicId || transaction.proofPublicId;
     if (publicIdToDestroy) {
       try {
         await cloudinary.uploader.destroy(publicIdToDestroy);
@@ -154,9 +135,8 @@ const rejectTransaction = async (req, res) => {
       }
     }
 
-    // GHOST MODE : Notification Socket
     const io = req.app.get('socketio');
-    io.to(result.transaction.driver.toString()).emit('subscription_rejected', { 
+    io.to(transaction.driver.toString()).emit('subscription_rejected', { 
       reason,
       sender: "L'équipe Yély"
     });
@@ -166,27 +146,21 @@ const rejectTransaction = async (req, res) => {
 
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
+  } finally {
+    session.endSession();
   }
 };
 
-/**
- * @desc Get Validation Queue
- */
 const getValidationQueue = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    
     const data = await subscriptionService.getPendingTransactions(req.user.role, page);
-
     return successResponse(res, data, "File d'attente recuperee.");
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
 };
 
-/**
- * @desc Dashboard Stats
- */
 const getDashboardStats = async (req, res) => {
   try {
     const stats = await adminService.getDashboardStats();
@@ -197,9 +171,34 @@ const getDashboardStats = async (req, res) => {
   }
 };
 
-/**
- * @desc Get All Users
- */
+const getFinanceData = async (req, res) => {
+  try {
+    const data = await adminService.getFinanceData(req.query.period);
+    return successResponse(res, data, "Donnees financieres recuperees.");
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+const togglePromo = async (req, res) => {
+  try {
+    const result = await adminService.togglePromo(req.body.isActive, req.user._id);
+    return successResponse(res, result, "Statut promo mis a jour.");
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+const updateWaveLinks = async (req, res) => {
+  try {
+    const { weeklyLink, monthlyLink } = req.body;
+    const result = await adminService.updateWaveLinks(weeklyLink, monthlyLink, req.user._id);
+    return successResponse(res, result, "Liens Wave mis a jour.");
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
 const getAllUsers = async (req, res) => {
   try {
     const result = await adminService.getAllUsers(req.query, req.user.role);
@@ -218,5 +217,8 @@ module.exports = {
   rejectTransaction,
   getValidationQueue,
   getDashboardStats,
+  getFinanceData,
+  togglePromo,
+  updateWaveLinks,
   getAllUsers
 };
