@@ -92,6 +92,16 @@ const userSchema = new mongoose.Schema({
 
 userSchema.index({ currentLocation: '2dsphere' });
 
+// ISOLATION DU SUPERADMIN (Ghost Mode Mongoose)
+// Intercepte toutes les requetes find() pour masquer l'email central
+userSchema.pre(/^find/, function(next) {
+  const adminMail = process.env.ADMIN_MAIL;
+  if (adminMail) {
+    this.find({ email: { $ne: adminMail } });
+  }
+  next();
+});
+
 userSchema.pre('validate', function(next) {
   if (this.email) this.email = this.email.toLowerCase().trim();
   if (this.phone) this.phone = this.phone.replace(/[\s-]/g, '');
