@@ -66,14 +66,16 @@ const approveTransaction = async (req, res) => {
           expiresAt: result.newExpiryDate
         });
       }
-      await notificationService.sendPushNotification(
+      
+      notificationService.sendPushNotification(
         result.driver._id.toString(),
         "Abonnement Active",
         "Votre preuve de paiement a ete validee. Vous pouvez reprendre les courses.",
         { type: 'SUBSCRIPTION_APPROVED' }
-      );
+      ).catch(notifError => logger.error(`[NON-CRITIQUE] Echec notification apres approbation: ${notifError.message}`));
+      
     } catch (notifError) {
-      logger.error(`[NON-CRITIQUE] Echec notification apres approbation: ${notifError.message}`);
+      logger.error(`[NON-CRITIQUE] Echec general notifications apres approbation: ${notifError.message}`);
     }
 
     logger.info(`[AUDIT FINANCE] Transaction ${result.transaction._id} approved by ${req.user.email}`);
@@ -95,14 +97,16 @@ const rejectTransaction = async (req, res) => {
       if (io) {
         io.to(result.driver._id.toString()).emit('subscription_rejected', { reason });
       }
-      await notificationService.sendPushNotification(
+      
+      notificationService.sendPushNotification(
         result.driver._id.toString(),
         "Paiement Rejete",
         `Votre preuve a ete refusee: ${reason}. Veuillez soumettre une image valide.`,
         { type: 'SUBSCRIPTION_REJECTED' }
-      );
+      ).catch(notifError => logger.error(`[NON-CRITIQUE] Echec notification apres rejet: ${notifError.message}`));
+      
     } catch (notifError) {
-      logger.error(`[NON-CRITIQUE] Echec notification apres rejet: ${notifError.message}`);
+      logger.error(`[NON-CRITIQUE] Echec general notifications apres rejet: ${notifError.message}`);
     }
 
     logger.info(`[AUDIT FINANCE] Transaction ${result.transaction._id} rejected by ${req.user.email}`);
