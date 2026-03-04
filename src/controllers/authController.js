@@ -96,10 +96,10 @@ const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
     await authService.forgotPassword(email);
-    return successResponse(res, null, "Si cette adresse email est associée à un compte, un code de réinitialisation y a été envoyé.", 200);
+    return successResponse(res, null, "Si cette adresse email est associee a un compte, un code de reinitialisation y a ete envoye.", 200);
   } catch (error) {
     const statusCode = error.statusCode || 500;
-    return errorResponse(res, error.message || "Erreur lors de la demande de réinitialisation.", statusCode);
+    return errorResponse(res, error.message || "Erreur lors de la demande de reinitialisation.", statusCode);
   }
 };
 
@@ -107,30 +107,31 @@ const resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
     await authService.resetPasswordWithOtp(email, otp, newPassword);
-    return successResponse(res, null, "Votre mot de passe a été réinitialisé avec succès. Vous pouvez maintenant vous connecter.", 200);
+    return successResponse(res, null, "Votre mot de passe a ete reinitialise avec succes. Vous pouvez maintenant vous connecter.", 200);
   } catch (error) {
     const statusCode = error.statusCode || 400;
-    return errorResponse(res, error.message || "Erreur lors de la réinitialisation du mot de passe.", statusCode);
+    return errorResponse(res, error.message || "Erreur lors de la reinitialisation du mot de passe.", statusCode);
   }
 };
 
 const refreshToken = async (req, res) => {
   try {
+    console.info('[AUTH_CONTROLLER] Requete de rafraichissement recue.');
     let token = req.body.refreshToken;
     
-    // Fallback sécurisé : si vide dans le body, on cherche dans le cookie
     if (!token && req.cookies && req.cookies.refreshToken) {
+      console.info('[AUTH_CONTROLLER] Token absent du body, recuperation depuis les cookies.');
       token = req.cookies.refreshToken;
     }
 
     if (!token) {
-       console.warn('[AUTH_CONTROLLER] Requête de refresh sans token reçue.');
+       console.warn('[AUTH_CONTROLLER_FATAL] Aucun refresh token fourni par le client (ni body, ni cookie).');
        return errorResponse(res, "Refresh token manquant", 401);
     }
     
+    console.info('[AUTH_CONTROLLER] Validation de la session en cours...');
     const user = await authService.validateSessionForRefresh(token);
 
-    // CORRECTION : Forçage en String de l'ID utilisateur
     const newAccessToken = generateAccessToken(user._id.toString(), user.role);
     const newRefreshToken = generateRefreshToken(user._id.toString());
 
@@ -150,7 +151,7 @@ const refreshToken = async (req, res) => {
       subscription: user.subscription 
     };
 
-    console.info(`[AUTH_CONTROLLER] Token rafraîchi avec succès pour l'utilisateur: ${user._id}`);
+    console.info(`[AUTH_CONTROLLER_SUCCESS] Token rafraichi avec succes pour l'utilisateur: ${user._id}`);
 
     return successResponse(res, { 
       user: userData,
@@ -159,7 +160,7 @@ const refreshToken = async (req, res) => {
     }, "Token rafraichi silencieusement", 200);
 
   } catch (error) {
-    console.error('[AUTH_CONTROLLER] Échec critique du Refresh Token:', error.message);
+    console.error('[AUTH_CONTROLLER_FATAL] Echec critique du Refresh Token. Raison:', error.message);
     clearRefreshTokenCookie(res); 
     const statusCode = error.statusCode || 401;
     return errorResponse(res, error.message || "Session definitivement invalide", statusCode);
