@@ -20,7 +20,6 @@ const logSystemAction = async (actorId, action, targetId, details) => {
     });
   } catch (error) {
     console.error(`[AUDIT ERROR] Echec d'ecriture du log (${action}):`, error.message);
-    // On ne jette pas d'erreur ici pour ne pas bloquer le flux principal
   }
 };
 
@@ -81,9 +80,6 @@ const updateMapSettings = async (data, requesterId) => {
   return settings;
 };
 
-/**
- * REPARATION SECURITE : Diagnostic des erreurs separe pour le frontend
- */
 const approveTransaction = async (transactionId, validatorId) => {
   const cleanId = transactionId.toString().trim();
   const transaction = await Transaction.findById(cleanId);
@@ -101,17 +97,20 @@ const approveTransaction = async (transactionId, validatorId) => {
 
   const daysToAdd = transaction.planId === 'WEEKLY' ? 7 : 30;
   
+  // CORRECTION SENIOR: Sauvegarde robuste dans le bon format du modèle User
+  if (!driver.subscription) driver.subscription = {};
+  driver.subscription.isActive = true;
+  driver.subscription.hoursRemaining = (driver.subscription.hoursRemaining || 0) + (daysToAdd * 24);
+  driver.subscription.lastCheckTime = new Date();
+
+  // On maintient une date d'expiration optionnelle au cas où d'autres services en auraient besoin
   let newExpiryDate = new Date();
   if (driver.subscriptionExpiresAt && driver.subscriptionExpiresAt > new Date()) {
     newExpiryDate = new Date(driver.subscriptionExpiresAt);
   }
   newExpiryDate.setDate(newExpiryDate.getDate() + daysToAdd);
-
   driver.subscriptionExpiresAt = newExpiryDate;
-  driver.subscriptionStatus = 'active'; 
-  if (driver.subscription) {
-    driver.subscription.status = 'active';
-  }
+
   await driver.save();
 
   transaction.status = 'APPROVED';
@@ -123,10 +122,7 @@ const approveTransaction = async (transactionId, validatorId) => {
   await transaction.save();
 
   const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA validee. +${daysToAdd} jours ajoutes pour ${driver.email}`;
-  
-  // Cette ligne ne fera plus jamais crasher le système grâce au try/catch ajouté plus haut
   await logSystemAction(validatorId, 'APPROVE_SUBSCRIPTION', driver._id, details);
-  
   try { await redisClient.del(`auth:user:${driver._id}`); } catch(e) {}
 
   return { transaction, driver, daysToAdd, newExpiryDate };
@@ -155,10 +151,11 @@ const rejectTransaction = async (transactionId, reason, validatorId) => {
   const driver = await User.findById(transaction.user);
   
   if (driver) {
-    driver.subscriptionStatus = 'inactive';
-    if (driver.subscription) {
-        driver.subscription.status = 'inactive';
-    }
+    // CORRECTION SENIOR: Annulation propre de l'abonnement
+    if (!driver.subscription) driver.subscription = {};
+    driver.subscription.isActive = false;
+    driver.subscription.hoursRemaining = 0;
+    
     await driver.save();
 
     const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA rejetee. Motif: ${reason}`;
