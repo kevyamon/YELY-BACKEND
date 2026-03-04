@@ -73,25 +73,30 @@ const login = async (identifier, password) => {
 // =========================================================================
 
 const forgotPassword = async (email) => {
+  console.log(`[DEBUG - SERVICE] Recherche de l'utilisateur avec l'email: ${email}`);
   const user = await User.findOne({ email: email.toLowerCase().trim() });
   
-  // SÉCURITÉ : Si l'utilisateur n'existe pas, on renvoie "true" silencieusement
-  // Cela empêche un pirate de deviner quels emails sont inscrits chez toi (Enumeration Attack)
-  if (!user) return true; 
+  // DÉBOGAGE : On désactive le return true silencieux. On veut VOIR l'erreur.
+  if (!user) {
+    console.log(`[DEBUG - SERVICE] ÉCHEC: Utilisateur introuvable pour ${email}`);
+    throw new AppError("DEBUG: Utilisateur introuvable en base de données.", 404);
+  } 
 
-  // Génération d'un code à 6 chiffres
+  console.log(`[DEBUG - SERVICE] Utilisateur trouvé, génération OTP...`);
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  
-  // On hache l'OTP avant de le stocker (même sécurité qu'un mot de passe)
   const hashedOtp = await bcrypt.hash(otp, 12);
 
   user.resetPasswordOtp = hashedOtp;
-  user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // Valable 15 minutes
+  user.resetPasswordExpires = Date.now() + 15 * 60 * 1000;
   await user.save({ validateBeforeSave: false });
+  
+  console.log(`[DEBUG - SERVICE] OTP généré et sauvegardé. Appel de emailService...`);
 
   try {
     await emailService.sendOtpEmail(user.email, otp);
+    console.log(`[DEBUG - SERVICE] Succès: emailService n'a pas renvoyé d'erreur.`);
   } catch (error) {
+    console.error(`[DEBUG - SERVICE] Erreur renvoyée par emailService:`, error);
     user.resetPasswordOtp = undefined;
     user.resetPasswordExpires = undefined;
     await user.save({ validateBeforeSave: false });

@@ -96,13 +96,15 @@ const logoutUser = async (req, res) => {
 // ==========================================
 
 const forgotPassword = async (req, res) => {
+  console.log("[DEBUG - CONTROLLER] Entrée dans forgotPassword. Body reçu:", req.body);
   try {
     const { email } = req.body;
     await authService.forgotPassword(email);
     
-    // SECURITE: Message générique pour éviter l'énumération d'emails par les hackers
+    console.log("[DEBUG - CONTROLLER] authService.forgotPassword exécuté avec succès");
     return successResponse(res, null, "Si cette adresse email est associée à un compte, un code de réinitialisation y a été envoyé.", 200);
   } catch (error) {
+    console.error("[DEBUG - CONTROLLER] Erreur capturée dans forgotPassword:", error);
     const statusCode = error.statusCode || 500;
     return errorResponse(res, error.message || "Erreur lors de la demande de réinitialisation.", statusCode);
   }

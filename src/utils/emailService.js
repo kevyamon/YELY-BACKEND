@@ -27,6 +27,14 @@ const LOGO_URL = "https://res.cloudinary.com/dskdkrwhq/image/upload/v1772629185/
 const GOLD_COLOR = "#D4AF37";
 
 const sendOtpEmail = async (to, otp) => {
+  console.log("[DEBUG - EMAIL] Variables d'environnement SMTP :", {
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT,
+    userIsDefined: !!process.env.SMTP_USER,
+    passIsDefined: !!process.env.SMTP_PASS,
+    from: process.env.EMAIL_FROM
+  });
+
   const mailOptions = {
     from: `"Yely Support" <${process.env.EMAIL_FROM}>`,
     to,
@@ -74,11 +82,16 @@ const sendOtpEmail = async (to, otp) => {
   };
 
   try {
-    await transporter.verify(); // On vérifie la connexion avant de lancer l'envoi
+    console.log("[DEBUG - EMAIL] Début de la vérification de la connexion SMTP (transporter.verify)...");
+    await transporter.verify(); 
+    console.log("[DEBUG - EMAIL] Connexion SMTP OK. Envoi du mail en cours...");
+    
     await transporter.sendMail(mailOptions);
+    console.log("[DEBUG - EMAIL] Mail envoyé avec succès au serveur SMTP Brevo !");
+    
   } catch (error) {
-    console.error("[EMAIL ERROR] Echec critique :", error.message);
-    throw new Error("Impossible d'envoyer l'email. Vérifiez la config SMTP Brevo.");
+    console.error("[EMAIL ERROR] Echec critique détaillé :", error.stack || error);
+    throw new Error(`Impossible d'envoyer l'email: ${error.message}`);
   }
 };
 

@@ -50,8 +50,8 @@ const createAuthLimiter = (maxAttempts, windowMinutes) => {
 const registerLimiter = createAuthLimiter(3, 60); // 3 essais par heure
 const loginLimiter = createAuthLimiter(5, 15);    // 5 essais par 15 min
 
-// Limiteur très strict pour éviter l'envoi massif de mails
-const forgotPasswordLimiter = createAuthLimiter(3, 60); // 3 demandes par heure max
+// DÉBOGAGE: Limiteur relâché temporairement à 100 essais au lieu de 3
+const forgotPasswordLimiter = createAuthLimiter(100, 60); 
 
 // ═══════════════════════════════════════════════════════════
 // ROUTES
