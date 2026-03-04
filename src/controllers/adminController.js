@@ -6,8 +6,12 @@ const mongoose = require('mongoose');
 const adminService = require('../services/adminService');
 const notificationService = require('../services/notificationService');
 const Transaction = require('../models/Transaction');
+// AJOUT SENIOR: Import du modèle AuditLog
+const AuditLog = require('../models/AuditLog'); 
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const logger = require('../config/logger');
+
+// ... (Garde toutes tes fonctions existantes intactes : updateAdminStatus, toggleUserBan, etc.) ...
 
 const updateAdminStatus = async (req, res) => {
   try {
@@ -57,7 +61,6 @@ const approveTransaction = async (req, res) => {
   try {
     const result = await adminService.approveTransaction(req.params.id, req.user._id);
 
-    // BLOC DE SÉCURITÉ : On ne laisse pas une erreur Push/Socket annuler un succès en DB
     try {
       const io = req.app.get('socketio');
       if (io) {
@@ -91,7 +94,6 @@ const rejectTransaction = async (req, res) => {
     const { reason } = req.body;
     const result = await adminService.rejectTransaction(req.params.id, reason, req.user._id);
 
-    // BLOC DE SÉCURITÉ : Isolement des notifications
     try {
       const io = req.app.get('socketio');
       if (io) {
@@ -204,6 +206,33 @@ const updateWaveLinks = async (req, res) => {
   }
 };
 
+// AJOUT SENIOR: Fonction pour récupérer l'historique d'audit
+const getAuditLogs = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 50); // Plus de logs par page
+    const skip = (page - 1) * limit;
+
+    const [logs, total] = await Promise.all([
+      AuditLog.find()
+        .populate('actor', 'name email role')
+        .sort({ createdAt: -1 }) // Plus récents d'abord
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      AuditLog.countDocuments()
+    ]);
+
+    return successResponse(res, {
+      logs,
+      pagination: { page, total, pages: Math.ceil(total / limit) }
+    }, "Journal récupéré.");
+  } catch (error) {
+    logger.error(`[AUDIT LOGS ERROR]: ${error.message}`);
+    return errorResponse(res, "Impossible de récupérer le journal.", 500);
+  }
+};
+
 module.exports = {
   updateAdminStatus,
   toggleUserBan,
@@ -215,5 +244,6 @@ module.exports = {
   getAllUsers,
   getFinanceData,
   togglePromo,
-  updateWaveLinks
+  updateWaveLinks,
+  getAuditLogs // Ne pas oublier d'exporter !
 };

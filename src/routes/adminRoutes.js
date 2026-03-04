@@ -19,6 +19,8 @@ const {
 router.get('/stats', protect, authorize('admin', 'superadmin'), adminController.getDashboardStats);
 router.get('/users', protect, authorize('admin', 'superadmin'), adminController.getAllUsers);
 router.get('/validations', protect, authorize('admin', 'superadmin'), adminController.getValidationQueue);
+// AJOUT SENIOR: Route pour lire le journal d'audit
+router.get('/logs', protect, authorize('admin', 'superadmin'), adminController.getAuditLogs);
 
 router.post('/approve/:id', 
   protect, 
