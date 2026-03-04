@@ -23,5 +23,8 @@ module.exports = {
   startRideSession: rideExecutionService.startRideSession,
   completeRideSession: rideExecutionService.completeRideSession,
   submitRideRating: rideExecutionService.submitRideRating,
-  checkRideProgressOnLocationUpdate: rideExecutionService.checkRideProgressOnLocationUpdate
+  checkRideProgressOnLocationUpdate: rideExecutionService.checkRideProgressOnLocationUpdate,
+  
+  // CORRECTION SENIOR: Le maillon manquant qui empechait l'historique de remonter au controleur !
+  getRideHistory: rideExecutionService.getRideHistory
 };
