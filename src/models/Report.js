@@ -6,7 +6,10 @@ const reportSchema = new mongoose.Schema({
   message: { type: String, required: true, maxlength: 2000 },
   captures: [{ type: String }], // URLs Cloudinary
   status: { type: String, enum: ['OPEN', 'IN_PROGRESS', 'RESOLVED'], default: 'OPEN' },
-  adminNote: { type: String, default: '' }
+  adminNote: { type: String, default: '' },
+  // AJOUT SENIOR: Les deux drapeaux pour la Suppression Intelligente
+  deletedByUser: { type: Boolean, default: false },
+  deletedByAdmin: { type: Boolean, default: false }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Report', reportSchema);

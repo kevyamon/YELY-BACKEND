@@ -31,10 +31,11 @@ const login = async (identifier, password) => {
   const isEmail = identifier.includes('@');
   const normalizedId = isEmail ? identifier.toLowerCase().trim() : identifier.replace(/\s/g, '');
 
-  // AJOUT SENIOR: Populate systematique pour réhydrater l'état Frontend au login
+  // CORRECTION SENIOR: Retrait de .populate('subscription'). 
+  // L'abonnement est déjà intégré dans l'objet User, on le récupère donc naturellement.
   const user = await User.findOne({
     $or: [{ email: normalizedId }, { phone: normalizedId }]
-  }).populate('subscription').select('+password +loginAttempts +lockUntil');
+  }).select('+password +loginAttempts +lockUntil');
 
   if (!user) {
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -89,8 +90,8 @@ const validateSessionForRefresh = async (token) => {
       throw new AppError('Structure du token illisible.', 401);
     }
 
-    // AJOUT SENIOR: Populate pour conserver l'état de l'abonnement lors du refresh
-    const user = await User.findById(userId).populate('subscription');
+    // CORRECTION SENIOR: Retrait de .populate('subscription') ici aussi pour éviter d'écraser la donnée.
+    const user = await User.findById(userId);
     
     if (!user) {
       throw new AppError('L\'utilisateur lie a cette session n\'existe plus.', 401);

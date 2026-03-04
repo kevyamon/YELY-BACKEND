@@ -8,11 +8,12 @@ const { uploadReportCaptures, validateFileSignature } = require('../middleware/u
 router.use(protect);
 router.post('/submit', uploadReportCaptures, validateFileSignature, reportController.submitReport);
 router.get('/my-reports', reportController.getMyReports);
+// AJOUT SENIOR: Nouvelle route pour que le plaintif puisse supprimer son signalement
+router.delete('/my-reports/:id', reportController.deleteMyReport);
 
 // Admin Only
 router.get('/all', authorize('admin', 'superadmin'), reportController.getAllReports);
 router.patch('/:id/resolve', authorize('admin', 'superadmin'), reportController.resolveReport);
-// AJOUT SENIOR: Route de suppression
 router.delete('/:id', authorize('admin', 'superadmin'), reportController.deleteReport); 
 
 module.exports = router;
