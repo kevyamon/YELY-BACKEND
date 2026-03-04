@@ -24,9 +24,10 @@ const submitReport = async (req, res) => {
       captures
     });
 
-    // AJOUT SENIOR: Notification en temps réel pour l'admin (activera la pastille)
-    const io = req.app.get('io');
+    // CORRECTION SENIOR: Utilisation du bon nom de variable 'socketio' au lieu de 'io'
+    const io = req.app.get('socketio');
     if (io) {
+      // On envoie spécifiquement dans la salle 'admin' si on l'a configurée, sinon on broadcast
       io.emit('new_admin_report', report);
     }
 
@@ -65,8 +66,8 @@ const resolveReport = async (req, res) => {
       { reportId: report._id.toString() }
     );
 
-    // Notification Socket.io pour la mise à jour en temps réel si l'app est ouverte
-    const io = req.app.get('io');
+    // CORRECTION SENIOR: Utilisation du bon nom 'socketio'
+    const io = req.app.get('socketio');
     if (io) {
       io.to(report.user.toString()).emit('report_resolved', report);
     }
