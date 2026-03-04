@@ -5,6 +5,7 @@
 const subscriptionService = require('../services/subscriptionService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const Transaction = require('../models/Transaction');
+const User = require('../models/User'); // AJOUT SENIOR: Nécessaire pour lire la date
 
 const getConfig = async (req, res) => {
   try {
@@ -57,11 +58,13 @@ const getStatus = async (req, res) => {
       status: 'PENDING' 
     });
 
-    // CORRECTION SENIOR: Nettoyage de l'ancienne propriété expiresAt
+    // CORRECTION SENIOR : On va chercher la vraie date d'expiration pour le Dashboard
+    const user = await User.findById(req.user._id).select('subscriptionExpiresAt');
+
     return successResponse(res, {
       isActive,
       isPending: !!pendingTransaction,
-      expiresAt: null 
+      expiresAt: user ? user.subscriptionExpiresAt : null
     });
   } catch (error) {
     console.error("[STATUS ERROR]:", error.message);
