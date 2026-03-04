@@ -1,6 +1,6 @@
 // src/controllers/notificationController.js
 const notificationService = require('../services/notificationService');
-const Notification = require('../models/Notification'); // Import nécessaire pour le delete
+const Notification = require('../models/Notification'); 
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 
 const getNotifications = async (req, res) => {
@@ -22,17 +22,17 @@ const markRead = async (req, res) => {
   }
 };
 
-// 🚀 AJOUT SENIOR : Suppression d'une ou de toutes les notifications
+// 🚀 CORRECTION SENIOR : Le champ Mongoose est 'recipient' et non 'user' !
 const deleteNotification = async (req, res) => {
   try {
     const notifId = req.params.id;
     
     if (notifId === 'all') {
-      await Notification.deleteMany({ user: req.user._id });
+      await Notification.deleteMany({ recipient: req.user._id });
       return successResponse(res, null, 'Toutes les notifications ont été supprimées.');
     }
 
-    const notif = await Notification.findOne({ _id: notifId, user: req.user._id });
+    const notif = await Notification.findOne({ _id: notifId, recipient: req.user._id });
     if (!notif) return errorResponse(res, "Notification introuvable.", 404);
 
     await Notification.findByIdAndDelete(notifId);
