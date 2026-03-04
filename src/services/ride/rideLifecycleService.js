@@ -12,7 +12,7 @@ const pricingService = require('../pricingService');
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 const { env } = require('../../config/env');
-const { sendPushNotification } = require('../notificationService');
+const { sendNotification } = require('../notificationService');
 
 const cleanupQueue = new Queue('ride-cleanup', { 
   connection: { url: env.REDIS_URL } 
@@ -67,11 +67,12 @@ const dispatchToNearbyDrivers = async (ride) => {
   logger.info(`[DISPATCH] ${drivers.length} chauffeurs trouves dans un rayon de ${maxDistanceInMeters}m pour la course ${ride._id}.`);
 
   drivers.forEach(driver => {
-    sendPushNotification(
+    sendNotification(
       driver._id,
       'Nouvelle demande de course',
       `Course de ${ride.distance} km disponible a proximite.`,
-      { rideId: ride._id.toString(), type: 'NEW_RIDE_REQUEST' }
+      'NEW_RIDE_REQUEST',
+      { rideId: ride._id.toString() }
     ).catch(err => logger.error(`[PUSH ERROR] Echec d'envoi au chauffeur ${driver._id}: ${err.message}`));
   });
 
