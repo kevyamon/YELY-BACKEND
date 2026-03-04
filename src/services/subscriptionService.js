@@ -1,5 +1,5 @@
 // src/services/subscriptionService.js
-// LOGIQUE ABONNEMENT - Assignation par lots (Lottery/Round Robin) & Gestion des Preuves
+// LOGIQUE ABONNEMENT - Assignation par lots & Calculs Financiers Dynamiques
 // STANDARD: Industriel / Bank Grade
 
 const Transaction = require('../models/Transaction');
@@ -30,16 +30,11 @@ const getNextValidator = async () => {
   if (admins.length === 0) return null;
 
   let settings = await Settings.findOne();
-  if (!settings) {
-    settings = await Settings.create({ lastAssignedAdminIndex: 0, validationCounter: 0 });
-  }
+  if (!settings) settings = await Settings.create({ lastAssignedAdminIndex: 0, validationCounter: 0 });
 
-  if (typeof settings.validationCounter === 'undefined') {
-    settings.validationCounter = 0;
-  }
+  if (typeof settings.validationCounter === 'undefined') settings.validationCounter = 0;
 
   const currentAdminIndex = Math.floor(settings.validationCounter / ASSIGNMENT_LOT_SIZE) % admins.length;
-  
   settings.validationCounter += 1;
   await settings.save();
 
@@ -47,22 +42,32 @@ const getNextValidator = async () => {
 };
 
 /**
- * Lecture dynamique depuis la base de données (Settings)
+ * LECTURE DYNAMIQUE ET CALCUL DES -40% EN TEMPS REEL
  */
 const getSubscriptionPricing = async () => {
   let settings = await Settings.findOne();
-  if (!settings) settings = {}; // Fallback de sécurité
+  if (!settings) settings = {};
 
   const isPromo = settings.isPromoActive || false;
+  
+  // Prix de base fixes (peuvent venir d'un .env si tu preferes)
+  const baseWeeklyPrice = 1000;
+  const baseMonthlyPrice = 6000;
+
+  // Formule mathématique stricte: -40% (multiplier par 0.6)
+  const weeklyPrice = isPromo ? Math.round(baseWeeklyPrice * 0.6) : baseWeeklyPrice;
+  const monthlyPrice = isPromo ? Math.round(baseMonthlyPrice * 0.6) : baseMonthlyPrice;
   
   return {
     isPromoActive: isPromo,
     weekly: {
-      price: isPromo ? parseInt(process.env.PROMO_PRICE_WEEKLY || '500', 10) : 1000,
+      price: weeklyPrice,
+      originalPrice: baseWeeklyPrice, // Renvoi du prix d'origine pour le barrer sur le front
       link: settings.waveLinkWeekly || process.env.WAVE_LINK_WEEKLY || '' 
     },
     monthly: {
-      price: isPromo ? parseInt(process.env.PROMO_PRICE_MONTHLY || '4000', 10) : 6000,
+      price: monthlyPrice,
+      originalPrice: baseMonthlyPrice,
       link: settings.waveLinkMonthly || process.env.WAVE_LINK_MONTHLY || ''
     }
   };
@@ -74,6 +79,7 @@ const submitProof = async (userId, data, file) => {
     throw new AppError("Une validation est deja en cours pour votre compte.", 400);
   }
 
+  // Le montant sera automatiquement le prix remisé à -40% si la promo est active
   const pricingConfig = await getSubscriptionPricing();
   let amount = 0;
   let collectorType = '';
@@ -107,7 +113,7 @@ const submitProof = async (userId, data, file) => {
     assignedTo: validatorId,
     auditLog: [{
       action: 'SUBMISSION',
-      note: `Preuve soumise pour le forfait ${data.planId} (Montant theorique: ${amount}F CFA)`
+      note: `Preuve soumise pour le forfait ${data.planId} (Montant: ${amount}F CFA)`
     }]
   });
 
@@ -116,28 +122,19 @@ const submitProof = async (userId, data, file) => {
       await notificationService.sendPushNotification(
         validator.fcmToken,
         "Nouvelle capture a verifier",
-        "Un chauffeur vient de soumettre un paiement. Verification requise.",
+        "Un chauffeur vient de soumettre un paiement.",
         { transactionId: transaction._id.toString(), type: 'VALIDATION_REQUEST' }
       );
-    } catch (error) {
-      console.error("[NOTIFICATION ERROR]: Echec de l'envoi du Push au validateur", error.message);
-    }
+    } catch (error) {}
   }
 
   return transaction;
 };
 
-// CORRECTION SENIOR : On vérifie la bonne propriété du modèle User
 const checkSubscriptionStatus = async (userId) => {
   const user = await User.findById(userId);
   if (!user || !user.subscription) return false;
-  
   return user.subscription.isActive === true;
 };
 
-module.exports = {
-  submitProof,
-  checkSubscriptionStatus,
-  getNextValidator,
-  getSubscriptionPricing
-};
+module.exports = { submitProof, checkSubscriptionStatus, getNextValidator, getSubscriptionPricing };

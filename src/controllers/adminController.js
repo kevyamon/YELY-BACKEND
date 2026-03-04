@@ -187,25 +187,26 @@ const getFinanceData = async (req, res) => {
   }
 };
 
+// Remplace uniquement cette fonction dans src/controllers/adminController.js
 const togglePromo = async (req, res) => {
   try {
     const result = await adminService.togglePromo(req.body.isActive, req.user._id);
+
+    // AJOUT SENIOR: Diffusion temps réel globale (io.emit touche tout le monde)
+    try {
+      const io = req.app.get('socketio');
+      if (io) {
+        io.emit('promo_updated', { isPromoActive: result.isPromoActive });
+      }
+    } catch (socketError) {
+      logger.error(`[SOCKET PROMO] Echec: ${socketError.message}`);
+    }
+
     return successResponse(res, result, "Statut promo mis a jour.");
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
 };
-
-const updateWaveLinks = async (req, res) => {
-  try {
-    const { weeklyLink, monthlyLink } = req.body;
-    const result = await adminService.updateWaveLinks(weeklyLink, monthlyLink, req.user._id);
-    return successResponse(res, result, "Liens Wave mis a jour.");
-  } catch (error) {
-    return errorResponse(res, error.message, 500);
-  }
-};
-
 // AJOUT SENIOR: Fonction pour récupérer l'historique d'audit
 const getAuditLogs = async (req, res) => {
   try {
