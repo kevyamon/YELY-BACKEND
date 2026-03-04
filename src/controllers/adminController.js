@@ -6,12 +6,9 @@ const mongoose = require('mongoose');
 const adminService = require('../services/adminService');
 const notificationService = require('../services/notificationService');
 const Transaction = require('../models/Transaction');
-// AJOUT SENIOR: Import du modèle AuditLog
 const AuditLog = require('../models/AuditLog'); 
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const logger = require('../config/logger');
-
-// ... (Garde toutes tes fonctions existantes intactes : updateAdminStatus, toggleUserBan, etc.) ...
 
 const updateAdminStatus = async (req, res) => {
   try {
@@ -187,12 +184,11 @@ const getFinanceData = async (req, res) => {
   }
 };
 
-// Remplace uniquement cette fonction dans src/controllers/adminController.js
 const togglePromo = async (req, res) => {
   try {
     const result = await adminService.togglePromo(req.body.isActive, req.user._id);
 
-    // AJOUT SENIOR: Diffusion temps réel globale (io.emit touche tout le monde)
+    // AJOUT SENIOR: Diffusion temps réel globale
     try {
       const io = req.app.get('socketio');
       if (io) {
@@ -207,17 +203,27 @@ const togglePromo = async (req, res) => {
     return errorResponse(res, error.message, 500);
   }
 };
-// AJOUT SENIOR: Fonction pour récupérer l'historique d'audit
+
+const updateWaveLinks = async (req, res) => {
+  try {
+    const { weeklyLink, monthlyLink } = req.body;
+    const result = await adminService.updateWaveLinks(weeklyLink, monthlyLink, req.user._id);
+    return successResponse(res, result, "Liens Wave mis a jour.");
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
 const getAuditLogs = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, parseInt(req.query.limit) || 50); // Plus de logs par page
+    const limit = Math.min(100, parseInt(req.query.limit) || 50); 
     const skip = (page - 1) * limit;
 
     const [logs, total] = await Promise.all([
       AuditLog.find()
         .populate('actor', 'name email role')
-        .sort({ createdAt: -1 }) // Plus récents d'abord
+        .sort({ createdAt: -1 }) 
         .skip(skip)
         .limit(limit)
         .lean(),
@@ -246,5 +252,5 @@ module.exports = {
   getFinanceData,
   togglePromo,
   updateWaveLinks,
-  getAuditLogs // Ne pas oublier d'exporter !
+  getAuditLogs 
 };
