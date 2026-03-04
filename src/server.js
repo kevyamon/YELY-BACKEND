@@ -205,8 +205,9 @@ const startServer = async () => {
     await mongoose.connect(env.MONGO_URI);
     logger.info('[MONGODB] Base de donnees connectee');
     
-    server.listen(env.PORT, () => {
-      logger.info(`[SERVER] Serveur Yely actif sur port ${env.PORT}`);
+    // MODIFICATION CLÉ: Ajout de '0.0.0.0' pour l'exposition publique
+    server.listen(env.PORT, '0.0.0.0', () => {
+      logger.info(`[SERVER] Serveur Yely actif sur 0.0.0.0:${env.PORT}`);
     });
   } catch (err) {
     logger.error(`[SERVER] Echec critique au demarrage : ${err.message}`);

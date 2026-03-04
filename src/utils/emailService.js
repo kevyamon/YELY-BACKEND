@@ -1,37 +1,16 @@
 // src/utils/emailService.js
-// SERVICE D'ENVOI D'EMAILS - Connecteur SMTP Brevo Premium
+// SERVICE D'ENVOI D'EMAILS - Connecteur API REST Brevo (Contournement Pare-feu Cloud)
 // CSCSM Level: Bank Grade
 
-const nodemailer = require('nodemailer');
-
-// DÉBOGAGE SENIOR: On force le port 465 et le mode sécurisé pour contourner le pare-feu Render
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp-relay.brevo.com',
-  port: 465, // <-- MODIFICATION CLÉ : Port 465 au lieu de 587
-  secure: true, // <-- MODIFICATION CLÉ : true est obligatoire pour le port 465
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-  connectionTimeout: 20000, // On augmente à 20s
-  greetingTimeout: 20000,
-  socketTimeout: 20000,
-  tls: {
-    rejectUnauthorized: false 
-  }
-});
+const axios = require('axios');
 
 const LOGO_URL = "https://res.cloudinary.com/dskdkrwhq/image/upload/v1772629185/photo_2026-03-04_12-55-42_b9icek.jpg";
 const GOLD_COLOR = "#D4AF37";
 
 const sendOtpEmail = async (to, otp) => {
-  console.log("[DEBUG - EMAIL] Tentative de connexion sur le port 465 (TLS Implicite)...");
+  console.log("[DEBUG - EMAIL] Utilisation de l'API HTTP Brevo (Port 443 HTTPS)...");
 
-  const mailOptions = {
-    from: `"Yely Support" <${process.env.EMAIL_FROM}>`,
-    to,
-    subject: `🔐 ${otp} est votre code de sécurité Yely`,
-    html: `
+  const htmlContent = `
     <!DOCTYPE html>
     <html>
     <body style="margin: 0; padding: 0; background-color: #0F0F0F; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
@@ -70,20 +49,34 @@ const sendOtpEmail = async (to, otp) => {
       </table>
     </body>
     </html>
-    `,
-  };
+  `;
 
   try {
-    console.log("[DEBUG - EMAIL] Vérification de la nouvelle connexion SMTP...");
-    await transporter.verify(); 
-    console.log("[DEBUG - EMAIL] Connexion SMTP 465 OK. Envoi du mail en cours...");
-    
-    await transporter.sendMail(mailOptions);
-    console.log("[DEBUG - EMAIL] Mail envoyé avec succès au serveur SMTP Brevo !");
-    
+    // On appelle directement l'API v3 de Brevo au lieu du SMTP
+    const response = await axios.post(
+      'https://api.brevo.com/v3/smtp/email',
+      {
+        sender: { email: process.env.EMAIL_FROM, name: "Yely Support" },
+        to: [{ email: to }],
+        subject: `🔐 ${otp} est votre code de sécurité Yely`,
+        htmlContent: htmlContent
+      },
+      {
+        headers: {
+          'accept': 'application/json',
+          'api-key': process.env.SMTP_PASS, // La clé API Brevo est requise ici (généralement identique au SMTP_PASS)
+          'content-type': 'application/json'
+        }
+      }
+    );
+
+    console.log("[DEBUG - EMAIL] Mail envoyé avec succès via l'API HTTP Brevo !");
+    return true;
+
   } catch (error) {
-    console.error("[EMAIL ERROR] Echec critique détaillé (Port 465) :", error.stack || error);
-    throw new Error(`Impossible d'envoyer l'email: ${error.message}`);
+    const errorDetails = error.response ? JSON.stringify(error.response.data) : error.message;
+    console.error("[EMAIL ERROR] Echec API HTTP :", errorDetails);
+    throw new Error(`Impossible d'envoyer l'email via API HTTP.`);
   }
 };
 
