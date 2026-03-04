@@ -1,6 +1,6 @@
 // src/controllers/subscriptionController.js
 // CONTROLEUR ABONNEMENT - Orchestration des Preuves de Paiement
-// STANDARD: Industriel / Bank Grade
+// STANDARD: Industriel / Bank Grade (Self-Healing Data)
 
 const subscriptionService = require('../services/subscriptionService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
@@ -58,9 +58,23 @@ const getStatus = async (req, res) => {
       status: 'PENDING' 
     });
 
-    // CORRECTION SENIOR: On récupère simplement la date exacte stockée en base, sans calcul hasardeux
     const user = await User.findById(req.user._id).select('subscription');
-    const exactExpiresAt = user?.subscription?.expiresAt || null;
+    let exactExpiresAt = user?.subscription?.expiresAt || null;
+
+    // CORRECTION SENIOR : Auto-réparation (Self-Healing) pour les anciens comptes
+    // Si l'utilisateur est actif, a des heures, mais pas de date d'expiration en base : on répare la base.
+    if (!exactExpiresAt && user?.subscription?.isActive && user?.subscription?.hoursRemaining > 0) {
+      const millisecondsRemaining = user.subscription.hoursRemaining * 60 * 60 * 1000;
+      exactExpiresAt = new Date(Date.now() + millisecondsRemaining);
+      
+      // On fige définitivement cette date dans la base de données
+      await User.updateOne(
+        { _id: req.user._id },
+        { $set: { 'subscription.expiresAt': exactExpiresAt } }
+      );
+      
+      console.info(`[SUBSCRIPTION FIX] Date d'expiration générée et figée pour l'utilisateur ${req.user._id}`);
+    }
 
     return successResponse(res, {
       isActive,
