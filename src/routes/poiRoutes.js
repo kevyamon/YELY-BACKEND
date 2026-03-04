@@ -1,4 +1,4 @@
-// src/routes/poiRoutes.js [NOUVEAU]
+// src/routes/poiRoutes.js [MODIFIÉ]
 // ROUTES DES LIEUX - Portes d'entrée de l'API
 // CSCSM Level: Bank Grade
 
@@ -18,7 +18,7 @@ router.get('/', poiController.getAllPOIs);
 // --------------------------------------------------------------------------
 // On active la vérification du token et on restreint au rôle "superadmin"
 router.use(authMiddleware.protect);
-router.use(authMiddleware.restrictTo('superadmin'));
+router.use(authMiddleware.authorize('superadmin')); // CORRECTION : Utilisation de authorize au lieu de restrictTo
 
 router.post('/', poiController.createPOI);
 router.post('/bulk-import', poiController.bulkImportPOIs); // Route spéciale pour l'ajout en masse
