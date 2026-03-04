@@ -31,8 +31,6 @@ const login = async (identifier, password) => {
   const isEmail = identifier.includes('@');
   const normalizedId = isEmail ? identifier.toLowerCase().trim() : identifier.replace(/\s/g, '');
 
-  // CORRECTION SENIOR: Retrait de .populate('subscription'). 
-  // L'abonnement est déjà intégré dans l'objet User, on le récupère donc naturellement.
   const user = await User.findOne({
     $or: [{ email: normalizedId }, { phone: normalizedId }]
   }).select('+password +loginAttempts +lockUntil');
@@ -77,6 +75,14 @@ const login = async (identifier, password) => {
     });
   }
 
+  // CORRECTION SENIOR : On synchronise le compteur du driver à la seconde où il se connecte
+  if (typeof user.syncSubscription === 'function' && user.syncSubscription()) {
+    await User.updateOne(
+      { _id: user._id }, 
+      { $set: { subscription: user.subscription } }
+    );
+  }
+
   return user;
 };
 
@@ -90,7 +96,6 @@ const validateSessionForRefresh = async (token) => {
       throw new AppError('Structure du token illisible.', 401);
     }
 
-    // CORRECTION SENIOR: Retrait de .populate('subscription') ici aussi pour éviter d'écraser la donnée.
     const user = await User.findById(userId);
     
     if (!user) {
@@ -101,6 +106,14 @@ const validateSessionForRefresh = async (token) => {
       throw new AppError(`Session revoquee. Compte suspendu: ${user.banReason}`, 403);
     }
     
+    // CORRECTION SENIOR : Auto-Correction silencieuse du timer lors des rafraîchissements
+    if (typeof user.syncSubscription === 'function' && user.syncSubscription()) {
+      await User.updateOne(
+        { _id: user._id }, 
+        { $set: { subscription: user.subscription } }
+      );
+    }
+
     return user;
   } catch (error) {
     if (error.isOperational) throw error;

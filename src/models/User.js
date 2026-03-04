@@ -79,9 +79,11 @@ const userSchema = new mongoose.Schema({
     color: { type: String, default: '' }
   },
   
+  // CORRECTION SENIOR : Ajout de expiresAt pour la verite absolue du temps
   subscription: {
     isActive: { type: Boolean, default: false, index: true },
     hoursRemaining: { type: Number, default: 0 },
+    expiresAt: { type: Date, default: null }, 
     lastCheckTime: { type: Date, default: Date.now }
   },
   
@@ -97,6 +99,40 @@ const userSchema = new mongoose.Schema({
 });
 
 userSchema.index({ currentLocation: '2dsphere' });
+
+// CORRECTION SENIOR : Methode intelligente d'auto-correction de l'abonnement
+userSchema.methods.syncSubscription = function() {
+  if (!this.subscription || this.role !== 'driver') return false;
+  
+  let changed = false;
+  
+  if (this.subscription.expiresAt) {
+    const now = new Date();
+    
+    // Si la date actuelle a depassé la date d'expiration
+    if (now >= this.subscription.expiresAt) {
+      if (this.subscription.isActive || this.subscription.hoursRemaining > 0) {
+        this.subscription.isActive = false;
+        this.subscription.hoursRemaining = 0;
+        changed = true;
+      }
+    } else {
+      // Sinon, on recalcule exactement les heures restantes
+      const hoursLeft = Math.ceil((this.subscription.expiresAt - now) / (1000 * 60 * 60));
+      if (this.subscription.hoursRemaining !== hoursLeft || !this.subscription.isActive) {
+        this.subscription.hoursRemaining = Math.max(0, hoursLeft);
+        this.subscription.isActive = true;
+        changed = true;
+      }
+    }
+  }
+  
+  if (changed) {
+    this.subscription.lastCheckTime = new Date();
+  }
+  
+  return changed;
+};
 
 userSchema.pre('validate', function(next) {
   if (this.email) this.email = this.email.toLowerCase().trim();

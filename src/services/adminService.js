@@ -97,19 +97,26 @@ const approveTransaction = async (transactionId, validatorId) => {
 
   const daysToAdd = transaction.planId === 'WEEKLY' ? 7 : 30;
   
-  // CORRECTION SENIOR: Sauvegarde robuste dans le bon format du modèle User
+  // CORRECTION SENIOR: Gestion propre de la date d'expiration
   if (!driver.subscription) driver.subscription = {};
-  driver.subscription.isActive = true;
-  driver.subscription.hoursRemaining = (driver.subscription.hoursRemaining || 0) + (daysToAdd * 24);
-  driver.subscription.lastCheckTime = new Date();
-
-  // On maintient une date d'expiration optionnelle au cas où d'autres services en auraient besoin
+  
   let newExpiryDate = new Date();
-  if (driver.subscriptionExpiresAt && driver.subscriptionExpiresAt > new Date()) {
-    newExpiryDate = new Date(driver.subscriptionExpiresAt);
+  // Si le chauffeur a deja un abonnement actif et non expire, on additionne le temps
+  if (driver.subscription.expiresAt && driver.subscription.expiresAt > new Date()) {
+    newExpiryDate = new Date(driver.subscription.expiresAt);
   }
   newExpiryDate.setDate(newExpiryDate.getDate() + daysToAdd);
-  driver.subscriptionExpiresAt = newExpiryDate;
+
+  driver.subscription.expiresAt = newExpiryDate;
+  driver.subscription.lastCheckTime = new Date();
+  
+  // On force la synchronisation immediatement pour que les heures restantes soient exactes
+  if (typeof driver.syncSubscription === 'function') {
+    driver.syncSubscription();
+  } else {
+    driver.subscription.isActive = true;
+    driver.subscription.hoursRemaining = Math.ceil((newExpiryDate - new Date()) / (1000 * 60 * 60));
+  }
 
   await driver.save();
 
@@ -155,6 +162,7 @@ const rejectTransaction = async (transactionId, reason, validatorId) => {
     if (!driver.subscription) driver.subscription = {};
     driver.subscription.isActive = false;
     driver.subscription.hoursRemaining = 0;
+    driver.subscription.expiresAt = null; // On supprime la date d'expiration
     
     await driver.save();
 
