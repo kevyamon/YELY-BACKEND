@@ -9,16 +9,10 @@ const DISPOSABLE_DOMAINS = [
   'yopmail.com', 'mailinator.com', 'throwaway.com'
 ];
 
-/**
- * Schéma d'inscription
- * Inclus : Nettoyage auto, validation email non-jetable, complexité mot de passe
- * ✅ CORRECTIF ACCENTS : Ajout de la plage \u00C0-\u00FF dans la Regex
- */
 const registerSchema = z.object({
   name: z.string()
     .min(2, 'Le nom doit contenir au moins 2 caractères')
     .max(50, 'Le nom ne peut dépasser 50 caractères')
-    // Libération des accents ici (\u00C0-\u00FF)
     .regex(/^[a-zA-Z\u00C0-\u00FF\s'-]+$/, 'Caractères autorisés: lettres (accents inclus), espaces, - et \' uniquement')
     .trim(),
     
@@ -61,8 +55,38 @@ const availabilitySchema = z.object({
   })
 }).strict();
 
+// ==========================================
+// NOUVEAUX SCHÉMAS - MOT DE PASSE OUBLIÉ
+// ==========================================
+
+const forgotPasswordSchema = z.object({
+  email: z.string()
+    .email('Veuillez fournir un email valide')
+    .toLowerCase()
+    .trim()
+}).strict();
+
+const resetPasswordSchema = z.object({
+  email: z.string()
+    .email('Email invalide')
+    .toLowerCase()
+    .trim(),
+    
+  otp: z.string()
+    .length(6, 'Le code doit contenir exactement 6 chiffres')
+    .regex(/^\d+$/, 'Le code ne doit contenir que des chiffres'),
+    
+  newPassword: z.string()
+    .min(8, 'Mot de passe: 8 caractères minimum')
+    .max(128, 'Mot de passe trop long')
+    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/, 
+      '1 majuscule, 1 minuscule, 1 chiffre, 1 symbole requis')
+}).strict();
+
 module.exports = {
   registerSchema,
   loginSchema,
-  availabilitySchema
+  availabilitySchema,
+  forgotPasswordSchema,
+  resetPasswordSchema
 };

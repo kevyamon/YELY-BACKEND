@@ -27,7 +27,6 @@ const registerUser = async (req, res) => {
       rating: user.rating,
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
-      // CORRECTION SENIOR : On passe l'abonnement au front !
       subscription: user.subscription 
     };
 
@@ -68,7 +67,6 @@ const loginUser = async (req, res) => {
       rating: user.rating,
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
-      // CORRECTION SENIOR : Crucial pour éviter le blocage fantôme au démarrage de l'app
       subscription: user.subscription 
     };
 
@@ -92,6 +90,37 @@ const logoutUser = async (req, res) => {
     return errorResponse(res, "Erreur lors de la deconnexion.", 500);
   }
 };
+
+// ==========================================
+// NOUVEAUX CONTROLEURS - MOT DE PASSE OUBLIÉ
+// ==========================================
+
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    await authService.forgotPassword(email);
+    
+    // SECURITE: Message générique pour éviter l'énumération d'emails par les hackers
+    return successResponse(res, null, "Si cette adresse email est associée à un compte, un code de réinitialisation y a été envoyé.", 200);
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    return errorResponse(res, error.message || "Erreur lors de la demande de réinitialisation.", statusCode);
+  }
+};
+
+const resetPassword = async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    await authService.resetPasswordWithOtp(email, otp, newPassword);
+    
+    return successResponse(res, null, "Votre mot de passe a été réinitialisé avec succès. Vous pouvez maintenant vous connecter.", 200);
+  } catch (error) {
+    const statusCode = error.statusCode || 400;
+    return errorResponse(res, error.message || "Erreur lors de la réinitialisation du mot de passe.", statusCode);
+  }
+};
+
+// ==========================================
 
 const refreshToken = async (req, res) => {
   try {
@@ -121,7 +150,6 @@ const refreshToken = async (req, res) => {
       rating: user.rating,
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
-      // CORRECTION SENIOR : Indispensable ici aussi
       subscription: user.subscription 
     };
 
@@ -163,6 +191,8 @@ module.exports = {
   registerUser,
   loginUser,
   logoutUser,
+  forgotPassword,
+  resetPassword,
   refreshToken,
   updateAvailability,
   updateFcmToken

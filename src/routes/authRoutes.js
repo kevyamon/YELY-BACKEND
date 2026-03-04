@@ -9,18 +9,21 @@ const {
   registerUser, 
   loginUser, 
   logoutUser, 
+  forgotPassword,
+  resetPassword,
   refreshToken,
   updateAvailability,
-  updateFcmToken // ✅ AJOUT DE L'IMPORT
+  updateFcmToken 
 } = require('../controllers/authController');
 const { protect, optionalAuth } = require('../middleware/authMiddleware');
 const validate = require('../middleware/validationMiddleware');
 
-// Import des schémas de validation centralisés
 const { 
   registerSchema, 
   loginSchema, 
-  availabilitySchema 
+  availabilitySchema,
+  forgotPasswordSchema,
+  resetPasswordSchema
 } = require('../validations/authValidation');
 
 // ═══════════════════════════════════════════════════════════
@@ -47,6 +50,9 @@ const createAuthLimiter = (maxAttempts, windowMinutes) => {
 const registerLimiter = createAuthLimiter(3, 60); // 3 essais par heure
 const loginLimiter = createAuthLimiter(5, 15);    // 5 essais par 15 min
 
+// Limiteur très strict pour éviter l'envoi massif de mails
+const forgotPasswordLimiter = createAuthLimiter(3, 60); // 3 demandes par heure max
+
 // ═══════════════════════════════════════════════════════════
 // ROUTES
 // ═══════════════════════════════════════════════════════════
@@ -54,11 +60,16 @@ const loginLimiter = createAuthLimiter(5, 15);    // 5 essais par 15 min
 // Public
 router.post('/register', registerLimiter, validate(registerSchema), registerUser);
 router.post('/login', loginLimiter, validate(loginSchema), loginUser);
+
+// NOUVELLES ROUTES : Mot de passe oublié
+router.post('/forgot-password', forgotPasswordLimiter, validate(forgotPasswordSchema), forgotPassword);
+router.post('/reset-password', validate(resetPasswordSchema), resetPassword);
+
 router.post('/refresh', refreshToken);
 router.post('/logout', optionalAuth, logoutUser);
 
 // Privé
 router.put('/availability', protect, validate(availabilitySchema), updateAvailability);
-router.put('/fcm-token', protect, updateFcmToken); // ✅ AJOUT DE LA ROUTE PRIVÉE
+router.put('/fcm-token', protect, updateFcmToken);
 
 module.exports = router;
