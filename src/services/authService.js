@@ -71,7 +71,6 @@ const login = async (identifier, password) => {
 const forgotPassword = async (email) => {
   const user = await User.findOne({ email: email.toLowerCase().trim() });
   
-  // RETOUR EN PROD: Sécurité silencieuse contre l'énumération d'emails réactivée
   if (!user) return true; 
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -118,10 +117,18 @@ const validateSessionForRefresh = async (token) => {
   try {
     const decoded = await verifyRefreshToken(token);
     const userId = decoded.userId || decoded.id || decoded._id || (typeof decoded === 'string' ? decoded : null);
-    if (!userId) throw new AppError('Structure du token illisible.', 401);
+    
+    if (!userId) {
+      console.error('[AUTH_SERVICE] Payload invalide, aucun userId trouvé.', decoded);
+      throw new AppError('Structure du token illisible.', 401);
+    }
     
     const user = await User.findById(userId);
-    if (!user) throw new AppError('L\'utilisateur lie a cette session n\'existe plus.', 401);
+    if (!user) {
+      console.error(`[AUTH_SERVICE] Utilisateur introuvable pour l'ID: ${userId}`);
+      throw new AppError('L\'utilisateur lie a cette session n\'existe plus.', 401);
+    }
+
     if (user.isBanned) throw new AppError(`Session revoquee. Compte suspendu: ${user.banReason}`, 403);
     
     if (typeof user.syncSubscription === 'function' && user.syncSubscription()) {
@@ -129,6 +136,7 @@ const validateSessionForRefresh = async (token) => {
     }
     return user;
   } catch (error) {
+    console.error('[AUTH_SERVICE] Echec validation session:', error.message);
     if (error.isOperational) throw error;
     throw new AppError(`Echec de validation de session: ${error.message}`, 401);
   }

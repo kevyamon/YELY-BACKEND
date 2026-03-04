@@ -9,34 +9,33 @@ const TokenBlacklist = require('../models/TokenBlacklist');
 
 const isProd = env.NODE_ENV === 'production';
 
-// Configuration tokens
 const TOKEN_CONFIG = {
   access: {
     secret: env.JWT_SECRET,
-    expiresIn: env.JWT_ACCESS_EXPIRATION || '15m',
-    options: { algorithm: 'HS256' }
+    expiresIn: env.JWT_ACCESS_EXPIRATION || '15m'
   },
   refresh: {
     secret: env.JWT_REFRESH_SECRET || env.JWT_SECRET,
-    expiresIn: env.JWT_REFRESH_EXPIRATION || '30d',
-    options: { algorithm: 'HS256' }
+    expiresIn: env.JWT_REFRESH_EXPIRATION || '30d'
   }
 };
 
-/**
- * Utilitaire de securite : Hachage SHA-256 unilateral
- */
 const hashToken = (token) => {
   return crypto.createHash('sha256').update(token).digest('hex');
+};
+
+const cleanTokenString = (token) => {
+  if (!token) return null;
+  // Retire les guillemets fantômes que le mobile (SecureStore) peut ajouter
+  return token.replace(/^"|"$/g, '').trim();
 };
 
 const generateAccessToken = (userId, role) => {
   return jwt.sign(
     { 
-      userId, 
+      userId: userId.toString(), // CORRECTION: Forçage en String
       role, 
-      type: 'access',
-      iat: Math.floor(Date.now() / 1000)
+      type: 'access'
     },
     TOKEN_CONFIG.access.secret,
     { expiresIn: TOKEN_CONFIG.access.expiresIn }
@@ -46,25 +45,22 @@ const generateAccessToken = (userId, role) => {
 const generateRefreshToken = (userId) => {
   return jwt.sign(
     { 
-      userId, 
+      userId: userId.toString(), // CORRECTION: Forçage en String
       type: 'refresh',
-      jti: crypto.randomUUID(),
-      iat: Math.floor(Date.now() / 1000)
+      // CORRECTION: randomBytes est compatible avec toutes les versions de Node
+      jti: crypto.randomBytes(16).toString('hex') 
     },
     TOKEN_CONFIG.refresh.secret,
     { expiresIn: TOKEN_CONFIG.refresh.expiresIn }
   );
 };
 
-/**
- * Configure le cookie httpOnly pour refresh token (Isole du JS Client)
- */
 const setRefreshTokenCookie = (res, refreshToken) => {
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: isProd,
     sameSite: isProd ? 'strict' : 'lax',
-    maxAge: 30 * 24 * 60 * 60 * 1000, // MODIFICATION : 30 jours en millisecondes
+    maxAge: 30 * 24 * 60 * 60 * 1000, 
     path: '/api/v1/auth',
     signed: false,
   });
@@ -81,54 +77,38 @@ const clearRefreshTokenCookie = (res) => {
 };
 
 const verifyAccessToken = (token) => {
-  const decoded = jwt.verify(token, TOKEN_CONFIG.access.secret);
+  const cleanToken = cleanTokenString(token);
+  const decoded = jwt.verify(cleanToken, TOKEN_CONFIG.access.secret);
   if (decoded.type !== 'access') throw new Error('Token type mismatch');
   return decoded;
 };
 
 const verifyRefreshToken = async (token) => {
-  const hashedToken = hashToken(token);
-  const isBlacklisted = await TokenBlacklist.exists({ token: hashedToken });
-  if (isBlacklisted) throw new Error('Token revoked');
+  try {
+    const cleanToken = cleanTokenString(token);
+    const hashedToken = hashToken(cleanToken);
+    
+    const isBlacklisted = await TokenBlacklist.exists({ token: hashedToken });
+    if (isBlacklisted) throw new Error('Token revoque (Blacklist)');
 
-  const decoded = jwt.verify(token, TOKEN_CONFIG.refresh.secret);
-  if (decoded.type !== 'refresh') throw new Error('Token type mismatch');
-  
-  return decoded;
+    const decoded = jwt.verify(cleanToken, TOKEN_CONFIG.refresh.secret);
+    if (decoded.type !== 'refresh') throw new Error('Token type mismatch');
+    
+    return decoded;
+  } catch (error) {
+    console.error(`[JWT] Erreur de vérification Refresh: ${error.message}`);
+    throw error;
+  }
 };
 
 const revokeRefreshToken = async (token) => {
   try {
-    const hashedToken = hashToken(token);
+    const cleanToken = cleanTokenString(token);
+    const hashedToken = hashToken(cleanToken);
     await TokenBlacklist.create({ token: hashedToken });
   } catch (err) {
     if (err.code !== 11000) console.error('[TOKEN] Erreur revocation:', err.message);
   }
-};
-
-const rotateTokens = async (res, oldRefreshToken, userId, role) => {
-  await revokeRefreshToken(oldRefreshToken); 
-  
-  const accessToken = generateAccessToken(userId, role);
-  const refreshToken = generateRefreshToken(userId);
-  
-  setRefreshTokenCookie(res, refreshToken);
-  
-  // SECURITE : Ne retourne JAMAIS le refreshToken dans le JSON
-  return { accessToken }; 
-};
-
-const generateAuthResponse = (res, user) => {
-  const accessToken = generateAccessToken(user._id, user.role);
-  const refreshToken = generateRefreshToken(user._id);
-  
-  setRefreshTokenCookie(res, refreshToken);
-  
-  // SECURITE : Le refreshToken est protege par le cookie HttpOnly. 
-  return {
-    accessToken,
-    expiresIn: 900
-  };
 };
 
 module.exports = {
@@ -138,7 +118,5 @@ module.exports = {
   clearRefreshTokenCookie,
   verifyAccessToken,
   verifyRefreshToken,
-  revokeRefreshToken,
-  rotateTokens,
-  generateAuthResponse,
+  revokeRefreshToken
 };

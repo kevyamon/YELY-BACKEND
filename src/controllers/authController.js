@@ -11,8 +11,8 @@ const registerUser = async (req, res) => {
   try {
     const user = await authService.register(req.body);
 
-    const accessToken = generateAccessToken(user._id, user.role);
-    const refreshTokenStr = generateRefreshToken(user._id);
+    const accessToken = generateAccessToken(user._id.toString(), user.role);
+    const refreshTokenStr = generateRefreshToken(user._id.toString());
 
     setRefreshTokenCookie(res, refreshTokenStr);
 
@@ -21,7 +21,7 @@ const registerUser = async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
-      profilePicture: user.profilePicture, // Ajout de l'image de profil
+      profilePicture: user.profilePicture,
       role: user.role,
       isAvailable: user.isAvailable,
       rating: user.rating,
@@ -52,8 +52,8 @@ const loginUser = async (req, res) => {
 
     const user = await authService.login(identifier, password);
 
-    const accessToken = generateAccessToken(user._id, user.role);
-    const refreshTokenStr = generateRefreshToken(user._id);
+    const accessToken = generateAccessToken(user._id.toString(), user.role);
+    const refreshTokenStr = generateRefreshToken(user._id.toString());
 
     setRefreshTokenCookie(res, refreshTokenStr);
 
@@ -62,7 +62,7 @@ const loginUser = async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
-      profilePicture: user.profilePicture, // Ajout de l'image de profil
+      profilePicture: user.profilePicture,
       role: user.role,
       isAvailable: user.isAvailable,
       rating: user.rating,
@@ -117,18 +117,22 @@ const resetPassword = async (req, res) => {
 const refreshToken = async (req, res) => {
   try {
     let token = req.body.refreshToken;
+    
+    // Fallback sécurisé : si vide dans le body, on cherche dans le cookie
     if (!token && req.cookies && req.cookies.refreshToken) {
       token = req.cookies.refreshToken;
     }
 
     if (!token) {
+       console.warn('[AUTH_CONTROLLER] Requête de refresh sans token reçue.');
        return errorResponse(res, "Refresh token manquant", 401);
     }
     
     const user = await authService.validateSessionForRefresh(token);
 
-    const newAccessToken = generateAccessToken(user._id, user.role);
-    const newRefreshToken = generateRefreshToken(user._id);
+    // CORRECTION : Forçage en String de l'ID utilisateur
+    const newAccessToken = generateAccessToken(user._id.toString(), user.role);
+    const newRefreshToken = generateRefreshToken(user._id.toString());
 
     setRefreshTokenCookie(res, newRefreshToken);
 
@@ -137,7 +141,7 @@ const refreshToken = async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
-      profilePicture: user.profilePicture, // Ajout de l'image de profil
+      profilePicture: user.profilePicture,
       role: user.role,
       isAvailable: user.isAvailable,
       rating: user.rating,
@@ -146,6 +150,8 @@ const refreshToken = async (req, res) => {
       subscription: user.subscription 
     };
 
+    console.info(`[AUTH_CONTROLLER] Token rafraîchi avec succès pour l'utilisateur: ${user._id}`);
+
     return successResponse(res, { 
       user: userData,
       accessToken: newAccessToken, 
@@ -153,6 +159,7 @@ const refreshToken = async (req, res) => {
     }, "Token rafraichi silencieusement", 200);
 
   } catch (error) {
+    console.error('[AUTH_CONTROLLER] Échec critique du Refresh Token:', error.message);
     clearRefreshTokenCookie(res); 
     const statusCode = error.statusCode || 401;
     return errorResponse(res, error.message || "Session definitivement invalide", statusCode);
