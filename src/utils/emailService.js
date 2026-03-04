@@ -9,6 +9,11 @@ const GOLD_COLOR = "#D4AF37";
 
 const sendOtpEmail = async (to, otp) => {
   console.log("[DEBUG - EMAIL] Utilisation de l'API HTTP Brevo (Port 443 HTTPS)...");
+  
+  // DÉBOGAGE: On vérifie si la clé API est bien chargée par Render
+  if (!process.env.BREVO_API_KEY) {
+    console.error("[EMAIL ERROR] La variable BREVO_API_KEY est manquante !");
+  }
 
   const htmlContent = `
     <!DOCTYPE html>
@@ -52,7 +57,6 @@ const sendOtpEmail = async (to, otp) => {
   `;
 
   try {
-    // On appelle directement l'API v3 de Brevo au lieu du SMTP
     const response = await axios.post(
       'https://api.brevo.com/v3/smtp/email',
       {
@@ -64,7 +68,7 @@ const sendOtpEmail = async (to, otp) => {
       {
         headers: {
           'accept': 'application/json',
-          'api-key': process.env.SMTP_PASS, // La clé API Brevo est requise ici (généralement identique au SMTP_PASS)
+          'api-key': process.env.BREVO_API_KEY, // <-- MODIFICATION CLÉ ICI
           'content-type': 'application/json'
         }
       }
