@@ -1,4 +1,4 @@
-// src/app.js
+// src/app.js [MODIFIÉ]
 // CONFIGURATION EXPRESS FORTERESSE - Versioning API & Sécurité Flux
 // CSCSM Level: Bank Grade
 
@@ -22,6 +22,7 @@ const subscriptionRoutes = require('./routes/subscriptionRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const userRoutes = require('./routes/userRoutes');
 const healthRoutes = require('./routes/healthRoutes');
+const poiRoutes = require('./routes/poiRoutes'); // <-- NOUVELLE LIGNE AJOUTÉE
 
 const app = express();
 
@@ -99,6 +100,7 @@ app.use(`${API_V1_PREFIX}/admin`, adminRoutes);
 // --- NOUVELLES ROUTES ---
 app.use(`${API_V1_PREFIX}/notifications`, require('./routes/notificationRoutes'));
 app.use(`${API_V1_PREFIX}/reports`, require('./routes/reportRoutes')); // POUR L'ÉTAPE 4
+app.use(`${API_V1_PREFIX}/pois`, poiRoutes); // <-- NOUVELLE LIGNE AJOUTÉE
 
 app.use((req, res) => {
   logger.warn(`[404] Endpoint non trouvé: ${req.method} ${req.url} - RequestID: ${req.id}`);
