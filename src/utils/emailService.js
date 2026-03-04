@@ -4,36 +4,28 @@
 
 const nodemailer = require('nodemailer');
 
+// DÉBOGAGE SENIOR: On force le port 465 et le mode sécurisé pour contourner le pare-feu Render
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: false, // false pour 587
+  host: process.env.SMTP_HOST || 'smtp-relay.brevo.com',
+  port: 465, // <-- MODIFICATION CLÉ : Port 465 au lieu de 587
+  secure: true, // <-- MODIFICATION CLÉ : true est obligatoire pour le port 465
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  // CORRECTION SENIOR : Timeouts pour éviter que le serveur ne tourne dans le vide
-  connectionTimeout: 10000, // 10s
-  greetingTimeout: 10000,
-  socketTimeout: 15000,
+  connectionTimeout: 20000, // On augmente à 20s
+  greetingTimeout: 20000,
+  socketTimeout: 20000,
   tls: {
-    // CORRECTION SENIOR : Autorise les certificats auto-signés (crucial sur Render)
     rejectUnauthorized: false 
   }
 });
 
-// Ton nouveau lien logo Cloudinary
 const LOGO_URL = "https://res.cloudinary.com/dskdkrwhq/image/upload/v1772629185/photo_2026-03-04_12-55-42_b9icek.jpg";
 const GOLD_COLOR = "#D4AF37";
 
 const sendOtpEmail = async (to, otp) => {
-  console.log("[DEBUG - EMAIL] Variables d'environnement SMTP :", {
-    host: process.env.SMTP_HOST,
-    port: process.env.SMTP_PORT,
-    userIsDefined: !!process.env.SMTP_USER,
-    passIsDefined: !!process.env.SMTP_PASS,
-    from: process.env.EMAIL_FROM
-  });
+  console.log("[DEBUG - EMAIL] Tentative de connexion sur le port 465 (TLS Implicite)...");
 
   const mailOptions = {
     from: `"Yely Support" <${process.env.EMAIL_FROM}>`,
@@ -82,15 +74,15 @@ const sendOtpEmail = async (to, otp) => {
   };
 
   try {
-    console.log("[DEBUG - EMAIL] Début de la vérification de la connexion SMTP (transporter.verify)...");
+    console.log("[DEBUG - EMAIL] Vérification de la nouvelle connexion SMTP...");
     await transporter.verify(); 
-    console.log("[DEBUG - EMAIL] Connexion SMTP OK. Envoi du mail en cours...");
+    console.log("[DEBUG - EMAIL] Connexion SMTP 465 OK. Envoi du mail en cours...");
     
     await transporter.sendMail(mailOptions);
     console.log("[DEBUG - EMAIL] Mail envoyé avec succès au serveur SMTP Brevo !");
     
   } catch (error) {
-    console.error("[EMAIL ERROR] Echec critique détaillé :", error.stack || error);
+    console.error("[EMAIL ERROR] Echec critique détaillé (Port 465) :", error.stack || error);
     throw new Error(`Impossible d'envoyer l'email: ${error.message}`);
   }
 };
