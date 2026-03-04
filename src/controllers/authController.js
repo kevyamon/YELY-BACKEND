@@ -27,7 +27,8 @@ const registerUser = async (req, res) => {
       rating: user.rating,
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
-      subscription: user.subscription // AJOUT
+      // CORRECTION SENIOR : On passe l'abonnement au front !
+      subscription: user.subscription 
     };
 
     return successResponse(res, { 
@@ -37,7 +38,6 @@ const registerUser = async (req, res) => {
     }, 'Compte cree avec succes', 201);
 
   } catch (error) {
-    console.error("[REGISTER ERROR]:", error.message || error);
     const statusCode = error.statusCode || 500;
     return errorResponse(res, error.message || "Erreur interne lors de l'inscription.", statusCode);
   }
@@ -68,17 +68,17 @@ const loginUser = async (req, res) => {
       rating: user.rating,
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
-      subscription: user.subscription // AJOUT IMPORTANT POUR LE FRONEND
+      // CORRECTION SENIOR : Crucial pour éviter le blocage fantôme au démarrage de l'app
+      subscription: user.subscription 
     };
 
     return successResponse(res, { 
       user: userData, 
       accessToken, 
-      refreshToken: refreshTokenStr
+      refreshToken: refreshTokenStr 
     }, 'Connexion reussie', 200);
 
   } catch (error) {
-    console.error("[LOGIN ERROR]:", error.message || error);
     const statusCode = error.statusCode || 500;
     return errorResponse(res, error.message || "Erreur interne lors de la connexion.", statusCode);
   }
@@ -121,17 +121,17 @@ const refreshToken = async (req, res) => {
       rating: user.rating,
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
-      subscription: user.subscription // AJOUT IMPORTANT
+      // CORRECTION SENIOR : Indispensable ici aussi
+      subscription: user.subscription 
     };
 
     return successResponse(res, { 
       user: userData,
       accessToken: newAccessToken, 
-      refreshToken: newRefreshToken
+      refreshToken: newRefreshToken 
     }, "Token rafraichi silencieusement", 200);
 
   } catch (error) {
-    console.error("[REFRESH CRITICAL FAILURE]:", error.message || error);
     clearRefreshTokenCookie(res); 
     const statusCode = error.statusCode || 401;
     return errorResponse(res, error.message || "Session definitivement invalide", statusCode);

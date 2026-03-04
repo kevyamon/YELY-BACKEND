@@ -1,169 +1,76 @@
-// src/controllers/authController.js
-// CONTROLEUR AUTHENTIFICATION - Alignement Parfait & Anti-Crash
+// src/controllers/subscriptionController.js
+// CONTROLEUR ABONNEMENT - Orchestration des Preuves de Paiement
 // STANDARD: Industriel / Bank Grade
 
-const User = require('../models/User');
-const authService = require('../services/authService');
+const subscriptionService = require('../services/subscriptionService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
-const { generateAccessToken, generateRefreshToken, setRefreshTokenCookie, clearRefreshTokenCookie } = require('../utils/tokenService'); 
-const { env } = require('../config/env');
+const Transaction = require('../models/Transaction');
 
-const registerUser = async (req, res) => {
+const getConfig = async (req, res) => {
   try {
-    const user = await authService.register(req.body);
-
-    const accessToken = generateAccessToken(user._id, user.role);
-    const refreshTokenStr = generateRefreshToken(user._id);
-
-    setRefreshTokenCookie(res, refreshTokenStr);
-
-    const userData = {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      role: user.role,
-      isAvailable: user.isAvailable,
-      rating: user.rating,
-      totalRides: user.totalRides,
-      totalEarnings: user.totalEarnings,
-      // CORRECTION SENIOR : On passe l'abonnement au front !
-      subscription: user.subscription 
-    };
-
-    return successResponse(res, { 
-      user: userData, 
-      accessToken, 
-      refreshToken: refreshTokenStr 
-    }, 'Compte cree avec succes', 201);
-
-  } catch (error) {
-    const statusCode = error.statusCode || 500;
-    return errorResponse(res, error.message || "Erreur interne lors de l'inscription.", statusCode);
-  }
-};
-
-const loginUser = async (req, res) => {
-  try {
-    const { identifier, password } = req.body;
-
-    if (!identifier || !password) {
-      return errorResponse(res, "Veuillez fournir un identifiant et un mot de passe.", 400);
-    }
-
-    const user = await authService.login(identifier, password);
-
-    const accessToken = generateAccessToken(user._id, user.role);
-    const refreshTokenStr = generateRefreshToken(user._id);
-
-    setRefreshTokenCookie(res, refreshTokenStr);
-
-    const userData = {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      role: user.role,
-      isAvailable: user.isAvailable,
-      rating: user.rating,
-      totalRides: user.totalRides,
-      totalEarnings: user.totalEarnings,
-      // CORRECTION SENIOR : Crucial pour éviter le blocage fantôme au démarrage de l'app
-      subscription: user.subscription 
-    };
-
-    return successResponse(res, { 
-      user: userData, 
-      accessToken, 
-      refreshToken: refreshTokenStr 
-    }, 'Connexion reussie', 200);
-
-  } catch (error) {
-    const statusCode = error.statusCode || 500;
-    return errorResponse(res, error.message || "Erreur interne lors de la connexion.", statusCode);
-  }
-};
-
-const logoutUser = async (req, res) => {
-  try {
-    clearRefreshTokenCookie(res);
-    return successResponse(res, null, 'Deconnexion reussie', 200);
-  } catch (error) {
-    return errorResponse(res, "Erreur lors de la deconnexion.", 500);
-  }
-};
-
-const refreshToken = async (req, res) => {
-  try {
-    let token = req.body.refreshToken;
-    if (!token && req.cookies && req.cookies.refreshToken) {
-      token = req.cookies.refreshToken;
-    }
-
-    if (!token) {
-       return errorResponse(res, "Refresh token manquant", 401);
-    }
+    // MODIFICATION SENIOR: Ajout du await indispensable
+    const config = await subscriptionService.getSubscriptionPricing();
     
-    const user = await authService.validateSessionForRefresh(token);
+    if (!config.weekly.link || !config.monthly.link) {
+      console.warn("[CONFIG WARNING]: Liens Wave manquants dans les variables d'environnement ou la DB.");
+    }
 
-    const newAccessToken = generateAccessToken(user._id, user.role);
-    const newRefreshToken = generateRefreshToken(user._id);
-
-    setRefreshTokenCookie(res, newRefreshToken);
-
-    const userData = {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      role: user.role,
-      isAvailable: user.isAvailable,
-      rating: user.rating,
-      totalRides: user.totalRides,
-      totalEarnings: user.totalEarnings,
-      // CORRECTION SENIOR : Indispensable ici aussi
-      subscription: user.subscription 
-    };
-
-    return successResponse(res, { 
-      user: userData,
-      accessToken: newAccessToken, 
-      refreshToken: newRefreshToken 
-    }, "Token rafraichi silencieusement", 200);
-
+    return successResponse(res, config, "Configuration de souscription recuperee avec succes.", 200);
   } catch (error) {
-    clearRefreshTokenCookie(res); 
-    const statusCode = error.statusCode || 401;
-    return errorResponse(res, error.message || "Session definitivement invalide", statusCode);
+    console.error("[CONFIG ERROR]:", error.message);
+    return errorResponse(res, "Erreur interne lors de la recuperation de la configuration tarifaire.", 500);
   }
 };
 
-const updateAvailability = async (req, res) => {
+const submitProof = async (req, res) => {
   try {
-    const { isAvailable } = req.body;
-    const user = await authService.updateAvailability(req.user._id, isAvailable);
-    return successResponse(res, { isAvailable: user.isAvailable }, "Disponibilite mise a jour", 200);
+    const { planId, senderPhone } = req.body;
+    
+    if (!planId || !senderPhone || !req.file) {
+      return errorResponse(res, "Donnees ou capture manquante. Requete rejetee.", 400);
+    }
+
+    const transaction = await subscriptionService.submitProof(
+      req.user._id, 
+      { planId, senderPhone }, 
+      req.file
+    );
+
+    return successResponse(
+      res, 
+      { transactionId: transaction._id }, 
+      "Preuve recue. Un administrateur verifie votre paiement. Acces prevu sous 15 minutes.", 
+      201
+    );
+
   } catch (error) {
+    console.error("[SUBMISSION ERROR]:", error.message);
     const statusCode = error.statusCode || 500;
-    return errorResponse(res, error.message || "Erreur de mise a jour", statusCode);
+    return errorResponse(res, error.message || "Erreur systeme lors de l'enregistrement de la preuve.", statusCode);
   }
 };
 
-const updateFcmToken = async (req, res) => {
+const getStatus = async (req, res) => {
   try {
-    const { fcmToken } = req.body;
-    await User.findByIdAndUpdate(req.user._id, { fcmToken });
-    return successResponse(res, null, "Token FCM mis a jour", 200);
+    const isActive = await subscriptionService.checkSubscriptionStatus(req.user._id);
+    const pendingTransaction = await Transaction.findOne({ 
+      user: req.user._id, 
+      status: 'PENDING' 
+    });
+
+    return successResponse(res, {
+      isActive,
+      isPending: !!pendingTransaction,
+      expiresAt: req.user.subscriptionExpiresAt || null
+    });
   } catch (error) {
-    return errorResponse(res, "Erreur de mise a jour", 500);
+    console.error("[STATUS ERROR]:", error.message);
+    return errorResponse(res, "Erreur lors de la lecture du statut d'abonnement.", 500);
   }
 };
 
 module.exports = {
-  registerUser,
-  loginUser,
-  logoutUser,
-  refreshToken,
-  updateAvailability,
-  updateFcmToken
+  getConfig,
+  submitProof,
+  getStatus
 };
