@@ -109,7 +109,6 @@ const rateRide = async (req, res) => {
   }
 };
 
-// 🚀 NOUVEAU : getRideHistory
 const getRideHistory = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -123,10 +122,22 @@ const getRideHistory = async (req, res) => {
   }
 };
 
+// 🚀 AJOUT SENIOR : Le controleur pour masquer de l'historique
+const hideFromHistory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await rideService.hideRideFromHistory(req.user, id);
+    return successResponse(res, null, 'Course supprimée de votre historique.');
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500);
+  }
+};
+
 module.exports = {
   markAsArrived,
   startRide,
   completeRide,
   rateRide,
-  getRideHistory // <-- Exporté ici
+  getRideHistory,
+  hideFromHistory
 };

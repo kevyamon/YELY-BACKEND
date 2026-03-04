@@ -9,6 +9,7 @@ const userRepository = require('../../repositories/userRepository');
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 
+// Duplique volontairement pour eviter les dependances circulaires inter-services
 const calculateHaversineDistance = (coords1, coords2) => {
   const [lng1, lat1] = coords1;
   const [lng2, lat2] = coords2;
@@ -199,6 +200,7 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
 
         io.to(ride.rider.toString()).emit('ride_arrived', { rideId: ride._id, arrivedAt: ride.arrivedAt });
         io.to(driverId.toString()).emit('ride_arrived', { rideId: ride._id, arrivedAt: ride.arrivedAt });
+        logger.info(`[GEOFENCING] Driver ${driverId} arrive chez le client (15m). Statut MAJ vers 'arrived'`);
       }
     }
 
@@ -207,6 +209,7 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
       
       if (distToDropoff <= 0.02) {
         io.to(driverId.toString()).emit('prompt_arrival_confirm', { rideId: ride._id });
+        logger.info(`[GEOFENCING] Course ${ride._id} a 20m de la destination. Modale declenchee.`);
       }
     }
   } catch (error) {
@@ -214,16 +217,18 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
   }
 };
 
+// 🚀 MODIFICATION SENIOR : Exclure les courses masquées (Soft Delete)
 const getRideHistory = async (user, page = 1, limit = 20) => {
   const skip = (page - 1) * limit;
-  
   const filter = {};
   
-  // AJOUT SENIOR: Support élargi des rôles possibles pour un passager en base de données pour éviter de fausser le filtre.
   if (user.role === 'driver') {
     filter.driver = user._id;
+    filter.hiddenForDriver = { $ne: true };
   } else {
+    // Si ce n'est pas un chauffeur, c'est le passager
     filter.rider = user._id;
+    filter.hiddenForRider = { $ne: true };
   }
 
   filter.status = { $nin: ['pending', 'searching'] };
@@ -249,11 +254,29 @@ const getRideHistory = async (user, page = 1, limit = 20) => {
   };
 };
 
+// 🚀 AJOUT SENIOR : Fonction pour masquer la course individuellement
+const hideRideFromHistory = async (user, rideId) => {
+  const ride = await Ride.findById(rideId);
+  if (!ride) throw new AppError("Course introuvable.", 404);
+
+  if (user.role === 'driver' && ride.driver && ride.driver.toString() === user._id.toString()) {
+    ride.hiddenForDriver = true;
+  } else if (ride.rider && ride.rider.toString() === user._id.toString()) {
+    ride.hiddenForRider = true;
+  } else {
+    throw new AppError("Non autorisé à masquer cette course.", 403);
+  }
+
+  await ride.save();
+  return true;
+};
+
 module.exports = {
   markRideAsArrived,
   startRideSession,
   completeRideSession,
   submitRideRating,
   checkRideProgressOnLocationUpdate,
-  getRideHistory
+  getRideHistory,
+  hideRideFromHistory
 };

@@ -20,5 +20,7 @@ module.exports = {
   startRide: rideExecutionController.startRide,
   completeRide: rideExecutionController.completeRide,
   rateRide: rideExecutionController.rateRide,
-  getRideHistory: rideExecutionController.getRideHistory // <-- Ajouté ici
+  getRideHistory: rideExecutionController.getRideHistory,
+  // AJOUT SENIOR : Export Final
+  hideFromHistory: rideExecutionController.hideFromHistory 
 };

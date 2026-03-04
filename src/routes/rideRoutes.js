@@ -17,8 +17,10 @@ router.post('/emergency-cancel', protect, authorize('rider', 'superadmin'), ride
 router.put('/:id/cancel', protect, authorize('rider', 'driver', 'superadmin'), rideController.cancelRide);
 router.put('/:id/rate', protect, authorize('rider', 'superadmin'), rideController.rateRide);
 
-// NOUVELLE ROUTE : Historique
+// HISTORIQUE
 router.get('/history', protect, rideController.getRideHistory);
+// 🚀 AJOUT SENIOR : Route pour le Soft Delete de la course
+router.delete('/:id/history', protect, rideController.hideFromHistory);
 
 // ROUTES D'ACTION AVEC VALIDATION STRICTE DU BODY
 router.post('/request', protect, authorize('rider', 'superadmin'), validate(requestRideSchema), rideController.requestRide);

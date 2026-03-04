@@ -24,7 +24,8 @@ module.exports = {
   completeRideSession: rideExecutionService.completeRideSession,
   submitRideRating: rideExecutionService.submitRideRating,
   checkRideProgressOnLocationUpdate: rideExecutionService.checkRideProgressOnLocationUpdate,
+  getRideHistory: rideExecutionService.getRideHistory,
   
-  // CORRECTION SENIOR: Le maillon manquant qui empechait l'historique de remonter au controleur !
-  getRideHistory: rideExecutionService.getRideHistory
+  // AJOUT SENIOR : L'export manquant
+  hideRideFromHistory: rideExecutionService.hideRideFromHistory 
 };

@@ -82,7 +82,11 @@ const rideSchema = new mongoose.Schema({
   completedAt: { type: Date },
   
   cancellationReason: { type: String },
-  rejectionReason: { type: String }
+  rejectionReason: { type: String },
+
+  // AJOUT SENIOR : Masquage Historique Individuel (Soft Delete)
+  hiddenForRider: { type: Boolean, default: false },
+  hiddenForDriver: { type: Boolean, default: false }
 });
 
 // Index de performance simples

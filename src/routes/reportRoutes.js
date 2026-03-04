@@ -12,5 +12,7 @@ router.get('/my-reports', reportController.getMyReports);
 // Admin Only
 router.get('/all', authorize('admin', 'superadmin'), reportController.getAllReports);
 router.patch('/:id/resolve', authorize('admin', 'superadmin'), reportController.resolveReport);
+// AJOUT SENIOR: Route de suppression
+router.delete('/:id', authorize('admin', 'superadmin'), reportController.deleteReport); 
 
 module.exports = router;

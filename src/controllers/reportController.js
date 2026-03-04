@@ -13,13 +13,13 @@ const submitReport = async (req, res) => {
       for (const file of req.files) {
         const result = await cloudinary.uploader.upload(file.path, { folder: 'yely/reports' });
         captures.push(result.secure_url);
-        fs.unlinkSync(file.path);
+        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
       }
     }
 
     const report = await Report.create({
       user: req.user._id,
-      message: message.substring(0, 2000), // Anti-injection brute
+      message: message.substring(0, 2000),
       captures
     });
 
@@ -48,4 +48,31 @@ const resolveReport = async (req, res) => {
   return successResponse(res, report, 'Signalement marqué comme résolu.');
 };
 
-module.exports = { submitReport, getMyReports, getAllReports, resolveReport };
+// AJOUT SENIOR : Suppression complète (DB + Cloudinary)
+const deleteReport = async (req, res) => {
+  try {
+    const report = await Report.findById(req.params.id);
+    if (!report) {
+      return errorResponse(res, "Signalement introuvable.", 404);
+    }
+
+    // Nettoyage Cloudinary pour ne pas polluer l'espace de stockage
+    if (report.captures && report.captures.length > 0) {
+      for (const url of report.captures) {
+        // Extraction robuste du public_id depuis l'URL Cloudinary
+        const publicIdMatch = url.match(/\/v\d+\/([^/.]+)\./);
+        const folderPrefix = 'yely/reports/';
+        if (publicIdMatch && publicIdMatch[1]) {
+           await cloudinary.uploader.destroy(`${folderPrefix}${publicIdMatch[1]}`).catch(err => console.log('Image non trouvée sur Cloud', err.message));
+        }
+      }
+    }
+
+    await Report.findByIdAndDelete(req.params.id);
+    return successResponse(res, null, 'Signalement supprimé définitivement.');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+module.exports = { submitReport, getMyReports, getAllReports, resolveReport, deleteReport };
