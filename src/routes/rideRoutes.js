@@ -11,6 +11,9 @@ const {
   finalizeRideSchema 
 } = require('../validations/rideValidation');
 
+// LECTURE COURSE EN COURS (La route qui manquait)
+router.get('/current', protect, authorize('rider', 'driver'), rideController.getCurrentRide);
+
 // ROUTES DE LECTURE & ANNULATION ET RATING
 router.get('/estimate', protect, authorize('rider', 'superadmin'), rideController.estimateRide);
 router.post('/emergency-cancel', protect, authorize('rider', 'superadmin'), rideController.emergencyCancel);
@@ -19,7 +22,6 @@ router.put('/:id/rate', protect, authorize('rider', 'superadmin'), rideControlle
 
 // HISTORIQUE
 router.get('/history', protect, rideController.getRideHistory);
-// 🚀 AJOUT SENIOR : Route pour le Soft Delete de la course
 router.delete('/:id/history', protect, rideController.hideFromHistory);
 
 // ROUTES D'ACTION AVEC VALIDATION STRICTE DU BODY

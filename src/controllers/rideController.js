@@ -14,6 +14,7 @@ module.exports = {
   lockRide: rideLifecycleController.lockRide,
   submitPrice: rideLifecycleController.submitPrice,
   finalizeRide: rideLifecycleController.finalizeRide,
+  getCurrentRide: rideLifecycleController.getCurrentRide, // AJOUT
 
   // --- Logique d'Execution ---
   markAsArrived: rideExecutionController.markAsArrived,
@@ -21,6 +22,5 @@ module.exports = {
   completeRide: rideExecutionController.completeRide,
   rateRide: rideExecutionController.rateRide,
   getRideHistory: rideExecutionController.getRideHistory,
-  // AJOUT SENIOR : Export Final
   hideFromHistory: rideExecutionController.hideFromHistory 
 };

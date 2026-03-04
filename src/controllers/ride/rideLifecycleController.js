@@ -2,10 +2,12 @@
 // SOUS-CONTROLEUR - Cycle de vie : Estimation, Demande, Annulation, Negociation
 // STANDARD: Industriel / Bank Grade
 
-const rideService = require('../../services/ride/rideLifecycleService'); // Lien direct vers le service cible
+const rideService = require('../../services/ride/rideLifecycleService'); 
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 const { successResponse, errorResponse } = require('../../utils/responseHandler');
+const User = require('../../models/User'); 
+const Ride = require('../../models/Ride'); // AJOUT: Requis pour getCurrentRide
 
 const estimateRide = async (req, res) => {
   try {
@@ -45,6 +47,8 @@ const requestRide = async (req, res) => {
 
     logger.info(`[DISPATCH] Course ${ride._id} creee (${ride.passengersCount} passagers). ${drivers.length} chauffeurs cibles.`);
 
+    const rider = await User.findById(req.user._id).select('name profilePicture');
+
     drivers.forEach(driver => {
       io.to(driver._id.toString()).emit('new_ride_request', {
         rideId: ride._id,
@@ -53,7 +57,9 @@ const requestRide = async (req, res) => {
         distance: ride.distance,
         forfait: ride.forfait,
         passengersCount: ride.passengersCount,
-        priceOptions: ride.priceOptions
+        priceOptions: ride.priceOptions,
+        riderName: rider.name,
+        riderProfilePicture: rider.profilePicture 
       });
     });
 
@@ -80,9 +86,6 @@ const cancelRide = async (req, res) => {
     } else if (req.user.role === 'driver') {
        io.to(ride.rider.toString()).emit('ride_cancelled', { rideId });
     }
-    
-    // Suppression du broadcast global io.to('drivers').emit('ride_taken_by_other')
-    // Seuls les acteurs directs sont notifies pour des raisons de securite et d'optimisation reseau.
 
     return successResponse(res, { status: 'cancelled' }, 'Course annulee avec succes');
   } catch (error) {
@@ -122,10 +125,9 @@ const lockRide = async (req, res) => {
 
     io.to(ride.rider.toString()).emit('driver_found', {
       driverName: req.user.name,
-      vehicle: req.user.vehicle
+      vehicle: req.user.vehicle,
+      driverProfilePicture: req.user.profilePicture 
     });
-
-    // Broadcast global supprime ici egalement
 
     return successResponse(res, { 
       rideId: ride._id, 
@@ -150,7 +152,8 @@ const submitPrice = async (req, res) => {
 
     io.to(ride.rider.toString()).emit('price_proposal_received', {
       amount: ride.proposedPrice,
-      driverName: req.user.name
+      driverName: req.user.name,
+      driverProfilePicture: req.user.profilePicture 
     });
 
     return successResponse(res, { status: 'negotiating' }, 'Proposition transmise');
@@ -171,13 +174,14 @@ const finalizeRide = async (req, res) => {
     const io = req.app.get('socketio');
 
     if (result.status === 'ACCEPTED') {
-      await result.ride.populate('driver', 'name phone vehicle currentLocation');
+      await result.ride.populate('driver', 'name phone vehicle currentLocation profilePicture');
       const driver = result.ride.driver;
 
       io.to(driver._id.toString()).emit('proposal_accepted', {
         rideId: result.ride._id,
         riderName: req.user.name,
         riderPhone: req.user.phone,
+        riderProfilePicture: req.user.profilePicture, 
         origin: result.ride.origin,
         destination: result.ride.destination
       });
@@ -188,7 +192,8 @@ const finalizeRide = async (req, res) => {
           name: driver.name, 
           phone: driver.phone, 
           vehicle: driver.vehicle, 
-          location: driver.currentLocation 
+          location: driver.currentLocation,
+          profilePicture: driver.profilePicture 
         } 
       }, 'Course confirmee');
 
@@ -197,8 +202,8 @@ const finalizeRide = async (req, res) => {
         message: 'Prix refuse'
       });
 
-      // Remplacement de l'appel direct au repository par le service de dispatch
       const newDrivers = await rideService.dispatchToNearbyDrivers(result.ride);
+      const rider = await User.findById(req.user._id).select('name profilePicture');
 
       logger.info(`[DISPATCH-RETRY] Recherche relancee pour ${result.ride._id}. ${newDrivers.length} nouveaux chauffeurs trouves.`);
 
@@ -210,12 +215,59 @@ const finalizeRide = async (req, res) => {
           distance: result.ride.distance,
           forfait: result.ride.forfait,
           passengersCount: result.ride.passengersCount,
-          priceOptions: result.ride.priceOptions
+          priceOptions: result.ride.priceOptions,
+          riderName: rider.name,
+          riderProfilePicture: rider.profilePicture 
         });
       });
 
       return successResponse(res, { status: 'searching' }, 'Recherche relancee');
     }
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500);
+  }
+};
+
+// ==========================================
+// 🚀 NOUVELLE FONCTION : GET CURRENT RIDE
+// ==========================================
+const getCurrentRide = async (req, res) => {
+  try {
+    const query = {
+      status: { $in: ['searching', 'negotiating', 'accepted', 'arrived', 'in_progress'] }
+    };
+
+    if (req.user.role === 'rider') {
+      query.rider = req.user._id;
+    } else if (req.user.role === 'driver') {
+      query.driver = req.user._id;
+    }
+
+    // On peuple massivement pour être sûr que le Frontend ait les photos
+    const currentRide = await Ride.findOne(query)
+      .populate('rider', 'name phone profilePicture')
+      .populate('driver', 'name phone vehicle currentLocation profilePicture')
+      .lean();
+
+    if (!currentRide) {
+      return successResponse(res, null, 'Aucune course en cours');
+    }
+
+    // Formatage pour coller à la structure attendue par Redux côté Frontend
+    const formattedRide = {
+      ...currentRide,
+      id: currentRide._id,
+      rideId: currentRide._id,
+      riderName: currentRide.rider?.name,
+      riderPhone: currentRide.rider?.phone,
+      riderProfilePicture: currentRide.rider?.profilePicture,
+      driverName: currentRide.driver?.name,
+      driverPhone: currentRide.driver?.phone,
+      driverProfilePicture: currentRide.driver?.profilePicture,
+      driverLocation: currentRide.driver?.currentLocation,
+    };
+
+    return successResponse(res, formattedRide, 'Course en cours recuperee');
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -228,5 +280,6 @@ module.exports = {
   emergencyCancel,
   lockRide,
   submitPrice,
-  finalizeRide
+  finalizeRide,
+  getCurrentRide // Export de la nouvelle fonction
 };
