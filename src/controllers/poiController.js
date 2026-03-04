@@ -1,4 +1,4 @@
-// src/controllers/poiController.js [NOUVEAU]
+// src/controllers/poiController.js [CORRIGÉ]
 // CONTRÔLEUR DES LIEUX - Logique métier (Ajout, Lecture, Modification, Suppression)
 // CSCSM Level: Bank Grade
 
@@ -27,13 +27,18 @@ exports.createPOI = async (req, res, next) => {
   try {
     const newPOI = await POI.create(req.body);
     
+    // TEMPS RÉEL : On notifie tous les clients connectés
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('poi_updated', { action: 'create', poi: newPOI });
+    }
+    
     res.status(201).json({
       success: true,
       data: newPOI,
     });
   } catch (error) {
     logger.error(`Erreur lors de la création d'un lieu: ${error.message}`);
-    // Gestion spécifique si le nom existe déjà
     if (error.code === 11000) {
       return next(new AppError('Un lieu avec ce nom existe déjà.', 400));
     }
@@ -45,12 +50,18 @@ exports.createPOI = async (req, res, next) => {
 exports.updatePOI = async (req, res, next) => {
   try {
     const poi = await POI.findByIdAndUpdate(req.params.id, req.body, {
-      new: true, // Retourne le document modifié
-      runValidators: true, // Vérifie que les données respectent le modèle
+      new: true,
+      runValidators: true,
     });
 
     if (!poi) {
       return next(new AppError('Aucun lieu trouvé avec cet identifiant', 404));
+    }
+
+    // TEMPS RÉEL
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('poi_updated', { action: 'update', poi });
     }
 
     res.status(200).json({
@@ -72,6 +83,12 @@ exports.deletePOI = async (req, res, next) => {
       return next(new AppError('Aucun lieu trouvé avec cet identifiant', 404));
     }
 
+    // TEMPS RÉEL
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('poi_deleted', { id: req.params.id });
+    }
+
     res.status(200).json({
       success: true,
       message: 'Lieu supprimé avec succès',
@@ -85,14 +102,19 @@ exports.deletePOI = async (req, res, next) => {
 // 5. Ajout en masse depuis un fichier JSON (Pour le SuperAdmin)
 exports.bulkImportPOIs = async (req, res, next) => {
   try {
-    const poisArray = req.body.pois; // On s'attend à recevoir { "pois": [ {...}, {...} ] }
+    const poisArray = req.body.pois;
 
     if (!poisArray || !Array.isArray(poisArray) || poisArray.length === 0) {
       return next(new AppError('Veuillez fournir un tableau valide de lieux.', 400));
     }
 
-    // Le bouclier : On insère tout d'un coup. S'il y a des doublons, ça va échouer proprement.
     const insertedPOIs = await POI.insertMany(poisArray, { ordered: false });
+
+    // TEMPS RÉEL : On notifie d'un changement global
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('poi_updated', { action: 'bulk' });
+    }
 
     res.status(201).json({
       success: true,
@@ -101,8 +123,10 @@ exports.bulkImportPOIs = async (req, res, next) => {
     });
   } catch (error) {
     logger.error(`Erreur lors de l'import de masse: ${error.message}`);
-    // Si des doublons sont ignorés mais d'autres passent (erreur 11000 en bulk)
     if (error.code === 11000) {
+      const io = req.app.get('io');
+      if (io) io.emit('poi_updated', { action: 'bulk_partial' });
+
       return res.status(207).json({
          success: true,
          message: "Importation partielle : certains lieux existaient déjà et ont été ignorés."
