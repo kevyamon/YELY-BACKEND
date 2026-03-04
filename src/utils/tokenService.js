@@ -1,5 +1,5 @@
 // src/utils/tokenService.js
-// GESTION TOKENS JWT - Access 15min / Refresh 7j + Blacklist Hachée (SHA-256)
+// GESTION TOKENS JWT - Access 15min / Refresh 30j + Blacklist Hachee (SHA-256)
 // CSCSM Level: Bank Grade
 
 const jwt = require('jsonwebtoken');
@@ -18,13 +18,13 @@ const TOKEN_CONFIG = {
   },
   refresh: {
     secret: env.JWT_REFRESH_SECRET || env.JWT_SECRET,
-    expiresIn: env.JWT_REFRESH_EXPIRATION || '7d',
+    expiresIn: env.JWT_REFRESH_EXPIRATION || '30d',
     options: { algorithm: 'HS256' }
   }
 };
 
 /**
- * 🛡️ Utilitaire de sécurité : Hachage SHA-256 unilatéral
+ * Utilitaire de securite : Hachage SHA-256 unilateral
  */
 const hashToken = (token) => {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -57,14 +57,14 @@ const generateRefreshToken = (userId) => {
 };
 
 /**
- * Configure le cookie httpOnly pour refresh token (Isolé du JS Client)
+ * Configure le cookie httpOnly pour refresh token (Isole du JS Client)
  */
 const setRefreshTokenCookie = (res, refreshToken) => {
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: isProd,
     sameSite: isProd ? 'strict' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, 
+    maxAge: 30 * 24 * 60 * 60 * 1000, // MODIFICATION : 30 jours en millisecondes
     path: '/api/v1/auth',
     signed: false,
   });
@@ -102,7 +102,7 @@ const revokeRefreshToken = async (token) => {
     const hashedToken = hashToken(token);
     await TokenBlacklist.create({ token: hashedToken });
   } catch (err) {
-    if (err.code !== 11000) console.error('[TOKEN] Erreur révocation:', err.message);
+    if (err.code !== 11000) console.error('[TOKEN] Erreur revocation:', err.message);
   }
 };
 
@@ -114,7 +114,7 @@ const rotateTokens = async (res, oldRefreshToken, userId, role) => {
   
   setRefreshTokenCookie(res, refreshToken);
   
-  // 🛡️ SÉCURITÉ : Ne retourne JAMAIS le refreshToken dans le JSON
+  // SECURITE : Ne retourne JAMAIS le refreshToken dans le JSON
   return { accessToken }; 
 };
 
@@ -124,7 +124,7 @@ const generateAuthResponse = (res, user) => {
   
   setRefreshTokenCookie(res, refreshToken);
   
-  // 🛡️ SÉCURITÉ : Le refreshToken est protégé par le cookie HttpOnly. 
+  // SECURITE : Le refreshToken est protege par le cookie HttpOnly. 
   return {
     accessToken,
     expiresIn: 900

@@ -21,7 +21,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET: 32 caracteres minimum'),
   JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET: 32 caracteres minimum'),
   JWT_ACCESS_EXPIRATION: z.string().default('15m'),
-  JWT_REFRESH_EXPIRATION: z.string().default('7d'),
+  JWT_REFRESH_EXPIRATION: z.string().default('30d'), // MODIFICATION : 30 jours par defaut
   
   FRONTEND_URL: z.string().url('FRONTEND_URL doit etre une URL valide'),
   
@@ -29,13 +29,10 @@ const envSchema = z.object({
   CLOUDINARY_API_KEY: z.string().min(1, 'Cloudinary API Key requise'),
   CLOUDINARY_API_SECRET: z.string().min(1, 'Cloudinary API Secret requis'),
   
-  // Rendu obligatoire: Les calculs de distance sont vitaux pour la facturation VTC
   LOCATION_IQ_TOKEN: z.string().min(1, 'Token LocationIQ requis'), 
 
-  // Rendu obligatoire: Les notifications Push sont vitales pour le cycle de vie des courses
   FIREBASE_PROJECT_ID: z.string().min(1, 'Firebase Project ID requis'),
   FIREBASE_CLIENT_EMAIL: z.string().email('Firebase Client Email invalide'),
-  // Transformation vitale pour parser les sauts de ligne depuis les variables d'environnement distantes
   FIREBASE_PRIVATE_KEY: z.string().min(1, 'Firebase Private Key requise').transform(val => val.replace(/\\n/g, '\n')),
 
   BCRYPT_ROUNDS: z.string().transform(Number).optional(),
