@@ -6,15 +6,13 @@ const subscriptionService = require('../services/subscriptionService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const Transaction = require('../models/Transaction');
 
-/**
- * Expose la configuration des paiements (Tarifs, Promo, Liens Wave) au Frontend.
- */
 const getConfig = async (req, res) => {
   try {
-    const config = subscriptionService.getSubscriptionPricing();
+    // MODIFICATION SENIOR: Ajout du await indispensable
+    const config = await subscriptionService.getSubscriptionPricing();
     
     if (!config.weekly.link || !config.monthly.link) {
-      console.warn("[CONFIG WARNING]: Liens Wave manquants dans les variables d'environnement.");
+      console.warn("[CONFIG WARNING]: Liens Wave manquants dans les variables d'environnement ou la DB.");
     }
 
     return successResponse(res, config, "Configuration de souscription recuperee avec succes.", 200);
@@ -24,9 +22,6 @@ const getConfig = async (req, res) => {
   }
 };
 
-/**
- * Recoit la capture d'ecran et les infos du depot.
- */
 const submitProof = async (req, res) => {
   try {
     const { planId, senderPhone } = req.body;
@@ -55,9 +50,6 @@ const submitProof = async (req, res) => {
   }
 };
 
-/**
- * Recupere le statut actuel de l'abonnement pour l'interface utilisateur.
- */
 const getStatus = async (req, res) => {
   try {
     const isActive = await subscriptionService.checkSubscriptionStatus(req.user._id);

@@ -21,10 +21,6 @@ const COLLECTOR_TYPES = {
   PARTNER: 'PARTNER'
 };
 
-/**
- * Gere la distribution des validations entre les admins par lots.
- * Chaque admin disponible recoit ASSIGNMENT_LOT_SIZE validations a la suite.
- */
 const getNextValidator = async () => {
   const admins = await User.find({ 
     role: { $in: ['admin', 'superadmin'] },
@@ -51,33 +47,37 @@ const getNextValidator = async () => {
 };
 
 /**
- * Recupere la configuration tarifaire et les liens de paiement depuis l'environnement.
+ * MODIFICATION SENIOR : Lecture dynamique depuis la base de données (Settings)
+ * au lieu du fichier .env statique.
  */
-const getSubscriptionPricing = () => {
-  const isPromo = process.env.IS_PROMO_ACTIVE === 'true';
+const getSubscriptionPricing = async () => {
+  let settings = await Settings.findOne();
+  if (!settings) settings = {}; // Fallback de sécurité
+
+  const isPromo = settings.isPromoActive || false;
+  
   return {
     isPromoActive: isPromo,
     weekly: {
       price: isPromo ? parseInt(process.env.PROMO_PRICE_WEEKLY || '500', 10) : 1000,
-      link: process.env.WAVE_LINK_WEEKLY || ''
+      // Priorité à la base de données pour les liens, sinon fallback sur le .env
+      link: settings.waveLinkWeekly || process.env.WAVE_LINK_WEEKLY || '' 
     },
     monthly: {
       price: isPromo ? parseInt(process.env.PROMO_PRICE_MONTHLY || '4000', 10) : 6000,
-      link: process.env.WAVE_LINK_MONTHLY || ''
+      link: settings.waveLinkMonthly || process.env.WAVE_LINK_MONTHLY || ''
     }
   };
 };
 
-/**
- * Soumission d'une preuve de paiement avec notification de l'administrateur.
- */
 const submitProof = async (userId, data, file) => {
   const existingPending = await Transaction.findOne({ user: userId, status: 'PENDING' });
   if (existingPending) {
     throw new AppError("Une validation est deja en cours pour votre compte.", 400);
   }
 
-  const pricingConfig = getSubscriptionPricing();
+  // MODIFICATION SENIOR : getSubscriptionPricing est maintenant asynchrone (await)
+  const pricingConfig = await getSubscriptionPricing();
   let amount = 0;
   let collectorType = '';
 
@@ -130,9 +130,6 @@ const submitProof = async (userId, data, file) => {
   return transaction;
 };
 
-/**
- * Verifie si un chauffeur possede un abonnement actif.
- */
 const checkSubscriptionStatus = async (userId) => {
   const user = await User.findById(userId);
   if (!user || !user.subscriptionExpiresAt) return false;
