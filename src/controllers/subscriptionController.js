@@ -58,20 +58,14 @@ const getStatus = async (req, res) => {
       status: 'PENDING' 
     });
 
-    // CORRECTION SENIOR : Calcul de la date d'expiration à la volée basée sur les heures restantes
+    // CORRECTION SENIOR: On récupère simplement la date exacte stockée en base, sans calcul hasardeux
     const user = await User.findById(req.user._id).select('subscription');
-    let calculatedExpiresAt = null;
-
-    if (user && user.subscription && user.subscription.isActive) {
-      // On convertit les heures restantes en millisecondes qu'on ajoute à la date actuelle
-      const millisecondsRemaining = (user.subscription.hoursRemaining || 0) * 60 * 60 * 1000;
-      calculatedExpiresAt = new Date(Date.now() + millisecondsRemaining);
-    }
+    const exactExpiresAt = user?.subscription?.expiresAt || null;
 
     return successResponse(res, {
       isActive,
       isPending: !!pendingTransaction,
-      expiresAt: calculatedExpiresAt
+      expiresAt: exactExpiresAt
     });
   } catch (error) {
     console.error("[STATUS ERROR]:", error.message);
