@@ -5,11 +5,15 @@
 const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
 const AppError = require('../utils/AppError');
-const cloudinary = require('cloudinary').v2; // On utilise le SDK Cloudinary
+const cloudinary = require('cloudinary').v2;
 const fs = require('fs');
 
 const getUserProfile = async (userId) => {
-  const user = await User.findById(userId).select('-password -__v');
+  // AJOUT SENIOR: Populate de la souscription pour éviter le bug d'affichage frontend
+  const user = await User.findById(userId)
+    .populate('subscription')
+    .select('-password -__v');
+    
   if (!user) throw new AppError('Utilisateur introuvable.', 404);
   return user;
 };
@@ -36,7 +40,7 @@ const updateProfile = async (userId, updateData) => {
     userId,
     { $set: updateData },
     { new: true, runValidators: true, select: '-password -__v' }
-  );
+  ).populate('subscription');
 
   await AuditLog.create({
     actor: userId,
@@ -53,7 +57,6 @@ const uploadProfilePicture = async (userId, file) => {
   if (!user) throw new AppError('Utilisateur introuvable.', 404);
 
   try {
-    // 1. Nettoyage de l'ancienne photo sur Cloudinary pour économiser l'espace
     if (user.profilePicture && user.profilePicture.includes('cloudinary.com')) {
       const publicIdMatch = user.profilePicture.match(/\/v\d+\/([^/.]+)\./);
       if (publicIdMatch && publicIdMatch[1]) {
@@ -61,16 +64,14 @@ const uploadProfilePicture = async (userId, file) => {
       }
     }
 
-    // 2. Upload de la nouvelle photo
     const result = await cloudinary.uploader.upload(file.path, {
       folder: 'yely/profiles',
-      transformation: [{ width: 500, height: 500, crop: 'fill' }] // Optimisation stricte
+      transformation: [{ width: 500, height: 500, crop: 'fill' }]
     });
 
     user.profilePicture = result.secure_url;
     await user.save();
 
-    // 3. Nettoyage du fichier local
     if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
 
     return user;
@@ -84,7 +85,6 @@ const anonymizeAccount = async (userId) => {
   const user = await User.findById(userId);
   if (!user) throw new AppError('Utilisateur introuvable.', 404);
 
-  // Génération d'un identifiant poubelle unique
   const randomSuffix = Math.random().toString(36).substring(2, 10);
 
   user.name = 'Utilisateur Supprimé';
@@ -94,13 +94,13 @@ const anonymizeAccount = async (userId) => {
   user.isAvailable = false;
   user.isDeleted = true;
   user.fcmToken = null;
-  user.password = await require('bcrypt').hash(randomSuffix, 10); // Brouillage du mot de passe
+  user.password = await require('bcrypt').hash(randomSuffix, 10);
 
   if (user.vehicle) {
     user.vehicle.plate = 'DELETED';
   }
 
-  await user.save({ validateBeforeSave: false }); // On désactive la validation stricte pour l'anonymisation
+  await user.save({ validateBeforeSave: false });
 
   await AuditLog.create({
     actor: userId,

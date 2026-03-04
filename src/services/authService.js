@@ -8,7 +8,7 @@ const { verifyRefreshToken } = require('../utils/tokenService');
 const { SECURITY_CONSTANTS } = require('../config/env');
 
 const MAX_ATTEMPTS = SECURITY_CONSTANTS?.MAX_LOGIN_ATTEMPTS || 5;
-const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000; // 15 min par defaut
+const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000;
 
 const register = async (userData) => {
   const existing = await User.findOne({
@@ -31,11 +31,11 @@ const login = async (identifier, password) => {
   const isEmail = identifier.includes('@');
   const normalizedId = isEmail ? identifier.toLowerCase().trim() : identifier.replace(/\s/g, '');
 
+  // AJOUT SENIOR: Populate systematique pour réhydrater l'état Frontend au login
   const user = await User.findOne({
     $or: [{ email: normalizedId }, { phone: normalizedId }]
-  }).select('+password +loginAttempts +lockUntil');
+  }).populate('subscription').select('+password +loginAttempts +lockUntil');
 
-  // SECURITE : Anti-Timing Attack 
   if (!user) {
     await new Promise(resolve => setTimeout(resolve, 500));
     throw new AppError('Identifiants incorrects.', 401);
@@ -83,14 +83,14 @@ const validateSessionForRefresh = async (token) => {
   try {
     const decoded = await verifyRefreshToken(token);
     
-    // EXTRACTION ROBUSTE : On s'assure de trouver l'ID peu importe la structure du token
     const userId = decoded.userId || decoded.id || decoded._id || (typeof decoded === 'string' ? decoded : null);
     
     if (!userId) {
       throw new AppError('Structure du token illisible.', 401);
     }
 
-    const user = await User.findById(userId);
+    // AJOUT SENIOR: Populate pour conserver l'état de l'abonnement lors du refresh
+    const user = await User.findById(userId).populate('subscription');
     
     if (!user) {
       throw new AppError('L\'utilisateur lie a cette session n\'existe plus.', 401);
@@ -102,9 +102,7 @@ const validateSessionForRefresh = async (token) => {
     
     return user;
   } catch (error) {
-    // Si c'est deja une AppError, on la fait remonter
     if (error.isOperational) throw error;
-    // Sinon c'est une erreur native JWT (TokenExpiredError, JsonWebTokenError...)
     throw new AppError(`Echec de validation de session: ${error.message}`, 401);
   }
 };

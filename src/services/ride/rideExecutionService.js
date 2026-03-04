@@ -9,7 +9,6 @@ const userRepository = require('../../repositories/userRepository');
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 
-// Duplique volontairement pour eviter les dependances circulaires inter-services
 const calculateHaversineDistance = (coords1, coords2) => {
   const [lng1, lat1] = coords1;
   const [lng2, lat2] = coords2;
@@ -200,7 +199,6 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
 
         io.to(ride.rider.toString()).emit('ride_arrived', { rideId: ride._id, arrivedAt: ride.arrivedAt });
         io.to(driverId.toString()).emit('ride_arrived', { rideId: ride._id, arrivedAt: ride.arrivedAt });
-        logger.info(`[GEOFENCING] Driver ${driverId} arrive chez le client (15m). Statut MAJ vers 'arrived'`);
       }
     }
 
@@ -209,7 +207,6 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
       
       if (distToDropoff <= 0.02) {
         io.to(driverId.toString()).emit('prompt_arrival_confirm', { rideId: ride._id });
-        logger.info(`[GEOFENCING] Course ${ride._id} a 20m de la destination. Modale declenchee.`);
       }
     }
   } catch (error) {
@@ -217,19 +214,18 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
   }
 };
 
-// 🚀 NOUVEAU : Récupération de l'historique paginé
 const getRideHistory = async (user, page = 1, limit = 20) => {
   const skip = (page - 1) * limit;
   
-  // Le filtre dépend du rôle
   const filter = {};
-  if (user.role === 'rider') {
-    filter.rider = user._id;
-  } else if (user.role === 'driver') {
+  
+  // AJOUT SENIOR: Support élargi des rôles possibles pour un passager en base de données pour éviter de fausser le filtre.
+  if (user.role === 'driver') {
     filter.driver = user._id;
+  } else {
+    filter.rider = user._id;
   }
 
-  // On exclut les courses pending/searching qui ne sont pas pertinentes dans l'historique
   filter.status = { $nin: ['pending', 'searching'] };
 
   const rides = await Ride.find(filter)
@@ -259,5 +255,5 @@ module.exports = {
   completeRideSession,
   submitRideRating,
   checkRideProgressOnLocationUpdate,
-  getRideHistory // <-- Exporté ici
+  getRideHistory
 };

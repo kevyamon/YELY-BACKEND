@@ -15,7 +15,6 @@ const registerUser = async (req, res) => {
     const accessToken = generateAccessToken(user._id, user.role);
     const refreshTokenStr = generateRefreshToken(user._id);
 
-    // On set le cookie pour les clients Web
     setRefreshTokenCookie(res, refreshTokenStr);
 
     const userData = {
@@ -27,13 +26,14 @@ const registerUser = async (req, res) => {
       isAvailable: user.isAvailable,
       rating: user.rating,
       totalRides: user.totalRides,
-      totalEarnings: user.totalEarnings
+      totalEarnings: user.totalEarnings,
+      subscription: user.subscription // AJOUT
     };
 
     return successResponse(res, { 
       user: userData, 
       accessToken, 
-      refreshToken: refreshTokenStr // Indispensable pour l'App Mobile
+      refreshToken: refreshTokenStr 
     }, 'Compte cree avec succes', 201);
 
   } catch (error) {
@@ -56,7 +56,6 @@ const loginUser = async (req, res) => {
     const accessToken = generateAccessToken(user._id, user.role);
     const refreshTokenStr = generateRefreshToken(user._id);
 
-    // On set le cookie pour les clients Web
     setRefreshTokenCookie(res, refreshTokenStr);
 
     const userData = {
@@ -68,13 +67,14 @@ const loginUser = async (req, res) => {
       isAvailable: user.isAvailable,
       rating: user.rating,
       totalRides: user.totalRides,
-      totalEarnings: user.totalEarnings
+      totalEarnings: user.totalEarnings,
+      subscription: user.subscription // AJOUT IMPORTANT POUR LE FRONEND
     };
 
     return successResponse(res, { 
       user: userData, 
       accessToken, 
-      refreshToken: refreshTokenStr // Indispensable pour l'App Mobile
+      refreshToken: refreshTokenStr
     }, 'Connexion reussie', 200);
 
   } catch (error) {
@@ -95,7 +95,6 @@ const logoutUser = async (req, res) => {
 
 const refreshToken = async (req, res) => {
   try {
-    // 1. Cherche le token dans le Body (Mobile) OU dans les Cookies (Web)
     let token = req.body.refreshToken;
     if (!token && req.cookies && req.cookies.refreshToken) {
       token = req.cookies.refreshToken;
@@ -105,14 +104,11 @@ const refreshToken = async (req, res) => {
        return errorResponse(res, "Refresh token manquant", 401);
     }
     
-    // 2. Valide la session
     const user = await authService.validateSessionForRefresh(token);
 
-    // 3. Génère les nouveaux tokens
     const newAccessToken = generateAccessToken(user._id, user.role);
     const newRefreshToken = generateRefreshToken(user._id);
 
-    // 4. Met à jour le cookie (Web)
     setRefreshTokenCookie(res, newRefreshToken);
 
     const userData = {
@@ -124,18 +120,19 @@ const refreshToken = async (req, res) => {
       isAvailable: user.isAvailable,
       rating: user.rating,
       totalRides: user.totalRides,
-      totalEarnings: user.totalEarnings
+      totalEarnings: user.totalEarnings,
+      subscription: user.subscription // AJOUT IMPORTANT
     };
 
     return successResponse(res, { 
       user: userData,
       accessToken: newAccessToken, 
-      refreshToken: newRefreshToken // Le mobile DOIT recevoir ceci pour la prochaine rotation
+      refreshToken: newRefreshToken
     }, "Token rafraichi silencieusement", 200);
 
   } catch (error) {
     console.error("[REFRESH CRITICAL FAILURE]:", error.message || error);
-    clearRefreshTokenCookie(res); // Purge de sécurité
+    clearRefreshTokenCookie(res); 
     const statusCode = error.statusCode || 401;
     return errorResponse(res, error.message || "Session definitivement invalide", statusCode);
   }
