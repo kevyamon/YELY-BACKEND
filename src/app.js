@@ -1,5 +1,5 @@
 // src/app.js [MODIFIÉ]
-// CONFIGURATION EXPRESS FORTERESSE - Versioning API & Sécurité Flux
+// CONFIGURATION EXPRESS FORTERESSE - Versioning API & Securite Flux
 // CSCSM Level: Bank Grade
 
 const express = require('express');
@@ -22,7 +22,7 @@ const subscriptionRoutes = require('./routes/subscriptionRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const userRoutes = require('./routes/userRoutes');
 const healthRoutes = require('./routes/healthRoutes');
-const poiRoutes = require('./routes/poiRoutes'); // <-- NOUVELLE LIGNE AJOUTÉE
+const poiRoutes = require('./routes/poiRoutes');
 
 const app = express();
 
@@ -59,8 +59,8 @@ const corsOptions = {
     if (allowedOrigins.includes(origin) || env.NODE_ENV === 'development') {
       callback(null, true);
     } else {
-      logger.warn(`[CORS] Origine rejetée: ${origin}`);
-      callback(new Error('Origine non autorisée par la politique CORS'));
+      logger.warn(`[CORS] Origine rejetee: ${origin}`);
+      callback(new Error('Origine non autorisee par la politique CORS'));
     }
   },
   credentials: true,
@@ -79,13 +79,13 @@ app.use(hpp());
 app.use(mongoSanitize({
   replaceWith: '_',
   onSanitize: ({ req, key }) => {
-    logger.warn(`[SANITIZE] Champ suspect nettoyé: ${key} - IP: ${req.ip} - RequestID: ${req.id}`);
+    logger.warn(`[SANITIZE] Champ suspect nettoye: ${key} - IP: ${req.ip} - RequestID: ${req.id}`);
   }
 }));
 app.use(sanitizationMiddleware);
 
 app.get('/', (req, res) => {
-  res.status(200).send('Yély API (Iron Dome) is running ');
+  res.status(200).send('Yely API (Iron Dome) is running');
 });
 
 const API_V1_PREFIX = '/api/v1';
@@ -99,12 +99,12 @@ app.use(`${API_V1_PREFIX}/admin`, adminRoutes);
 
 // --- NOUVELLES ROUTES ---
 app.use(`${API_V1_PREFIX}/notifications`, require('./routes/notificationRoutes'));
-app.use(`${API_V1_PREFIX}/reports`, require('./routes/reportRoutes')); // POUR L'ÉTAPE 4
-app.use(`${API_V1_PREFIX}/pois`, poiRoutes); // <-- NOUVELLE LIGNE AJOUTÉE
+app.use(`${API_V1_PREFIX}/reports`, require('./routes/reportRoutes'));
+app.use(`${API_V1_PREFIX}/pois`, poiRoutes);
 
 app.use((req, res) => {
-  logger.warn(`[404] Endpoint non trouvé: ${req.method} ${req.url} - RequestID: ${req.id}`);
-  res.status(404).json({ success: false, message: "La ressource demandée est introuvable." });
+  logger.warn(`[404] Endpoint non trouve: ${req.method} ${req.url} - RequestID: ${req.id}`);
+  res.status(404).json({ success: false, message: "La ressource demandee est introuvable." });
 });
 
 app.use(errorHandler);
