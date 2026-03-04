@@ -1,7 +1,4 @@
 // src/middleware/uploadMiddleware.js
-// MIDDLEWARE UPLOAD - Anti-Spoofing & Magic Numbers
-// CSCSM Level: Bank Grade
-
 const multer = require('multer');
 const fs = require('fs');
 const { errorResponse } = require('../utils/responseHandler');
@@ -20,39 +17,34 @@ const storage = multer.diskStorage({
 
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 }
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB global
 });
 
-// Différents points d'entrée selon le besoin
 const uploadSingle = upload.single('proofImage');
 const uploadProfilePic = upload.single('profilePicture');
+const uploadReportCaptures = upload.array('captures', 3); // MAX 3 CAPTURES
 
 const validateFileSignature = (req, res, next) => {
-  if (!req.file) return next();
+  const files = req.file ? [req.file] : (req.files || []);
+  if (files.length === 0) return next();
 
   try {
-    const buffer = Buffer.alloc(4);
-    const fd = fs.openSync(req.file.path, 'r');
-    fs.readSync(fd, buffer, 0, 4, 0);
-    fs.closeSync(fd);
-    
-    const hex = buffer.toString('hex').toUpperCase();
+    for (const file of files) {
+      const buffer = Buffer.alloc(4);
+      const fd = fs.openSync(file.path, 'r');
+      fs.readSync(fd, buffer, 0, 4, 0);
+      fs.closeSync(fd);
+      const hex = buffer.toString('hex').toUpperCase();
 
-    if (hex.startsWith('FFD8') || hex === '89504E47') {
-      return next();
-    } else {
-      fs.unlinkSync(req.file.path);
-      console.warn(`[SECURITY] Tentative de spoofing MIME détectée par l'utilisateur ${req.user?._id || 'Inconnu'}`);
-      return errorResponse(res, "Fichier corrompu ou format non autorisé. Seules les vraies images JPEG/PNG sont acceptées.", 400);
+      if (!hex.startsWith('FFD8') && hex !== '89504E47') {
+        files.forEach(f => fs.unlinkSync(f.path));
+        return errorResponse(res, "Type de fichier invalide détecté.", 400);
+      }
     }
+    next();
   } catch (error) {
-    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-    return errorResponse(res, "Erreur lors de l'analyse sécuritaire du fichier.", 500);
+    return errorResponse(res, "Erreur d'analyse sécuritaire.", 500);
   }
 };
 
-module.exports = {
-  uploadSingle,
-  uploadProfilePic,
-  validateFileSignature
-};
+module.exports = { uploadSingle, uploadProfilePic, uploadReportCaptures, validateFileSignature };
