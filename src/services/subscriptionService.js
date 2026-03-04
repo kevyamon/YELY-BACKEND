@@ -9,8 +9,6 @@ const cloudinary = require('../config/cloudinary');
 const AppError = require('../utils/AppError');
 const notificationService = require('./notificationService');
 
-const ASSIGNMENT_LOT_SIZE = 3;
-
 const PLAN_TYPES = {
   WEEKLY: 'WEEKLY',
   MONTHLY: 'MONTHLY'
@@ -21,24 +19,65 @@ const COLLECTOR_TYPES = {
   PARTNER: 'PARTNER'
 };
 
-const getNextValidator = async () => {
-  const admins = await User.find({ 
-    role: { $in: ['admin', 'superadmin'] },
-    isAvailable: true 
+// Cerveau de l'assignation (Round-Robin intelligent par 3)
+const getNextValidator = async (planType) => {
+  let settings = await Settings.findOne();
+  if (!settings) settings = await Settings.create({});
+
+  const superadmin = await User.findOne({ role: 'superadmin' });
+  const partnerEmail = process.env.PARTNAIR || '';
+  const partner = await User.findOne({ email: partnerEmail, role: 'admin' });
+
+  // Les admins "classiques" (qui ne sont ni le partenaire ni le superadmin)
+  const classicAdmins = await User.find({
+    role: 'admin',
+    email: { $ne: partnerEmail }
   }).sort({ _id: 1 });
 
-  if (admins.length === 0) return null;
+  // Fallback de sécurité extrême au cas où
+  const fallbackValidator = superadmin || partner || classicAdmins[0];
 
-  let settings = await Settings.findOne();
-  if (!settings) settings = await Settings.create({ lastAssignedAdminIndex: 0, validationCounter: 0 });
+  if (!settings.isLoadReduced) {
+    // MODE NORMAL : Assignation stricte
+    if (planType === PLAN_TYPES.WEEKLY) return superadmin || fallbackValidator;
+    if (planType === PLAN_TYPES.MONTHLY) return partner || fallbackValidator;
+  }
 
-  if (typeof settings.validationCounter === 'undefined') settings.validationCounter = 0;
+  // MODE REDUCTION DE CHARGE (3 par 3)
+  let targetValidator = null;
 
-  const currentAdminIndex = Math.floor(settings.validationCounter / ASSIGNMENT_LOT_SIZE) % admins.length;
-  settings.validationCounter += 1;
+  if (planType === PLAN_TYPES.WEEKLY) {
+    const cycle = Math.floor(settings.weeklyCounter / 3);
+    
+    // Si cycle pair (0, 2, 4...) ou aucun admin classique dispo -> Superadmin
+    if (cycle % 2 === 0 || classicAdmins.length === 0) {
+      targetValidator = superadmin;
+    } else {
+      // Cycle impair (1, 3, 5...) -> Admins classiques (tour de rôle)
+      const index = settings.lastAssignedAdminIndex % classicAdmins.length;
+      targetValidator = classicAdmins[index];
+      settings.lastAssignedAdminIndex += 1;
+    }
+    settings.weeklyCounter += 1;
+  }
+
+  if (planType === PLAN_TYPES.MONTHLY) {
+    const cycle = Math.floor(settings.monthlyCounter / 3);
+    
+    // Si cycle pair ou aucun admin classique dispo -> Partenaire
+    if (cycle % 2 === 0 || classicAdmins.length === 0) {
+      targetValidator = partner;
+    } else {
+      // Cycle impair -> Admins classiques (tour de rôle)
+      const index = settings.lastAssignedAdminIndex % classicAdmins.length;
+      targetValidator = classicAdmins[index];
+      settings.lastAssignedAdminIndex += 1;
+    }
+    settings.monthlyCounter += 1;
+  }
+
   await settings.save();
-
-  return admins[currentAdminIndex];
+  return targetValidator || fallbackValidator;
 };
 
 /**
@@ -79,7 +118,6 @@ const submitProof = async (userId, data, file) => {
     throw new AppError("Une validation est deja en cours pour votre compte.", 400);
   }
 
-  // Le montant sera automatiquement le prix remisé à -40% si la promo est active
   const pricingConfig = await getSubscriptionPricing();
   let amount = 0;
   let collectorType = '';
@@ -99,7 +137,8 @@ const submitProof = async (userId, data, file) => {
     resource_type: 'image'
   });
 
-  const validator = await getNextValidator();
+  // On envoie le planId pour orienter le routeur intelligent
+  const validator = await getNextValidator(data.planId);
   const validatorId = validator ? validator._id : null;
 
   const transaction = await Transaction.create({

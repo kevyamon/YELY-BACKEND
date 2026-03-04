@@ -42,6 +42,9 @@ router.get('/finance', protect, authorize('superadmin'), adminController.getFina
 router.put('/finance/links', protect, authorize('superadmin'), adminController.updateWaveLinks);
 router.put('/promo/toggle', protect, authorize('superadmin'), adminController.togglePromo);
 
+// NOUVEAU: Bouton Reduire la Charge
+router.put('/load-reduce/toggle', protect, authorize('superadmin'), adminController.toggleLoadReduce);
+
 router.post('/update-role', protect, authorize('superadmin'), validate(updateRoleSchema), adminController.updateAdminStatus);
 router.post('/toggle-ban', protect, authorize('superadmin'), validate(toggleBanSchema), adminController.toggleUserBan);
 router.post('/map-lock', protect, authorize('superadmin'), validate(mapSettingsSchema), adminController.updateMapSettings);

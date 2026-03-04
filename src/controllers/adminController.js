@@ -240,6 +240,38 @@ const getAuditLogs = async (req, res) => {
   }
 };
 
+const toggleLoadReduce = async (req, res) => {
+  try {
+    let settings = await require('../models/Settings').findOne();
+    if (!settings) settings = await require('../models/Settings').create({});
+
+    settings.isLoadReduced = !settings.isLoadReduced;
+    
+    // On réinitialise les compteurs pour repartir proprement sur un cycle de 3
+    settings.weeklyCounter = 0;
+    settings.monthlyCounter = 0;
+    
+    await settings.save();
+
+    try {
+      const io = req.app.get('socketio');
+      if (io) {
+        // Optionnel : on informe uniquement le superadmin en direct
+        io.to(req.user._id.toString()).emit('load_reduce_updated', { isLoadReduced: settings.isLoadReduced });
+      }
+    } catch (e) {
+      logger.warn(`[SOCKET PROMO] Echec: ${e.message}`);
+    }
+
+    logger.info(`[AUDIT CONFIG] Load Reduction set to ${settings.isLoadReduced} by ${req.user.email}`);
+    return successResponse(res, { isLoadReduced: settings.isLoadReduced }, 
+      settings.isLoadReduced ? "Mode Réduction de charge activé." : "Mode Réduction de charge désactivé."
+    );
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
 module.exports = {
   updateAdminStatus,
   toggleUserBan,
@@ -252,5 +284,6 @@ module.exports = {
   getFinanceData,
   togglePromo,
   updateWaveLinks,
-  getAuditLogs 
+  getAuditLogs,
+  toggleLoadReduce
 };

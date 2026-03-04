@@ -43,6 +43,12 @@ const settingsSchema = new mongoose.Schema({
   // --- PAIEMENT & ABONNEMENT ---
   waveLinkWeekly: { type: String, default: "", trim: true },
   waveLinkMonthly: { type: String, default: "", trim: true },
+
+  // --- OPTIMISATION DE CHARGE (ROUND ROBIN) ---
+  isLoadReduced: { type: Boolean, default: false },
+  weeklyCounter: { type: Number, default: 0 },
+  monthlyCounter: { type: Number, default: 0 },
+  lastAssignedAdminIndex: { type: Number, default: 0 },
   
   updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 }, { 
