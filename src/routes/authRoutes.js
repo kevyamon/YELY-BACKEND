@@ -47,28 +47,25 @@ const createAuthLimiter = (maxAttempts, windowMinutes) => {
   });
 };
 
-const registerLimiter = createAuthLimiter(3, 60); // 3 essais par heure
-const loginLimiter = createAuthLimiter(5, 15);    // 5 essais par 15 min
+const registerLimiter = createAuthLimiter(3, 60); 
+const loginLimiter = createAuthLimiter(5, 15);    
 
-// DÉBOGAGE: Limiteur relâché temporairement à 100 essais au lieu de 3
-const forgotPasswordLimiter = createAuthLimiter(100, 60); 
+// RETOUR EN PROD: Limiteur strict rétabli à 3 demandes par heure max
+const forgotPasswordLimiter = createAuthLimiter(3, 60); 
 
 // ═══════════════════════════════════════════════════════════
 // ROUTES
 // ═══════════════════════════════════════════════════════════
 
-// Public
 router.post('/register', registerLimiter, validate(registerSchema), registerUser);
 router.post('/login', loginLimiter, validate(loginSchema), loginUser);
 
-// NOUVELLES ROUTES : Mot de passe oublié
 router.post('/forgot-password', forgotPasswordLimiter, validate(forgotPasswordSchema), forgotPassword);
 router.post('/reset-password', validate(resetPasswordSchema), resetPassword);
 
 router.post('/refresh', refreshToken);
 router.post('/logout', optionalAuth, logoutUser);
 
-// Privé
 router.put('/availability', protect, validate(availabilitySchema), updateAvailability);
 router.put('/fcm-token', protect, updateFcmToken);
 

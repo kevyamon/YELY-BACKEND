@@ -6,7 +6,6 @@ const User = require('../models/User');
 const authService = require('../services/authService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const { generateAccessToken, generateRefreshToken, setRefreshTokenCookie, clearRefreshTokenCookie } = require('../utils/tokenService'); 
-const { env } = require('../config/env');
 
 const registerUser = async (req, res) => {
   try {
@@ -91,20 +90,12 @@ const logoutUser = async (req, res) => {
   }
 };
 
-// ==========================================
-// NOUVEAUX CONTROLEURS - MOT DE PASSE OUBLIÉ
-// ==========================================
-
 const forgotPassword = async (req, res) => {
-  console.log("[DEBUG - CONTROLLER] Entrée dans forgotPassword. Body reçu:", req.body);
   try {
     const { email } = req.body;
     await authService.forgotPassword(email);
-    
-    console.log("[DEBUG - CONTROLLER] authService.forgotPassword exécuté avec succès");
     return successResponse(res, null, "Si cette adresse email est associée à un compte, un code de réinitialisation y a été envoyé.", 200);
   } catch (error) {
-    console.error("[DEBUG - CONTROLLER] Erreur capturée dans forgotPassword:", error);
     const statusCode = error.statusCode || 500;
     return errorResponse(res, error.message || "Erreur lors de la demande de réinitialisation.", statusCode);
   }
@@ -114,15 +105,12 @@ const resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
     await authService.resetPasswordWithOtp(email, otp, newPassword);
-    
     return successResponse(res, null, "Votre mot de passe a été réinitialisé avec succès. Vous pouvez maintenant vous connecter.", 200);
   } catch (error) {
     const statusCode = error.statusCode || 400;
     return errorResponse(res, error.message || "Erreur lors de la réinitialisation du mot de passe.", statusCode);
   }
 };
-
-// ==========================================
 
 const refreshToken = async (req, res) => {
   try {

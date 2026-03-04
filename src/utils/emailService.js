@@ -8,13 +8,6 @@ const LOGO_URL = "https://res.cloudinary.com/dskdkrwhq/image/upload/v1772629185/
 const GOLD_COLOR = "#D4AF37";
 
 const sendOtpEmail = async (to, otp) => {
-  console.log("[DEBUG - EMAIL] Utilisation de l'API HTTP Brevo (Port 443 HTTPS)...");
-  
-  // DÉBOGAGE: On vérifie si la clé API est bien chargée par Render
-  if (!process.env.BREVO_API_KEY) {
-    console.error("[EMAIL ERROR] La variable BREVO_API_KEY est manquante !");
-  }
-
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -57,7 +50,7 @@ const sendOtpEmail = async (to, otp) => {
   `;
 
   try {
-    const response = await axios.post(
+    await axios.post(
       'https://api.brevo.com/v3/smtp/email',
       {
         sender: { email: process.env.EMAIL_FROM, name: "Yely Support" },
@@ -68,19 +61,16 @@ const sendOtpEmail = async (to, otp) => {
       {
         headers: {
           'accept': 'application/json',
-          'api-key': process.env.BREVO_API_KEY, // <-- MODIFICATION CLÉ ICI
+          'api-key': process.env.BREVO_API_KEY,
           'content-type': 'application/json'
         }
       }
     );
-
-    console.log("[DEBUG - EMAIL] Mail envoyé avec succès via l'API HTTP Brevo !");
     return true;
-
   } catch (error) {
     const errorDetails = error.response ? JSON.stringify(error.response.data) : error.message;
-    console.error("[EMAIL ERROR] Echec API HTTP :", errorDetails);
-    throw new Error(`Impossible d'envoyer l'email via API HTTP.`);
+    console.error("[EMAIL ERROR] Echec d'envoi API HTTP :", errorDetails);
+    throw new Error("Impossible d'envoyer l'email.");
   }
 };
 
