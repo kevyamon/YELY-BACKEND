@@ -47,8 +47,7 @@ const getNextValidator = async () => {
 };
 
 /**
- * MODIFICATION SENIOR : Lecture dynamique depuis la base de données (Settings)
- * au lieu du fichier .env statique.
+ * Lecture dynamique depuis la base de données (Settings)
  */
 const getSubscriptionPricing = async () => {
   let settings = await Settings.findOne();
@@ -60,7 +59,6 @@ const getSubscriptionPricing = async () => {
     isPromoActive: isPromo,
     weekly: {
       price: isPromo ? parseInt(process.env.PROMO_PRICE_WEEKLY || '500', 10) : 1000,
-      // Priorité à la base de données pour les liens, sinon fallback sur le .env
       link: settings.waveLinkWeekly || process.env.WAVE_LINK_WEEKLY || '' 
     },
     monthly: {
@@ -76,7 +74,6 @@ const submitProof = async (userId, data, file) => {
     throw new AppError("Une validation est deja en cours pour votre compte.", 400);
   }
 
-  // MODIFICATION SENIOR : getSubscriptionPricing est maintenant asynchrone (await)
   const pricingConfig = await getSubscriptionPricing();
   let amount = 0;
   let collectorType = '';
@@ -130,10 +127,12 @@ const submitProof = async (userId, data, file) => {
   return transaction;
 };
 
+// CORRECTION SENIOR : On vérifie la bonne propriété du modèle User
 const checkSubscriptionStatus = async (userId) => {
   const user = await User.findById(userId);
-  if (!user || !user.subscriptionExpiresAt) return false;
-  return user.subscriptionExpiresAt > new Date();
+  if (!user || !user.subscription) return false;
+  
+  return user.subscription.isActive === true;
 };
 
 module.exports = {

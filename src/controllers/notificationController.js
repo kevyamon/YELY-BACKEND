@@ -22,7 +22,7 @@ const markRead = async (req, res) => {
   }
 };
 
-// 🚀 CORRECTION SENIOR : Le champ Mongoose est 'recipient' et non 'user' !
+//  CORRECTION SENIOR : Le champ Mongoose est 'recipient' et non 'user' !
 const deleteNotification = async (req, res) => {
   try {
     const notifId = req.params.id;

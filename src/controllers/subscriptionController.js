@@ -8,7 +8,6 @@ const Transaction = require('../models/Transaction');
 
 const getConfig = async (req, res) => {
   try {
-    // MODIFICATION SENIOR: Ajout du await indispensable
     const config = await subscriptionService.getSubscriptionPricing();
     
     if (!config.weekly.link || !config.monthly.link) {
@@ -58,10 +57,11 @@ const getStatus = async (req, res) => {
       status: 'PENDING' 
     });
 
+    // CORRECTION SENIOR: Nettoyage de l'ancienne propriété expiresAt
     return successResponse(res, {
       isActive,
       isPending: !!pendingTransaction,
-      expiresAt: req.user.subscriptionExpiresAt || null
+      expiresAt: null 
     });
   } catch (error) {
     console.error("[STATUS ERROR]:", error.message);
