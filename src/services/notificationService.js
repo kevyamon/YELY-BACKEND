@@ -1,79 +1,78 @@
 // src/services/notificationService.js
-// SERVICE DE NOTIFICATIONS PUSH - React Native (Expo) Optimise
+// SERVICE NOTIFICATIONS - Orchestration Push & In-App
 // CSCSM Level: Bank Grade
 
-const admin = require('../config/firebase');
+const admin = require('firebase-admin');
+const Notification = require('../models/Notification');
 const User = require('../models/User');
 const logger = require('../config/logger');
 
 /**
- * ENVOI DE NOTIFICATION PUSH
- * @param {string} target - L'ID de l'utilisateur OU directement son token FCM
- * @param {string} title - Titre de la notif
- * @param {string} body - Corps du texte
- * @param {object} data - Donnees invisibles pour le routing React Navigation
+ * Envoie une notification Push et la sauvegarde en base pour l'historique In-App
  */
-const sendPushNotification = async (target, title, body, data = {}) => {
+const sendNotification = async (userId, title, message, type = 'SYSTEM', metadata = {}) => {
   try {
-    if (!admin.apps || !admin.apps.length) return false; 
+    // 1. Sauvegarde In-App (Toujours effectuée)
+    const inAppNotif = await Notification.create({
+      recipient: userId,
+      title,
+      message,
+      type,
+      metadata
+    });
 
-    let fcmToken = target;
-    let userId = null;
+    // 2. Tentative d'envoi Push (si le token FCM existe)
+    const user = await User.findById(userId).select('+fcmToken');
+    if (user && user.fcmToken) {
+      const payload = {
+        notification: { title, body: message },
+        data: {
+          ...metadata,
+          notificationId: inAppNotif._id.toString(),
+          type: type
+        },
+        token: user.fcmToken
+      };
 
-    // Detection automatique: Si ce n'est pas un token (qui est generalement long), c'est un ObjectId
-    if (target && target.length < 50) {
-      userId = target;
-      const user = await User.findById(userId).select('fcmToken name');
-      
-      if (!user || !user.fcmToken) {
-        logger.info(`[PUSH IGNORE] Aucun token FCM pour ${user ? user.name : userId}`);
-        return false;
-      }
-      fcmToken = user.fcmToken;
+      await admin.messaging().send(payload).catch(err => {
+        logger.warn(`[PUSH] Echec d'envoi à ${userId}: ${err.message}`);
+      });
     }
 
-    // Configuration specifique pour React Native / Expo
-    const message = {
-      notification: { title, body },
-      data: {
-        ...data
-      },
-      token: fcmToken,
-      android: {
-        priority: 'high',
-        notification: {
-          sound: 'default',
-          channelId: 'yely_rides'
-        }
-      },
-      apns: {
-        payload: {
-          aps: {
-            sound: 'default',
-            contentAvailable: true
-          }
-        }
-      }
-    };
-
-    const response = await admin.messaging().send(message);
-    logger.info(`[PUSH SUCCES] Envoye au token se terminant par ...${fcmToken.slice(-5)}: ${response}`);
-    return true;
-
+    return inAppNotif;
   } catch (error) {
-    logger.error(`[PUSH ERREUR] Echec de l'envoi: ${error.message}`);
-    
-    if (error.code === 'messaging/invalid-registration-token' || error.code === 'messaging/registration-token-not-registered') {
-       // Si on a l'ID utilisateur, on nettoie son profil
-       if (target && target.length < 50) {
-         await User.findByIdAndUpdate(target, { fcmToken: null });
-         logger.info(`[PUSH CLEANUP] Token mort supprime pour l'utilisateur ${target}`);
-       }
-    }
-    return false;
+    logger.error(`[NOTIF SERVICE] Erreur critique: ${error.message}`);
+    return null;
   }
 };
 
+const getNotificationsForUser = async (userId, page = 1, limit = 20) => {
+  const skip = (page - 1) * limit;
+  const notifications = await Notification.find({ recipient: userId })
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+  const total = await Notification.countDocuments({ recipient: userId });
+  const unreadCount = await Notification.countDocuments({ recipient: userId, isRead: false });
+
+  return { notifications, pagination: { page, total, pages: Math.ceil(total / limit), unreadCount } };
+};
+
+const markAsRead = async (userId, notificationId) => {
+  if (notificationId === 'all') {
+    return await Notification.updateMany({ recipient: userId, isRead: false }, { isRead: true });
+  }
+  return await Notification.findOneAndUpdate(
+    { _id: notificationId, recipient: userId },
+    { isRead: true },
+    { new: true }
+  );
+};
+
 module.exports = {
-  sendPushNotification
+  sendNotification,
+  getNotificationsForUser,
+  markAsRead
 };

@@ -12,7 +12,7 @@ const { env } = require('./config/env');
 const { apiLimiter } = require('./middleware/rateLimitMiddleware');
 const { sanitizationMiddleware } = require('./middleware/sanitizationMiddleware');
 const errorHandler = require('./middleware/errorHandler');
-const requestIdMiddleware = require('./middleware/requestIdMiddleware'); // ← Ajout Vague 0
+const requestIdMiddleware = require('./middleware/requestIdMiddleware'); 
 const logger = require('./config/logger');
 
 // Routes
@@ -25,24 +25,19 @@ const healthRoutes = require('./routes/healthRoutes');
 
 const app = express();
 
-// 0. DURCISSEMENT SERVEUR
 app.disable('x-powered-by');
 
-// Trust proxy
 if (env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
 
-// 1. REQUEST ID (nouveau - placé très tôt)
 app.use(requestIdMiddleware);
 
-// 2. LOGS HTTP
 app.use((req, res, next) => {
   logger.http(`${req.method} ${req.url} - IP: ${req.ip} - RequestID: ${req.id}`);
   next();
 });
 
-// 3. SÉCURITÉ HEADERS
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -56,7 +51,6 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-// 4. CORS STRICT
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
@@ -74,15 +68,12 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// 5. RATE LIMITING GLOBAL
 app.use('/api/', apiLimiter);
 
-// 6. PARSERS & PROTECTION
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 app.use(cookieParser());
 
-// 7. NETTOYAGE
 app.use(hpp());
 app.use(mongoSanitize({
   replaceWith: '_',
@@ -92,12 +83,10 @@ app.use(mongoSanitize({
 }));
 app.use(sanitizationMiddleware);
 
-// 8. ROUTES DE BASE
 app.get('/', (req, res) => {
   res.status(200).send('Yély API (Iron Dome) is running ');
 });
 
-// 9. ROUTES API V1
 const API_V1_PREFIX = '/api/v1';
 
 app.use(`${API_V1_PREFIX}/health`, healthRoutes);
@@ -107,13 +96,15 @@ app.use(`${API_V1_PREFIX}/rides`, rideRoutes);
 app.use(`${API_V1_PREFIX}/subscriptions`, subscriptionRoutes);
 app.use(`${API_V1_PREFIX}/admin`, adminRoutes);
 
-// 10. 404
+// --- NOUVELLES ROUTES ---
+app.use(`${API_V1_PREFIX}/notifications`, require('./routes/notificationRoutes'));
+app.use(`${API_V1_PREFIX}/reports`, require('./routes/reportRoutes')); // POUR L'ÉTAPE 4
+
 app.use((req, res) => {
   logger.warn(`[404] Endpoint non trouvé: ${req.method} ${req.url} - RequestID: ${req.id}`);
   res.status(404).json({ success: false, message: "La ressource demandée est introuvable." });
 });
 
-// 11. GESTION D'ERREURS GLOBALE
 app.use(errorHandler);
 
 module.exports = app;
