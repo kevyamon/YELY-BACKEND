@@ -21,6 +21,7 @@ const registerUser = async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
+      profilePicture: user.profilePicture, // Ajout de l'image de profil
       role: user.role,
       isAvailable: user.isAvailable,
       rating: user.rating,
@@ -61,6 +62,7 @@ const loginUser = async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
+      profilePicture: user.profilePicture, // Ajout de l'image de profil
       role: user.role,
       isAvailable: user.isAvailable,
       rating: user.rating,
@@ -135,6 +137,7 @@ const refreshToken = async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
+      profilePicture: user.profilePicture, // Ajout de l'image de profil
       role: user.role,
       isAvailable: user.isAvailable,
       rating: user.rating,
