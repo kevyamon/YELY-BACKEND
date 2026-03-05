@@ -21,7 +21,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET: 32 caracteres minimum'),
   JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET: 32 caracteres minimum'),
   JWT_ACCESS_EXPIRATION: z.string().default('15m'),
-  JWT_REFRESH_EXPIRATION: z.string().default('30d'), // MODIFICATION : 30 jours par defaut
+  JWT_REFRESH_EXPIRATION: z.string().default('30d'),
   
   FRONTEND_URL: z.string().url('FRONTEND_URL doit etre une URL valide'),
   
@@ -36,6 +36,8 @@ const envSchema = z.object({
   FIREBASE_PRIVATE_KEY: z.string().min(1, 'Firebase Private Key requise').transform(val => val.replace(/\\n/g, '\n')),
 
   BCRYPT_ROUNDS: z.string().transform(Number).optional(),
+
+  SENTRY_DSN: z.string().url('SENTRY_DSN doit etre une URL valide').optional(),
 })
 .refine((data) => data.JWT_SECRET !== data.JWT_REFRESH_SECRET, {
   message: "CRITIQUE : JWT_SECRET et JWT_REFRESH_SECRET doivent etre differents !",

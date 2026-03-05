@@ -11,76 +11,72 @@ const DISPOSABLE_DOMAINS = [
 
 const registerSchema = z.object({
   name: z.string()
-    .min(2, 'Le nom doit contenir au moins 2 caractères')
-    .max(50, 'Le nom ne peut dépasser 50 caractères')
-    .regex(/^[a-zA-Z\u00C0-\u00FF\s'-]+$/, 'Caractères autorisés: lettres (accents inclus), espaces, - et \' uniquement')
+    .min(2, 'Votre nom doit contenir au moins 2 lettres.')
+    .max(50, 'Votre nom est un peu trop long (maximum 50 caractères).')
+    .regex(/^[a-zA-Z\u00C0-\u00FF\s'-]+$/, 'Votre nom ne doit contenir ni chiffres ni caractères spéciaux.')
     .trim(),
     
   email: z.string()
-    .email('Email invalide')
+    .email('Veuillez fournir une adresse e-mail valide.')
     .toLowerCase()
     .trim()
     .refine((email) => {
       const domain = email.split('@')[1];
       return !DISPOSABLE_DOMAINS.includes(domain);
-    }, 'Les emails temporaires ne sont pas autorisés'),
+    }, 'Les adresses e-mail temporaires ne sont pas autorisées.'),
 
   phone: z.string()
-    .regex(/^\+?[0-9\s]{8,20}$/, 'Format invalide (+225 XX XX XX XX)')
+    .regex(/^\+?[0-9\s]{8,20}$/, 'Veuillez fournir un numéro de téléphone valide.')
     .trim(),
 
   password: z.string()
-    .min(8, 'Mot de passe: 8 caractères minimum')
-    .max(128, 'Mot de passe trop long')
+    .min(8, 'Votre mot de passe doit faire au moins 8 caractères.')
+    .max(128, 'Votre mot de passe est trop long.')
     .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/, 
-      '1 majuscule, 1 minuscule, 1 chiffre, 1 symbole requis'),
+      'Pour votre sécurité, le mot de passe doit inclure une majuscule, un chiffre et un symbole.'),
 
   role: z.enum(['rider', 'driver']).default('rider')
 }).strict();
 
 const loginSchema = z.object({
   identifier: z.string()
-    .min(3, 'Identifiant trop court')
-    .max(254, 'Identifiant trop long')
+    .min(3, 'L\'identifiant est trop court.')
+    .max(254, 'L\'identifiant est trop long.')
     .trim(),
     
   password: z.string()
-    .min(1, 'Le mot de passe est requis')
+    .min(1, 'Le mot de passe est requis.')
 }).strict();
 
 const availabilitySchema = z.object({
   isAvailable: z.boolean({
-    required_error: 'Statut de disponibilité requis',
-    invalid_type_error: 'La valeur doit être true ou false'
+    required_error: 'Le statut de disponibilité est requis.',
+    invalid_type_error: 'La valeur fournie est invalide.'
   })
 }).strict();
 
-// ==========================================
-// NOUVEAUX SCHÉMAS - MOT DE PASSE OUBLIÉ
-// ==========================================
-
 const forgotPasswordSchema = z.object({
   email: z.string()
-    .email('Veuillez fournir un email valide')
+    .email('Veuillez fournir une adresse e-mail valide.')
     .toLowerCase()
     .trim()
 }).strict();
 
 const resetPasswordSchema = z.object({
   email: z.string()
-    .email('Email invalide')
+    .email('Veuillez fournir une adresse e-mail valide.')
     .toLowerCase()
     .trim(),
     
   otp: z.string()
-    .length(6, 'Le code doit contenir exactement 6 chiffres')
-    .regex(/^\d+$/, 'Le code ne doit contenir que des chiffres'),
+    .length(6, 'Le code de sécurité doit contenir exactement 6 chiffres.')
+    .regex(/^\d+$/, 'Le code ne doit contenir que des chiffres.'),
     
   newPassword: z.string()
-    .min(8, 'Mot de passe: 8 caractères minimum')
-    .max(128, 'Mot de passe trop long')
+    .min(8, 'Le nouveau mot de passe doit faire au moins 8 caractères.')
+    .max(128, 'Le nouveau mot de passe est trop long.')
     .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/, 
-      '1 majuscule, 1 minuscule, 1 chiffre, 1 symbole requis')
+      'Pour votre sécurité, le mot de passe doit inclure une majuscule, un chiffre et un symbole.')
 }).strict();
 
 module.exports = {

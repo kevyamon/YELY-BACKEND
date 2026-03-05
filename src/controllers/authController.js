@@ -4,10 +4,10 @@
 
 const User = require('../models/User');
 const authService = require('../services/authService');
-const { successResponse, errorResponse } = require('../utils/responseHandler');
+const { successResponse } = require('../utils/responseHandler');
 const { generateAccessToken, generateRefreshToken, setRefreshTokenCookie, clearRefreshTokenCookie } = require('../utils/tokenService'); 
 
-const registerUser = async (req, res) => {
+const registerUser = async (req, res, next) => {
   try {
     const user = await authService.register(req.body);
 
@@ -34,20 +34,20 @@ const registerUser = async (req, res) => {
       user: userData, 
       accessToken, 
       refreshToken: refreshTokenStr 
-    }, 'Compte cree avec succes', 201);
+    }, 'Compte crée avec succès', 201);
 
   } catch (error) {
-    const statusCode = error.statusCode || 500;
-    return errorResponse(res, error.message || "Erreur interne lors de l'inscription.", statusCode);
+    return next(error);
   }
 };
 
-const loginUser = async (req, res) => {
+const loginUser = async (req, res, next) => {
   try {
     const { identifier, password } = req.body;
 
     if (!identifier || !password) {
-      return errorResponse(res, "Veuillez fournir un identifiant et un mot de passe.", 400);
+      const AppError = require('../utils/AppError');
+      throw new AppError("Veuillez fournir un identifiant et un mot de passe.", 400);
     }
 
     const user = await authService.login(identifier, password);
@@ -75,61 +75,55 @@ const loginUser = async (req, res) => {
       user: userData, 
       accessToken, 
       refreshToken: refreshTokenStr 
-    }, 'Connexion reussie', 200);
+    }, 'Connexion réussie', 200);
 
   } catch (error) {
-    const statusCode = error.statusCode || 500;
-    return errorResponse(res, error.message || "Erreur interne lors de la connexion.", statusCode);
+    return next(error);
   }
 };
 
-const logoutUser = async (req, res) => {
+const logoutUser = async (req, res, next) => {
   try {
     clearRefreshTokenCookie(res);
-    return successResponse(res, null, 'Deconnexion reussie', 200);
+    return successResponse(res, null, 'Déconnexion réussie', 200);
   } catch (error) {
-    return errorResponse(res, "Erreur lors de la deconnexion.", 500);
+    return next(error);
   }
 };
 
-const forgotPassword = async (req, res) => {
+const forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
     await authService.forgotPassword(email);
-    return successResponse(res, null, "Si cette adresse email est associee a un compte, un code de reinitialisation y a ete envoye.", 200);
+    return successResponse(res, null, "Si cette adresse e-mail est associée à un compte, un code de réinitialisation y a été envoyé.", 200);
   } catch (error) {
-    const statusCode = error.statusCode || 500;
-    return errorResponse(res, error.message || "Erreur lors de la demande de reinitialisation.", statusCode);
+    return next(error);
   }
 };
 
-const resetPassword = async (req, res) => {
+const resetPassword = async (req, res, next) => {
   try {
     const { email, otp, newPassword } = req.body;
     await authService.resetPasswordWithOtp(email, otp, newPassword);
-    return successResponse(res, null, "Votre mot de passe a ete reinitialise avec succes. Vous pouvez maintenant vous connecter.", 200);
+    return successResponse(res, null, "Votre mot de passe a été réinitialisé avec succès. Vous pouvez maintenant vous connecter.", 200);
   } catch (error) {
-    const statusCode = error.statusCode || 400;
-    return errorResponse(res, error.message || "Erreur lors de la reinitialisation du mot de passe.", statusCode);
+    return next(error);
   }
 };
 
-const refreshToken = async (req, res) => {
+const refreshToken = async (req, res, next) => {
   try {
-    console.info('[AUTH_CONTROLLER] Requete de rafraichissement recue.');
     let token = req.body.refreshToken;
     
     if (!token && req.cookies && req.cookies.refreshToken) {
-      console.info('[AUTH_CONTROLLER] Token absent du body, recuperation depuis les cookies.');
       token = req.cookies.refreshToken;
     }
 
     if (!token) {
-       console.warn('[AUTH_CONTROLLER_FATAL] Aucun refresh token fourni par le client (ni body, ni cookie).');
-       return errorResponse(res, "Refresh token manquant", 401);
+       const AppError = require('../utils/AppError');
+       throw new AppError("Session invalide ou expirée.", 401);
     }
     
-    console.info('[AUTH_CONTROLLER] Validation de la session en cours...');
     const user = await authService.validateSessionForRefresh(token);
 
     const newAccessToken = generateAccessToken(user._id.toString(), user.role);
@@ -151,40 +145,35 @@ const refreshToken = async (req, res) => {
       subscription: user.subscription 
     };
 
-    console.info(`[AUTH_CONTROLLER_SUCCESS] Token rafraichi avec succes pour l'utilisateur: ${user._id}`);
-
     return successResponse(res, { 
       user: userData,
       accessToken: newAccessToken, 
       refreshToken: newRefreshToken 
-    }, "Token rafraichi silencieusement", 200);
+    }, "Session rafraîchie", 200);
 
   } catch (error) {
-    console.error('[AUTH_CONTROLLER_FATAL] Echec critique du Refresh Token. Raison:', error.message);
     clearRefreshTokenCookie(res); 
-    const statusCode = error.statusCode || 401;
-    return errorResponse(res, error.message || "Session definitivement invalide", statusCode);
+    return next(error);
   }
 };
 
-const updateAvailability = async (req, res) => {
+const updateAvailability = async (req, res, next) => {
   try {
     const { isAvailable } = req.body;
     const user = await authService.updateAvailability(req.user._id, isAvailable);
-    return successResponse(res, { isAvailable: user.isAvailable }, "Disponibilite mise a jour", 200);
+    return successResponse(res, { isAvailable: user.isAvailable }, "Disponibilité mise à jour", 200);
   } catch (error) {
-    const statusCode = error.statusCode || 500;
-    return errorResponse(res, error.message || "Erreur de mise a jour", statusCode);
+    return next(error);
   }
 };
 
-const updateFcmToken = async (req, res) => {
+const updateFcmToken = async (req, res, next) => {
   try {
     const { fcmToken } = req.body;
     await User.findByIdAndUpdate(req.user._id, { fcmToken });
-    return successResponse(res, null, "Token FCM mis a jour", 200);
+    return successResponse(res, null, "Token système mis à jour", 200);
   } catch (error) {
-    return errorResponse(res, "Erreur de mise a jour", 500);
+    return next(error);
   }
 };
 

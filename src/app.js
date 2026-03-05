@@ -3,6 +3,7 @@
 // CSCSM Level: Bank Grade
 
 const express = require('express');
+const Sentry = require('@sentry/node');
 const helmet = require('helmet');
 const cors = require('cors');
 const hpp = require('hpp');
@@ -23,6 +24,16 @@ const adminRoutes = require('./routes/adminRoutes');
 const userRoutes = require('./routes/userRoutes');
 const healthRoutes = require('./routes/healthRoutes');
 const poiRoutes = require('./routes/poiRoutes');
+
+// Initialisation de Sentry au tout début pour capter les erreurs globales
+if (env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: env.SENTRY_DSN,
+    environment: env.NODE_ENV,
+    tracesSampleRate: env.NODE_ENV === 'production' ? 0.2 : 1.0,
+  });
+  logger.info('[SENTRY] Monitoring des erreurs active.');
+}
 
 const app = express();
 
@@ -96,8 +107,6 @@ app.use(`${API_V1_PREFIX}/users`, userRoutes);
 app.use(`${API_V1_PREFIX}/rides`, rideRoutes);
 app.use(`${API_V1_PREFIX}/subscriptions`, subscriptionRoutes);
 app.use(`${API_V1_PREFIX}/admin`, adminRoutes);
-
-// --- NOUVELLES ROUTES ---
 app.use(`${API_V1_PREFIX}/notifications`, require('./routes/notificationRoutes'));
 app.use(`${API_V1_PREFIX}/reports`, require('./routes/reportRoutes'));
 app.use(`${API_V1_PREFIX}/pois`, poiRoutes);
