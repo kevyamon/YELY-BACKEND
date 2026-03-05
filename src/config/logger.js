@@ -37,19 +37,28 @@ const redactFormat = winston.format((info) => {
   return info;
 });
 
-// INTERCEPTEUR SENTRY POUR WINSTON
-const SentryTransport = new winston.transports.Stream({
-  stream: {
-    write: (info) => {
-      if (info.level === 'error') {
-        Sentry.captureException(new Error(info.message), {
-          extra: info
-        });
-      }
+// CORRECTION : Creation d'un vrai Transport Winston personnalise au lieu d'un faux Stream
+class CustomSentryTransport extends winston.Transport {
+  constructor(opts) {
+    super(opts);
+  }
+
+  log(info, callback) {
+    setImmediate(() => {
+      this.emit('logged', info);
+    });
+
+    if (info.level === 'error') {
+      Sentry.captureException(new Error(info.message), {
+        extra: info
+      });
     }
-  },
-  level: 'error'
-});
+    
+    if (callback) {
+      callback();
+    }
+  }
+}
 
 const levels = { error: 0, warn: 1, info: 2, http: 3, debug: 4 };
 const colors = { error: 'red', warn: 'yellow', info: 'green', http: 'magenta', debug: 'white' };
@@ -86,7 +95,7 @@ const transportsList = [
 ];
 
 if (process.env.SENTRY_DSN) {
-  transportsList.push(SentryTransport);
+  transportsList.push(new CustomSentryTransport({ level: 'error' }));
 }
 
 const logger = winston.createLogger({
