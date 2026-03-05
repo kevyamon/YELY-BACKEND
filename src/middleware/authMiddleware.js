@@ -72,11 +72,11 @@ const protect = async (req, res, next) => {
       throw new AppError(`Compte suspendu: ${user.banReason || 'Raison non spécifiée'}`, 403);
     }
 
-    // 6. Anti-Tampering (Rôle Token vs DB)
+    // 6. Synchronisation dynamique du rôle (Évite la déconnexion forcée)
     if (decoded.role && decoded.role !== user.role) {
-      logger.error(`[AUTH MISMATCH] Rôle Token (${decoded.role}) != DB (${user.role}) pour ${user.email}`);
-      await redisClient.del(cacheKey); // On purge le cache corrompu
-      throw new AppError('Vos permissions ont changé. Veuillez vous reconnecter.', 403);
+      logger.info(`[AUTH SYNC] Rôle Token (${decoded.role}) différent de la DB (${user.role}) pour ${user.email}. Application du nouveau rôle en temps réel.`);
+      // Nous ne jetons plus d'erreur 403 ici. L'utilisateur continue sa navigation, 
+      // et le système utilise ses nouveaux droits (user.role) issus de la base de données.
     }
 
     // 7. Attachement User Sécurisé
