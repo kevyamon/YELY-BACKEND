@@ -1,22 +1,22 @@
-// backend/src/validations/rideValidation.js
+// src/validations/rideValidation.js
 // CONTRATS DE DONNEES RIDE - Zod Flexible & Messages Explicites
 // CSCSM Level: Bank Grade
 
 const { z } = require('zod');
 
 const coordinatesSchema = z.tuple([
-  z.number({ required_error: "Longitude requise", invalid_type_error: "La longitude doit etre un nombre" })
-    .min(-180, "Longitude minimale -180")
-    .max(180, "Longitude maximale 180"),
-  z.number({ required_error: "Latitude requise", invalid_type_error: "La latitude doit etre un nombre" })
-    .min(-90, "Latitude minimale -90")
-    .max(90, "Latitude maximale 90")
+  z.number({ required_error: "La position géographique (longitude) est requise.", invalid_type_error: "Format de longitude invalide." })
+    .min(-180, "Position invalide.")
+    .max(180, "Position invalide."),
+  z.number({ required_error: "La position géographique (latitude) est requise.", invalid_type_error: "Format de latitude invalide." })
+    .min(-90, "Position invalide.")
+    .max(90, "Position invalide.")
 ]);
 
 const pointSchema = z.object({
-  address: z.string({ required_error: "Adresse requise" })
-    .min(5, "Adresse trop courte")
-    .max(200, "Adresse trop longue")
+  address: z.string({ required_error: "Veuillez fournir une adresse valide." })
+    .min(5, "L'adresse indiquée est trop courte.")
+    .max(200, "L'adresse indiquée est trop longue.")
     .trim(),
   coordinates: coordinatesSchema
 }); 
@@ -24,48 +24,46 @@ const pointSchema = z.object({
 const requestRideSchema = z.object({
   origin: pointSchema,
   destination: pointSchema,
-  // Le forfait est conserve pour la retrocompatibilite mais rendu passif
   forfait: z.enum(['ECHO', 'STANDARD', 'VIP']).optional().default('STANDARD'),
-  // Ajout strict du nombre de passagers pour eviter la suppression silencieuse par Zod
-  passengersCount: z.number({ invalid_type_error: "Le nombre de passagers doit etre un nombre" })
-    .int("Le nombre de passagers doit etre un entier")
-    .min(1, "Il faut au moins 1 passager")
-    .max(4, "Maximum 4 passagers autorises")
+  passengersCount: z.number({ invalid_type_error: "Le nombre de passagers doit être un nombre." })
+    .int("Le nombre de passagers doit être un entier.")
+    .min(1, "Il faut au moins 1 passager pour la course.")
+    .max(4, "Le nombre maximum de passagers autorisés est de 4.")
     .optional()
     .default(1)
 }); 
 
 const rideActionSchema = z.object({
   rideId: z.string({
-    required_error: "L'ID de la course est requis",
-    invalid_type_error: "L'ID doit etre une chaine de caracteres"
+    required_error: "L'identifiant de la course est manquant.",
+    invalid_type_error: "L'identifiant de la course est invalide."
   })
   .trim()
-  .regex(/^[0-9a-fA-F]{24}$/, 'ID de course invalide')
+  .regex(/^[0-9a-fA-F]{24}$/, 'Identifiant de course non reconnu.')
 }); 
 
 const submitPriceSchema = z.object({
   rideId: z.string({
-    required_error: "L'ID de la course est requis",
-    invalid_type_error: "L'ID doit etre une chaine de caracteres"
+    required_error: "L'identifiant de la course est manquant.",
+    invalid_type_error: "L'identifiant de la course est invalide."
   })
   .trim()
-  .regex(/^[0-9a-fA-F]{24}$/, 'ID de course invalide'),
+  .regex(/^[0-9a-fA-F]{24}$/, 'Identifiant de course non reconnu.'),
   amount: z.number({
-    required_error: "Le montant est requis",
-    invalid_type_error: "Le montant doit etre un nombre"
-  }).positive('Le montant doit etre positif')
+    required_error: "Veuillez indiquer un montant.",
+    invalid_type_error: "Le montant proposé doit être un nombre valide."
+  }).positive('Le montant proposé doit être supérieur à zéro.')
 }); 
 
 const finalizeRideSchema = z.object({
   rideId: z.string({
-    required_error: "L'ID de la course est requis",
-    invalid_type_error: "L'ID doit etre une chaine de caracteres"
+    required_error: "L'identifiant de la course est manquant.",
+    invalid_type_error: "L'identifiant de la course est invalide."
   })
   .trim()
-  .regex(/^[0-9a-fA-F]{24}$/, 'ID de course invalide'),
+  .regex(/^[0-9a-fA-F]{24}$/, 'Identifiant de course non reconnu.'),
   decision: z.enum(['ACCEPTED', 'REJECTED'], {
-    errorMap: () => ({ message: 'Decision invalide (ACCEPTED ou REJECTED)' })
+    errorMap: () => ({ message: 'La décision doit être soit acceptée, soit refusée.' })
   })
 }); 
 

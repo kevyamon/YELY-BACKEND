@@ -6,14 +6,14 @@ const rideService = require('../../services/rideService');
 const User = require('../../models/User');
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
-const { successResponse, errorResponse } = require('../../utils/responseHandler');
+const { successResponse } = require('../../utils/responseHandler');
 
-const markAsArrived = async (req, res) => {
+const markAsArrived = async (req, res, next) => {
   try {
     const { rideId } = req.body;
     
     if (!rideId) {
-      throw new AppError('ID de la course manquant.', 400);
+      throw new AppError('L\'identifiant de la course est manquant.', 400);
     }
 
     const ride = await rideService.markRideAsArrived(req.user._id, rideId);
@@ -27,16 +27,16 @@ const markAsArrived = async (req, res) => {
     
     return successResponse(res, { status: 'arrived' }, 'Chauffeur sur place');
   } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || 500);
+    return next(error);
   }
 };
 
-const startRide = async (req, res) => {
+const startRide = async (req, res, next) => {
   try {
     const { rideId } = req.body;
     
     if (!rideId) {
-      throw new AppError('ID de la course manquant.', 400);
+      throw new AppError('L\'identifiant de la course est manquant.', 400);
     }
 
     const ride = await rideService.startRideSession(req.user._id, rideId);
@@ -46,20 +46,20 @@ const startRide = async (req, res) => {
       startedAt: ride.startedAt 
     });
     
-    logger.info(`[RIDE EXECUTION] Course ${rideId} demarree (Statut: in_progress). Driver ID: ${req.user._id}`);
+    logger.info(`[RIDE EXECUTION] Course ${rideId} démarrée (Statut: in_progress). Driver ID: ${req.user._id}`);
     
     return successResponse(res, { status: 'in_progress' }, 'En route');
   } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || 500);
+    return next(error);
   }
 };
 
-const completeRide = async (req, res) => {
+const completeRide = async (req, res, next) => {
   try {
     const { rideId } = req.body;
     
     if (!rideId) {
-      throw new AppError('ID de la course manquant.', 400);
+      throw new AppError('L\'identifiant de la course est manquant.', 400);
     }
 
     const ride = await rideService.completeRideSession(req.user._id, rideId);
@@ -77,7 +77,7 @@ const completeRide = async (req, res) => {
       finalPrice: ride.price 
     });
     
-    logger.info(`[RIDE EXECUTION] Course ${rideId} terminee. Driver ID: ${req.user._id}. Prix final: ${ride.price}`);
+    logger.info(`[RIDE EXECUTION] Course ${rideId} terminée. Driver ID: ${req.user._id}. Prix final: ${ride.price}`);
     
     return successResponse(res, { 
       status: 'completed', 
@@ -87,49 +87,48 @@ const completeRide = async (req, res) => {
         totalEarnings: updatedDriver.totalEarnings,
         rating: updatedDriver.rating
       }
-    }, 'Course achevee');
+    }, 'Course achevée');
   } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || 500);
+    return next(error);
   }
 };
 
-const rateRide = async (req, res) => {
+const rateRide = async (req, res, next) => {
   try {
     const rideId = req.params.id;
     const { rating, comment } = req.body;
     
-    if (!rideId) throw new AppError('ID de la course manquant.', 400);
-    if (!rating || rating < 1 || rating > 5) throw new AppError('Note invalide (1 a 5).', 400);
+    if (!rideId) throw new AppError('L\'identifiant de la course est manquant.', 400);
+    if (!rating || rating < 1 || rating > 5) throw new AppError('La note doit être comprise entre 1 et 5.', 400);
 
     await rideService.submitRideRating(rideId, rating, comment);
 
-    return successResponse(res, { status: 'rated' }, 'Note enregistree avec succes');
+    return successResponse(res, { status: 'rated' }, 'Note enregistrée avec succès');
   } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || 500);
+    return next(error);
   }
 };
 
-const getRideHistory = async (req, res) => {
+const getRideHistory = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     
     const result = await rideService.getRideHistory(req.user, page, limit);
     
-    return successResponse(res, result, 'Historique recupere');
+    return successResponse(res, result, 'Historique récupéré');
   } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || 500);
+    return next(error);
   }
 };
 
-// 🚀 AJOUT SENIOR : Le controleur pour masquer de l'historique
-const hideFromHistory = async (req, res) => {
+const hideFromHistory = async (req, res, next) => {
   try {
     const { id } = req.params;
     await rideService.hideRideFromHistory(req.user, id);
     return successResponse(res, null, 'Course supprimée de votre historique.');
   } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || 500);
+    return next(error);
   }
 };
 
