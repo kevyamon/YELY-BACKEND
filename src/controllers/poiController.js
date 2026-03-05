@@ -38,8 +38,8 @@ exports.createPOI = async (req, res, next) => {
   try {
     const newPOI = await POI.create(req.body);
     
-    // TEMPS RÉEL : On notifie tous les clients connectés
-    const io = req.app.get('io');
+    // TEMPS RÉEL : On notifie tous les clients connectés via socketio
+    const io = req.app.get('socketio');
     if (io) {
       io.emit('poi_updated', { action: 'create', poi: newPOI });
     }
@@ -87,8 +87,8 @@ exports.updatePOI = async (req, res, next) => {
       runValidators: true,
     });
 
-    // TEMPS RÉEL
-    const io = req.app.get('io');
+    // TEMPS RÉEL via socketio
+    const io = req.app.get('socketio');
     if (io) {
       io.emit('poi_updated', { action: 'update', poi });
     }
@@ -128,8 +128,8 @@ exports.deletePOI = async (req, res, next) => {
     // Si le lieu est libre, suppression immédiate
     await POI.findByIdAndDelete(req.params.id);
 
-    // TEMPS RÉEL
-    const io = req.app.get('io');
+    // TEMPS RÉEL via socketio
+    const io = req.app.get('socketio');
     if (io) {
       io.emit('poi_deleted', { id: req.params.id });
     }
@@ -155,7 +155,7 @@ exports.bulkImportPOIs = async (req, res, next) => {
 
     const insertedPOIs = await POI.insertMany(poisArray, { ordered: false });
 
-    const io = req.app.get('io');
+    const io = req.app.get('socketio');
     if (io) {
       io.emit('poi_updated', { action: 'bulk' });
     }
@@ -168,7 +168,7 @@ exports.bulkImportPOIs = async (req, res, next) => {
   } catch (error) {
     logger.error(`Erreur lors de l'import de masse: ${error.message}`);
     if (error.code === 11000) {
-      const io = req.app.get('io');
+      const io = req.app.get('socketio');
       if (io) io.emit('poi_updated', { action: 'bulk_partial' });
 
       return res.status(207).json({
