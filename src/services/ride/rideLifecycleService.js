@@ -203,10 +203,12 @@ const emergencyCancelUserRides = async (userId) => {
     await userRepository.updateDriverAvailability(driverId, true);
   }
 
+  // RETOUR CORRIGÉ : On renvoie les courses actives pour pouvoir lire leurs origines/destinations dans le contrôleur
   return { 
     count: activeRides.length, 
     ridesCleared: rideIdsToCancel, 
-    driversFreed: driverIdsToFree 
+    driversFreed: driverIdsToFree,
+    cancelledRides: activeRides 
   };
 };
 
@@ -294,6 +296,11 @@ const cancelSearchTimeout = async (io, rideId) => {
     });
     
     io.emit('ride_taken_by_other', { rideId }); 
+
+    // DECLENCHEUR TEMPS REEL (Timeout) : Libération au cas où la course expire sans chauffeur
+    const poiController = require('../../controllers/poiController');
+    if (ride.origin?.address) await poiController.releasePendingPOI(ride.origin.address, io);
+    if (ride.destination?.address) await poiController.releasePendingPOI(ride.destination.address, io);
   }
 };
 

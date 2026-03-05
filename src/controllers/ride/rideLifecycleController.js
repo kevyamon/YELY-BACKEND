@@ -3,6 +3,7 @@
 // STANDARD: Industriel / Bank Grade
 
 const rideService = require('../../services/ride/rideLifecycleService'); 
+const poiController = require('../poiController'); // IMPORT SENIOR: Libérateur de lieux
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 const { successResponse } = require('../../utils/responseHandler');
@@ -87,6 +88,14 @@ const cancelRide = async (req, res, next) => {
        io.to(ride.rider.toString()).emit('ride_cancelled', { rideId });
     }
 
+    // DECLENCHEUR TEMPS REEL : Libération des lieux en attente suite à l'annulation
+    if (ride.origin?.address) {
+      await poiController.releasePendingPOI(ride.origin.address, io);
+    }
+    if (ride.destination?.address) {
+      await poiController.releasePendingPOI(ride.destination.address, io);
+    }
+
     return successResponse(res, { status: 'cancelled' }, 'Course annulée avec succès');
   } catch (error) {
     return next(error);
@@ -104,6 +113,18 @@ const emergencyCancel = async (req, res, next) => {
           message: 'La course a été annulée suite à une réinitialisation du client.'
         });
       });
+    }
+
+    // DECLENCHEUR TEMPS REEL (Urgence) : Libération de tous les lieux bloqués par ces courses
+    if (result.cancelledRides && result.cancelledRides.length > 0) {
+      for (const ride of result.cancelledRides) {
+        if (ride.origin?.address) {
+          await poiController.releasePendingPOI(ride.origin.address, io);
+        }
+        if (ride.destination?.address) {
+          await poiController.releasePendingPOI(ride.destination.address, io);
+        }
+      }
     }
 
     return successResponse(res, result, 'Base de données nettoyée avec succès');

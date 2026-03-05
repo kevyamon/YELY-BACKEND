@@ -1,10 +1,21 @@
-// src/controllers/poiController.js [CORRIGÉ]
-// CONTRÔLEUR DES LIEUX - Logique métier (Ajout, Lecture, Modification, Suppression)
+// src/controllers/poiController.js
+// CONTRÔLEUR DES LIEUX - Logique métier (Ajout, Lecture, Modification, Suppression, File d'attente)
 // CSCSM Level: Bank Grade
 
 const POI = require('../models/POI');
+const Ride = require('../models/Ride'); // Ajout pour la vérification des conflits
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
+
+// Fonction utilitaire interne : Vérifie si un lieu est verrouillé par une course active
+const isPoiInUse = async (poiName) => {
+  const activeStatuses = ['searching', 'negotiating', 'accepted', 'arrived', 'in_progress'];
+  const inUse = await Ride.exists({
+    status: { $in: activeStatuses },
+    $or: [{ 'origin.address': poiName }, { 'destination.address': poiName }]
+  });
+  return !!inUse;
+};
 
 // 1. Lire tous les lieux actifs (Pour l'application mobile des utilisateurs)
 exports.getAllPOIs = async (req, res, next) => {
@@ -49,14 +60,32 @@ exports.createPOI = async (req, res, next) => {
 // 3. Modifier un lieu existant (Pour le SuperAdmin)
 exports.updatePOI = async (req, res, next) => {
   try {
+    const poiToUpdate = await POI.findById(req.params.id);
+    if (!poiToUpdate) {
+      return next(new AppError('Aucun lieu trouvé avec cet identifiant', 404));
+    }
+
+    // VÉRIFICATION DE CONFLIT : Le lieu est-il en cours d'utilisation ?
+    const inUse = await isPoiInUse(poiToUpdate.name);
+    
+    if (inUse) {
+      poiToUpdate.pendingAction = 'UPDATE';
+      poiToUpdate.pendingData = req.body;
+      await poiToUpdate.save();
+      
+      return res.status(202).json({
+        success: true,
+        message: 'Ce lieu est actuellement utilisé par une course. La modification a été mise en attente et s\'appliquera automatiquement à la fin de la course.',
+        data: poiToUpdate,
+        isPending: true
+      });
+    }
+
+    // Si le lieu est libre, modification immédiate
     const poi = await POI.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
       runValidators: true,
     });
-
-    if (!poi) {
-      return next(new AppError('Aucun lieu trouvé avec cet identifiant', 404));
-    }
 
     // TEMPS RÉEL
     const io = req.app.get('io');
@@ -77,11 +106,27 @@ exports.updatePOI = async (req, res, next) => {
 // 4. Supprimer un lieu (Pour le SuperAdmin)
 exports.deletePOI = async (req, res, next) => {
   try {
-    const poi = await POI.findByIdAndDelete(req.params.id);
-
+    const poi = await POI.findById(req.params.id);
     if (!poi) {
       return next(new AppError('Aucun lieu trouvé avec cet identifiant', 404));
     }
+
+    // VÉRIFICATION DE CONFLIT
+    const inUse = await isPoiInUse(poi.name);
+    
+    if (inUse) {
+      poi.pendingAction = 'DELETE';
+      await poi.save();
+      
+      return res.status(202).json({
+        success: true,
+        message: 'Ce lieu est actuellement utilisé par une course. La suppression a été mise en attente et s\'exécutera automatiquement à la fin de la course.',
+        isPending: true
+      });
+    }
+
+    // Si le lieu est libre, suppression immédiate
+    await POI.findByIdAndDelete(req.params.id);
 
     // TEMPS RÉEL
     const io = req.app.get('io');
@@ -110,7 +155,6 @@ exports.bulkImportPOIs = async (req, res, next) => {
 
     const insertedPOIs = await POI.insertMany(poisArray, { ordered: false });
 
-    // TEMPS RÉEL : On notifie d'un changement global
     const io = req.app.get('io');
     if (io) {
       io.emit('poi_updated', { action: 'bulk' });
@@ -133,5 +177,32 @@ exports.bulkImportPOIs = async (req, res, next) => {
       });
     }
     next(new AppError("Erreur lors de l'importation de masse des lieux.", 500));
+  }
+};
+
+// 6. LIBÉRATEUR DE FILE D'ATTENTE (Fonction système appelée par le rideExecutionService)
+exports.releasePendingPOI = async (poiName, io) => {
+  try {
+    const poi = await POI.findOne({ name: poiName, pendingAction: { $ne: 'NONE' } });
+    if (!poi) return; // Aucune action en attente pour ce lieu
+
+    // Ultime vérification : Ce lieu est-il utilisé par UNE AUTRE course simultanément ?
+    const inUse = await isPoiInUse(poiName);
+    if (inUse) return; // Toujours verrouillé, on annule la libération
+
+    if (poi.pendingAction === 'DELETE') {
+      await POI.findByIdAndDelete(poi._id);
+      if (io) io.emit('poi_deleted', { id: poi._id });
+      logger.info(`[POI SYSTEM] Exécution différée : Suppression du lieu ${poiName}`);
+    } else if (poi.pendingAction === 'UPDATE') {
+      Object.assign(poi, poi.pendingData);
+      poi.pendingAction = 'NONE';
+      poi.pendingData = {};
+      await poi.save();
+      if (io) io.emit('poi_updated', { action: 'update', poi });
+      logger.info(`[POI SYSTEM] Exécution différée : Mise à jour du lieu ${poiName}`);
+    }
+  } catch (error) {
+    logger.error(`[POI ERROR] Échec lors de la libération différée du lieu ${poiName}: ${error.message}`);
   }
 };

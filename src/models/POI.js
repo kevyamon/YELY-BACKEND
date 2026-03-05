@@ -1,4 +1,4 @@
-// src/models/POI.js [NOUVEAU]
+// src/models/POI.js
 // MODÈLE DE BASE DE DONNÉES - Points d'Intérêt (Lieux)
 // CSCSM Level: Bank Grade
 
@@ -31,6 +31,16 @@ const poiSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true, // Permet de désactiver un lieu sans le supprimer définitivement
+    },
+    // AJOUTS SENIOR : Système de file d'attente (Pending State)
+    pendingAction: {
+      type: String,
+      enum: ['NONE', 'UPDATE', 'DELETE'],
+      default: 'NONE',
+    },
+    pendingData: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     }
   },
   {

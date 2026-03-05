@@ -1,15 +1,15 @@
 // src/services/ride/rideExecutionService.js
-// SERVICE METIER - Execution de la course, Geofencing et Notation
+// SERVICE METIER - Execution de la course, Geofencing, Notation et Libération POI
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
 const Ride = require('../../models/Ride');
 const User = require('../../models/User');
 const userRepository = require('../../repositories/userRepository');
+const poiController = require('../../controllers/poiController'); // Import du libérateur
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 
-// Duplique volontairement pour eviter les dependances circulaires inter-services
 const calculateHaversineDistance = (coords1, coords2) => {
   const [lng1, lat1] = coords1;
   const [lng2, lat2] = coords2;
@@ -83,7 +83,8 @@ const startRideSession = async (driverId, rideId) => {
   return ride;
 };
 
-const completeRideSession = async (driverId, rideId) => {
+// MODIFICATION SENIOR : Injection de 'io' pour libérer les POIs en attente
+const completeRideSession = async (driverId, rideId, io) => {
   const session = await mongoose.startSession();
   let result;
   
@@ -136,6 +137,17 @@ const completeRideSession = async (driverId, rideId) => {
   } finally {
     await session.endSession();
   }
+
+  // DECLENCHEUR TEMPS RÉEL : On libère les actions fantômes éventuelles sur l'origine ou la destination
+  if (result && io) {
+    if (result.origin?.address) {
+      await poiController.releasePendingPOI(result.origin.address, io);
+    }
+    if (result.destination?.address) {
+      await poiController.releasePendingPOI(result.destination.address, io);
+    }
+  }
+
   return result;
 };
 
@@ -217,7 +229,6 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
   }
 };
 
-// 🚀 MODIFICATION SENIOR : Exclure les courses masquées (Soft Delete)
 const getRideHistory = async (user, page = 1, limit = 20) => {
   const skip = (page - 1) * limit;
   const filter = {};
@@ -226,7 +237,6 @@ const getRideHistory = async (user, page = 1, limit = 20) => {
     filter.driver = user._id;
     filter.hiddenForDriver = { $ne: true };
   } else {
-    // Si ce n'est pas un chauffeur, c'est le passager
     filter.rider = user._id;
     filter.hiddenForRider = { $ne: true };
   }
@@ -254,7 +264,6 @@ const getRideHistory = async (user, page = 1, limit = 20) => {
   };
 };
 
-// 🚀 AJOUT SENIOR : Fonction pour masquer la course individuellement
 const hideRideFromHistory = async (user, rideId) => {
   const ride = await Ride.findById(rideId);
   if (!ride) throw new AppError("Course introuvable.", 404);

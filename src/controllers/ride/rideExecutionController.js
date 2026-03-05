@@ -62,10 +62,11 @@ const completeRide = async (req, res, next) => {
       throw new AppError('L\'identifiant de la course est manquant.', 400);
     }
 
-    const ride = await rideService.completeRideSession(req.user._id, rideId);
+    // MODIFICATION : Récupération de l'instance socketio et injection dans le service
+    const io = req.app.get('socketio');
+    const ride = await rideService.completeRideSession(req.user._id, rideId, io);
     
     const updatedDriver = await User.findById(req.user._id).select('totalRides totalEarnings rating');
-    const io = req.app.get('socketio');
 
     io.to(ride.rider.toString()).emit('ride_completed', { 
       rideId: ride._id, 
