@@ -167,7 +167,7 @@ const getDashboardStats = async (req, res) => {
 
 const getAllUsers = async (req, res) => {
   try {
-    const result = await adminService.getAllUsers(req.query, req.user.role);
+    const result = await adminService.getAllUsers(req.query, req.user.role, req.user._id);
     return successResponse(res, { users: result.users, pagination: result.pagination }, "Utilisateurs recuperes.");
   } catch (error) {
     logger.error(`[ADMIN USERS] Erreur: ${error.message}`);
@@ -188,7 +188,6 @@ const togglePromo = async (req, res) => {
   try {
     const result = await adminService.togglePromo(req.body.isActive, req.user._id);
 
-    // AJOUT SENIOR: Diffusion temps réel globale
     try {
       const io = req.app.get('socketio');
       if (io) {
@@ -247,7 +246,6 @@ const toggleLoadReduce = async (req, res) => {
 
     settings.isLoadReduced = !settings.isLoadReduced;
     
-    // On réinitialise les compteurs pour repartir proprement sur un cycle de 3
     settings.weeklyCounter = 0;
     settings.monthlyCounter = 0;
     
@@ -256,7 +254,6 @@ const toggleLoadReduce = async (req, res) => {
     try {
       const io = req.app.get('socketio');
       if (io) {
-        // Optionnel : on informe uniquement le superadmin en direct
         io.to(req.user._id.toString()).emit('load_reduce_updated', { isLoadReduced: settings.isLoadReduced });
       }
     } catch (e) {

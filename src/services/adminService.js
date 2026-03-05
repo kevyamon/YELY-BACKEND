@@ -97,11 +97,9 @@ const approveTransaction = async (transactionId, validatorId) => {
 
   const daysToAdd = transaction.planId === 'WEEKLY' ? 7 : 30;
   
-  // CORRECTION SENIOR: Gestion propre de la date d'expiration
   if (!driver.subscription) driver.subscription = {};
   
   let newExpiryDate = new Date();
-  // Si le chauffeur a deja un abonnement actif et non expire, on additionne le temps
   if (driver.subscription.expiresAt && driver.subscription.expiresAt > new Date()) {
     newExpiryDate = new Date(driver.subscription.expiresAt);
   }
@@ -110,7 +108,6 @@ const approveTransaction = async (transactionId, validatorId) => {
   driver.subscription.expiresAt = newExpiryDate;
   driver.subscription.lastCheckTime = new Date();
   
-  // On force la synchronisation immediatement pour que les heures restantes soient exactes
   if (typeof driver.syncSubscription === 'function') {
     driver.syncSubscription();
   } else {
@@ -158,11 +155,10 @@ const rejectTransaction = async (transactionId, reason, validatorId) => {
   const driver = await User.findById(transaction.user);
   
   if (driver) {
-    // CORRECTION SENIOR: Annulation propre de l'abonnement
     if (!driver.subscription) driver.subscription = {};
     driver.subscription.isActive = false;
     driver.subscription.hoursRemaining = 0;
-    driver.subscription.expiresAt = null; // On supprime la date d'expiration
+    driver.subscription.expiresAt = null; 
     
     await driver.save();
 
@@ -229,12 +225,14 @@ const updateWaveLinks = async (weeklyLink, monthlyLink, requesterId) => {
   return { waveLinkWeekly: settings.waveLinkWeekly, waveLinkMonthly: settings.waveLinkMonthly };
 };
 
-const getAllUsers = async (query, userRole) => {
+const getAllUsers = async (query, userRole, requesterId) => {
   const page = Math.max(1, parseInt(query.page) || 1);
   const limit = Math.min(50, parseInt(query.limit) || 20);
   const skip = (page - 1) * limit;
 
-  const filter = {};
+  // AJOUT SENIOR: On exclut systématiquement l'utilisateur courant de la liste
+  const filter = { _id: { $ne: requesterId } };
+  
   if (userRole === 'admin') filter.role = { $ne: 'superadmin' };
   
   if (query.search) {
