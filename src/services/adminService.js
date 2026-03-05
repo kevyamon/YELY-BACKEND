@@ -1,5 +1,5 @@
 // src/services/adminService.js
-// LOGIQUE DE GOUVERNANCE - Diagnostics d'erreurs stricts et precis
+// LOGIQUE DE GOUVERNANCE - Diagnostics d'erreurs stricts et precis (Tolérant aux pannes Redis)
 // CSCSM Level: Bank Grade
 
 const User = require('../models/User');
@@ -230,7 +230,6 @@ const getAllUsers = async (query, userRole, requesterId) => {
   const limit = Math.min(50, parseInt(query.limit) || 20);
   const skip = (page - 1) * limit;
 
-  // AJOUT SENIOR: On exclut systématiquement l'utilisateur courant de la liste
   const filter = { _id: { $ne: requesterId } };
   
   if (userRole === 'admin') filter.role = { $ne: 'superadmin' };

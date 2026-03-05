@@ -1,5 +1,5 @@
 // src/middleware/authMiddleware.js
-// AUTHENTIFICATION FORTERESSE - Validation ObjectId, RBAC, Anti-tampering & CACHE REDIS
+// AUTHENTIFICATION FORTERESSE - Validation ObjectId, RBAC, Anti-tampering & CACHE REDIS (Tolérant aux pannes)
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
@@ -47,10 +47,17 @@ const protect = async (req, res, next) => {
       throw new AppError('Token corrompu.', 401);
     }
 
-    // 4. Vérification dans le cache Redis avant MongoDB (Scalabilité)
+    // 4. Vérification dans le cache Redis (AVEC FALLBACK SECURISÉ)
     const cacheKey = `auth:user:${decoded.userId}`;
-    let user;
-    const cachedUser = await redisClient.get(cacheKey);
+    let user = null;
+    let cachedUser = null;
+
+    // Tentative de lecture Redis sécurisée
+    try {
+      cachedUser = await redisClient.get(cacheKey);
+    } catch (redisError) {
+      logger.warn(`[REDIS FALLBACK] Impossible de lire le cache pour ${decoded.userId}, bascule vers MongoDB.`);
+    }
 
     if (cachedUser) {
       user = JSON.parse(cachedUser);
@@ -62,8 +69,12 @@ const protect = async (req, res, next) => {
         throw new AppError('L\'utilisateur appartenant à ce token n\'existe plus.', 401);
       }
       
-      // Mise en cache pour 15 min (aligné sur l'expiration du JWT)
-      await redisClient.setex(cacheKey, 900, JSON.stringify(user));
+      // Tentative d'écriture Redis sécurisée
+      try {
+        await redisClient.setex(cacheKey, 900, JSON.stringify(user));
+      } catch (redisError) {
+        // On ne fait rien, ce n'est pas grave si on ne peut pas mettre en cache
+      }
     }
 
     // 5. Vérification Ban
@@ -75,8 +86,13 @@ const protect = async (req, res, next) => {
     // 6. Synchronisation dynamique du rôle (Évite la déconnexion forcée)
     if (decoded.role && decoded.role !== user.role) {
       logger.info(`[AUTH SYNC] Rôle Token (${decoded.role}) différent de la DB (${user.role}) pour ${user.email}. Application du nouveau rôle en temps réel.`);
-      // Nous ne jetons plus d'erreur 403 ici. L'utilisateur continue sa navigation, 
-      // et le système utilise ses nouveaux droits (user.role) issus de la base de données.
+      
+      // Tentative de purge Redis sécurisée
+      try {
+        await redisClient.del(cacheKey); 
+      } catch (redisError) {
+        // Silencieux
+      }
     }
 
     // 7. Attachement User Sécurisé
@@ -102,7 +118,7 @@ const authorize = (...roles) => {
 };
 
 /**
- * Middleware authentification optionnelle
+ * Middleware authentification optionnelle (Avec Fallback Sécurisé)
  */
 const optionalAuth = async (req, res, next) => {
   try {
@@ -116,15 +132,23 @@ const optionalAuth = async (req, res, next) => {
     const decoded = verifyAccessToken(token);
     const cacheKey = `auth:user:${decoded.userId}`;
     
-    let user;
-    const cachedUser = await redisClient.get(cacheKey);
+    let user = null;
+    let cachedUser = null;
+
+    try {
+      cachedUser = await redisClient.get(cacheKey);
+    } catch (redisError) {
+      // Silencieux
+    }
     
     if (cachedUser) {
       user = JSON.parse(cachedUser);
     } else {
       user = await User.findById(decoded.userId).select('name email role isBanned').lean();
       if (user) {
-        await redisClient.setex(cacheKey, 900, JSON.stringify(user));
+        try {
+          await redisClient.setex(cacheKey, 900, JSON.stringify(user));
+        } catch (redisError) {}
       }
     }
 
