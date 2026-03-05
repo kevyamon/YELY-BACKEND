@@ -13,12 +13,15 @@ const MAX_ATTEMPTS = SECURITY_CONSTANTS?.MAX_LOGIN_ATTEMPTS || 5;
 const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000;
 
 const register = async (userData) => {
-  const existing = await User.findOne({
-    $or: [{ email: userData.email }, { phone: userData.phone }]
-  });
+  const emailExists = await User.findOne({ email: userData.email });
+  if (emailExists) throw new AppError('Cette adresse e-mail est deja associee a un compte.', 409);
 
-  if (existing) throw new AppError('Cet email ou ce numero est deja utilise.', 409);
-  if (userData.role && ['admin', 'superadmin'].includes(userData.role)) throw new AppError('Action non autorisee.', 403);
+  const phoneExists = await User.findOne({ phone: userData.phone });
+  if (phoneExists) throw new AppError('Ce numero de telephone est deja associe a un compte.', 409);
+
+  if (userData.role && ['admin', 'superadmin'].includes(userData.role)) {
+    throw new AppError('Action non autorisee.', 403);
+  }
 
   const user = await User.create(userData);
   return user;
@@ -53,7 +56,9 @@ const login = async (identifier, password) => {
       updates.loginAttempts = 0; 
     }
     await User.updateOne({ _id: user._id }, updates);
-    if (updates.lockUntil) throw new AppError(`Trop de tentatives echouees. Compte verrouille pour ${LOCK_WINDOW / 60000} minutes.`, 429);
+    if (updates.lockUntil) {
+      throw new AppError(`Trop de tentatives echouees. Compte verrouille pour ${LOCK_WINDOW / 60000} minutes.`, 429);
+    }
     throw new AppError('Identifiants incorrects.', 401);
   }
 
@@ -86,7 +91,7 @@ const forgotPassword = async (email) => {
     user.resetPasswordOtp = undefined;
     user.resetPasswordExpires = undefined;
     await user.save({ validateBeforeSave: false });
-    throw new AppError("Erreur lors de l'envoi de l'email.", 500);
+    throw new AppError("Erreur lors de l'envoi de l'e-mail.", 500);
   }
 
   return true;
@@ -97,12 +102,12 @@ const resetPasswordWithOtp = async (email, otp, newPassword) => {
     .select('+resetPasswordOtp +resetPasswordExpires');
 
   if (!user || !user.resetPasswordExpires || user.resetPasswordExpires < Date.now()) {
-    throw new AppError('Le code est invalide ou a expiré.', 400);
+    throw new AppError('Le code est invalide ou a expire.', 400);
   }
 
   const isValidOtp = await bcrypt.compare(otp.toString(), user.resetPasswordOtp);
   if (!isValidOtp) {
-    throw new AppError('Le code est invalide ou a expiré.', 400);
+    throw new AppError('Le code est invalide ou a expire.', 400);
   }
 
   user.password = newPassword;
@@ -119,13 +124,11 @@ const validateSessionForRefresh = async (token) => {
     const userId = decoded.userId || decoded.id || decoded._id || (typeof decoded === 'string' ? decoded : null);
     
     if (!userId) {
-      console.error('[AUTH_SERVICE] Payload invalide, aucun userId trouvé.', decoded);
-      throw new AppError('Structure du token illisible.', 401);
+      throw new AppError('Structure du jeton illisible.', 401);
     }
     
     const user = await User.findById(userId);
     if (!user) {
-      console.error(`[AUTH_SERVICE] Utilisateur introuvable pour l'ID: ${userId}`);
       throw new AppError('L\'utilisateur lie a cette session n\'existe plus.', 401);
     }
 
@@ -136,9 +139,8 @@ const validateSessionForRefresh = async (token) => {
     }
     return user;
   } catch (error) {
-    console.error('[AUTH_SERVICE] Echec validation session:', error.message);
     if (error.isOperational) throw error;
-    throw new AppError(`Echec de validation de session: ${error.message}`, 401);
+    throw new AppError(`Echec de validation de session.`, 401);
   }
 };
 

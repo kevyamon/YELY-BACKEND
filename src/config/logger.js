@@ -1,12 +1,12 @@
 // src/config/logger.js
-// SYSTEME DE LOGS CENTRALISE - Masquage PII (RGPD Compliant) & Stack Traces
+// SYSTEME DE LOGS CENTRALISE - Masquage PII (RGPD Compliant) & Sentry Integration
 // STANDARD: Industriel / Bank Grade
 
 const winston = require('winston');
 const path = require('path');
+const Sentry = require('@sentry/node');
 const { env } = require('./env');
 
-// SECURITE RGPD & PCI-DSS : Liste des champs sensibles (Credentials + PII)
 const SENSITIVE_FIELDS = [
   'password', 'token', 'accessToken', 'refreshToken', 'currentPassword', 'newPassword',
   'email', 'phone', 'idCard', 'license', 'insurance', 'fcmToken' 
@@ -37,6 +37,20 @@ const redactFormat = winston.format((info) => {
   return info;
 });
 
+// INTERCEPTEUR SENTRY POUR WINSTON
+const SentryTransport = new winston.transports.Stream({
+  stream: {
+    write: (info) => {
+      if (info.level === 'error') {
+        Sentry.captureException(new Error(info.message), {
+          extra: info
+        });
+      }
+    }
+  },
+  level: 'error'
+});
+
 const levels = { error: 0, warn: 1, info: 2, http: 3, debug: 4 };
 const colors = { error: 'red', warn: 'yellow', info: 'green', http: 'magenta', debug: 'white' };
 winston.addColors(colors);
@@ -56,25 +70,30 @@ const consoleFormat = winston.format.combine(
   })
 );
 
+const transportsList = [
+  new winston.transports.Console({ format: consoleFormat }),
+  new winston.transports.File({
+    filename: path.join('logs', 'error.log'),
+    level: 'error',
+    maxsize: 5242880, 
+    maxFiles: 5,
+  }),
+  new winston.transports.File({
+    filename: path.join('logs', 'all.log'),
+    maxsize: 10485760, 
+    maxFiles: 7,
+  })
+];
+
+if (process.env.SENTRY_DSN) {
+  transportsList.push(SentryTransport);
+}
+
 const logger = winston.createLogger({
   level: env.NODE_ENV === 'development' ? 'debug' : 'info',
   levels,
   format: baseFormat,
-  transports: [
-    new winston.transports.Console({ format: consoleFormat }),
-    new winston.transports.File({
-      filename: path.join('logs', 'error.log'),
-      level: 'error',
-      maxsize: 5242880, 
-      maxFiles: 5,
-    }),
-    new winston.transports.File({
-      filename: path.join('logs', 'all.log'),
-      maxsize: 10485760, 
-      maxFiles: 7,
-    }),
-  ],
-  // CAPTURE DES CRASHS FATALS (Nouveau filet de securite)
+  transports: transportsList,
   exceptionHandlers: [
     new winston.transports.Console({ format: consoleFormat }),
     new winston.transports.File({ filename: path.join('logs', 'exceptions.log') })
@@ -83,7 +102,7 @@ const logger = winston.createLogger({
     new winston.transports.Console({ format: consoleFormat }),
     new winston.transports.File({ filename: path.join('logs', 'rejections.log') })
   ],
-  exitOnError: false // Permet a Winston de loguer l'erreur avant que le processus ne soit tue
+  exitOnError: false 
 });
 
 module.exports = logger;
