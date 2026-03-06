@@ -85,29 +85,21 @@ const dispatchToNearbyDrivers = async (ride, radius) => {
 
 const expandSearchRadius = async (io, rideId) => {
   const ride = await Ride.findOne({ _id: rideId, status: 'searching' });
-  if (!ride) return; // Stoppe net si un chauffeur a cliqué sur "Accepter" et que le statut n'est plus "searching"
+  if (!ride) return; 
 
   const initialRadius = 1000;
-  const maxRadius = initialRadius * 5; 
+  const maxRadius = 2500; // FIX : Limite stricte a 5 agrandissements
   const step = 300;
 
-  const currentRadius = ride.currentSearchRadius || initialRadius;
-  const nextRadius = currentRadius + step;
+  let nextRadius = (ride.currentSearchRadius || initialRadius) + step;
 
   if (nextRadius > maxRadius) {
-    logger.info(`[DISPATCH] Rayon max atteint (${maxRadius}m) pour ${rideId}. Lancement du timeout final (60s).`);
-    await cleanupQueue.add(
-      'check-search-timeout',
-      { rideId: ride._id },
-      { delay: 60000, removeOnComplete: true }
-    );
-    return;
+    return; // Securite anti-boucle infinie
   }
 
   ride.currentSearchRadius = nextRadius;
   await ride.save();
 
-  // UX PASSAGER : On l'informe que le radar grandit
   io.to(ride.rider.toString()).emit('search_expanded', { radius: nextRadius });
 
   logger.info(`[DISPATCH] Agrandissement du rayon a ${nextRadius}m pour la course ${rideId}`);
@@ -131,13 +123,21 @@ const expandSearchRadius = async (io, rideId) => {
     });
   } 
 
-  // CORRECTION MAJEURE : On programme TOUJOURS la prochaine vague d'agrandissement.
-  // Tant que le statut de la course est "searching", on ne s'arrête jamais de chercher !
-  await cleanupQueue.add(
-    'expand-search',
-    { rideId: ride._id },
-    { delay: 30000, removeOnComplete: true }
-  );
+  // LA CORRECTION CRITIQUE EST ICI : Aiguillage parfait
+  if (nextRadius === maxRadius) {
+    logger.info(`[DISPATCH] Rayon MAX atteint (${maxRadius}m) pour ${rideId}. Sablier de mort lance (60s).`);
+    await cleanupQueue.add(
+      'check-search-timeout',
+      { rideId: ride._id },
+      { delay: 60000, removeOnComplete: true }
+    );
+  } else {
+    await cleanupQueue.add(
+      'expand-search',
+      { rideId: ride._id },
+      { delay: 30000, removeOnComplete: true }
+    );
+  }
 };
 
 const createRideRequest = async (riderId, rideData, redisClient) => {
@@ -197,8 +197,6 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
 
     const drivers = await dispatchToNearbyDrivers(ride, initialRadius);
 
-    // CORRECTION MAJEURE : On programme le worker d'agrandissement MEME SI on a trouvé des chauffeurs !
-    // S'ils ignorent la requête, le système continuera d'agrandir au lieu de rester bloqué.
     await cleanupQueue.add(
       'expand-search',
       { rideId: ride._id },
@@ -372,9 +370,15 @@ const cancelSearchTimeout = async (io, rideId) => {
     
     io.emit('ride_taken_by_other', { rideId }); 
 
-    const poiController = require('../../controllers/poiController');
-    if (ride.origin?.address) await poiController.releasePendingPOI(ride.origin.address, io);
-    if (ride.destination?.address) await poiController.releasePendingPOI(ride.destination.address, io);
+    // FIX : Enveloppement dans un try-catch pour eviter que le Worker plante silencieusement 
+    // en cas d'erreur avec le controlleur de POI.
+    try {
+      const poiController = require('../../controllers/poiController');
+      if (ride.origin?.address) await poiController.releasePendingPOI(ride.origin.address, io);
+      if (ride.destination?.address) await poiController.releasePendingPOI(ride.destination.address, io);
+    } catch (error) {
+      logger.warn(`[POI RELEASE ERROR] Echec lors de la destruction de la course : ${error.message}`);
+    }
   }
 };
 
