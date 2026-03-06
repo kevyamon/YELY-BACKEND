@@ -6,7 +6,7 @@ const User = require('../models/User');
 const authService = require('../services/authService');
 const { successResponse } = require('../utils/responseHandler');
 const { generateAccessToken, generateRefreshToken, setRefreshTokenCookie, clearRefreshTokenCookie } = require('../utils/tokenService'); 
-const AppError = require('../utils/AppError'); // Import centralisé pour les erreurs
+const AppError = require('../utils/AppError'); 
 
 const registerUser = async (req, res, next) => {
   try {
@@ -52,7 +52,7 @@ const loginUser = async (req, res, next) => {
 
     const user = await authService.login(identifier, password);
 
-    // 🛡️ BOUCLIER ANTI-ZOMBIE : Interdiction stricte aux comptes supprimés ou bannis
+    // 🛡️ BOUCLIER ANTI-ZOMBIE 
     if (user.isDeleted) {
       throw new AppError("Ce compte a été désactivé ou supprimé.", 403);
     }
@@ -76,7 +76,7 @@ const loginUser = async (req, res, next) => {
       rating: user.rating,
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
-      subscription: user.subscription 
+      subscription: user.subscription // 🛡️ Ceci est désormais l'état 100% à jour vérifié en BDD
     };
 
     return successResponse(res, { 
@@ -133,7 +133,6 @@ const refreshToken = async (req, res, next) => {
     
     const user = await authService.validateSessionForRefresh(token);
 
-    // 🛡️ BOUCLIER ANTI-ZOMBIE (Coupe la boucle de refresh côté Frontend)
     if (user.isDeleted || user.isBanned) {
       throw new AppError("Session invalide, compte inactif.", 403);
     }
@@ -154,7 +153,7 @@ const refreshToken = async (req, res, next) => {
       rating: user.rating,
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
-      subscription: user.subscription 
+      subscription: user.subscription // 🛡️ Garantie d'être à jour au refresh
     };
 
     return successResponse(res, { 

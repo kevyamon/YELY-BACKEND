@@ -8,12 +8,12 @@ const { verifyRefreshToken } = require('../utils/tokenService');
 const { SECURITY_CONSTANTS } = require('../config/env');
 const emailService = require('../utils/emailService');
 const bcrypt = require('bcrypt');
+const { checkSubscriptionStatus } = require('./subscriptionService'); // 🛡️ Import ajouté
 
 const MAX_ATTEMPTS = SECURITY_CONSTANTS?.MAX_LOGIN_ATTEMPTS || 5;
 const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000;
 
 const register = async (userData) => {
-  // On s'assure que s'il y a un vieux compte supprimé avec ces infos, on l'ignore
   const emailExists = await User.findOne({ email: userData.email, isDeleted: { $ne: true } });
   if (emailExists) throw new AppError('Cette adresse e-mail est deja associee a un compte.', 409);
 
@@ -32,7 +32,7 @@ const login = async (identifier, password) => {
   const isEmail = identifier.includes('@');
   const normalizedId = isEmail ? identifier.toLowerCase().trim() : identifier.replace(/\s/g, '');
 
-  const user = await User.findOne({
+  let user = await User.findOne({
     $or: [{ email: normalizedId }, { phone: normalizedId }]
   }).select('+password +loginAttempts +lockUntil');
 
@@ -41,11 +41,7 @@ const login = async (identifier, password) => {
     throw new AppError('Identifiants incorrects.', 401);
   }
 
-  // 🛡️ BOUCLIER STRICT 1 : Rejet des comptes zombies au login manuel
-  if (user.isDeleted) {
-    throw new AppError('Ce compte a ete supprime et ne peut plus se connecter.', 403);
-  }
-
+  if (user.isDeleted) throw new AppError('Ce compte a ete supprime et ne peut plus se connecter.', 403);
   if (user.isBanned) throw new AppError(`Compte suspendu: ${user.banReason}`, 403);
 
   if (user.lockUntil && user.lockUntil > Date.now()) {
@@ -72,8 +68,10 @@ const login = async (identifier, password) => {
     await User.updateOne({ _id: user._id }, { loginAttempts: 0, $unset: { lockUntil: 1 } });
   }
 
-  if (typeof user.syncSubscription === 'function' && user.syncSubscription()) {
-    await User.updateOne({ _id: user._id }, { $set: { subscription: user.subscription } });
+  // 🛡️ MODIFICATION MAJEURE : On force la vérification stricte de l'abonnement
+  if (user.role === 'driver') {
+      await checkSubscriptionStatus(user._id);
+      user = await User.findById(user._id); // On recharge l'utilisateur avec l'état garanti
   }
 
   return user;
@@ -82,7 +80,6 @@ const login = async (identifier, password) => {
 const forgotPassword = async (email) => {
   const user = await User.findOne({ email: email.toLowerCase().trim() });
   
-  // 🛡️ On ignore silencieusement la demande si le compte est supprimé
   if (!user || user.isDeleted) return true; 
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -108,7 +105,6 @@ const resetPasswordWithOtp = async (email, otp, newPassword) => {
   const user = await User.findOne({ email: email.toLowerCase().trim() })
     .select('+resetPasswordOtp +resetPasswordExpires');
 
-  // 🛡️ Blocage de la réinitialisation sur un zombie
   if (!user || user.isDeleted || !user.resetPasswordExpires || user.resetPasswordExpires < Date.now()) {
     throw new AppError('Le code est invalide ou a expire.', 400);
   }
@@ -135,18 +131,20 @@ const validateSessionForRefresh = async (token) => {
       throw new AppError('Structure du jeton illisible.', 401);
     }
     
-    const user = await User.findById(userId);
+    let user = await User.findById(userId);
     if (!user) {
       throw new AppError('L\'utilisateur lie a cette session n\'existe plus.', 401);
     }
 
-    // 🛡️ LE VRAI COUPABLE ÉTAIT ICI ! Destruction des sessions fantômes
     if (user.isDeleted) throw new AppError('Session invalide, ce compte est supprime.', 403);
     if (user.isBanned) throw new AppError(`Session revoquee. Compte suspendu: ${user.banReason}`, 403);
     
-    if (typeof user.syncSubscription === 'function' && user.syncSubscription()) {
-      await User.updateOne({ _id: user._id }, { $set: { subscription: user.subscription } });
+    // 🛡️ MODIFICATION MAJEURE : Vérification stricte au refresh
+    if (user.role === 'driver') {
+        await checkSubscriptionStatus(user._id);
+        user = await User.findById(user._id); // Recharge avec l'état garanti
     }
+
     return user;
   } catch (error) {
     if (error.isOperational) throw error;
