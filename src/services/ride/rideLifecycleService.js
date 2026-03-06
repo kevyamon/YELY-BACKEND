@@ -6,7 +6,7 @@ const mongoose = require('mongoose');
 const axios = require('axios');
 const { Queue } = require('bullmq');
 const Ride = require('../../models/Ride');
-const User = require('../../models/User'); // AJOUT CRITIQUE POUR RECUPERER LE RIDER
+const User = require('../../models/User'); 
 const userRepository = require('../../repositories/userRepository');
 const pricingService = require('../pricingService');
 const AppError = require('../../utils/AppError');
@@ -85,7 +85,7 @@ const dispatchToNearbyDrivers = async (ride, radius) => {
 
 const expandSearchRadius = async (io, rideId) => {
   const ride = await Ride.findOne({ _id: rideId, status: 'searching' });
-  if (!ride) return; 
+  if (!ride) return; // Stoppe net si un chauffeur a cliqué sur "Accepter" et que le statut n'est plus "searching"
 
   const initialRadius = 1000;
   const maxRadius = initialRadius * 5; 
@@ -115,7 +115,6 @@ const expandSearchRadius = async (io, rideId) => {
   const drivers = await dispatchToNearbyDrivers(ride, nextRadius);
 
   if (drivers.length > 0) {
-    // CORRECTION CRITIQUE : Il manquait l'émission du Socket pour réveiller l'application du chauffeur !
     const rider = await User.findById(ride.rider).select('name profilePicture');
     drivers.forEach(driver => {
       io.to(driver._id.toString()).emit('new_ride_request', {
@@ -130,14 +129,15 @@ const expandSearchRadius = async (io, rideId) => {
         riderProfilePicture: rider?.profilePicture 
       });
     });
-  } else {
-    // S'il n'y a personne, on relance la boucle pour dans 30 secondes
-    await cleanupQueue.add(
-      'expand-search',
-      { rideId: ride._id },
-      { delay: 30000, removeOnComplete: true }
-    );
-  }
+  } 
+
+  // CORRECTION MAJEURE : On programme TOUJOURS la prochaine vague d'agrandissement.
+  // Tant que le statut de la course est "searching", on ne s'arrête jamais de chercher !
+  await cleanupQueue.add(
+    'expand-search',
+    { rideId: ride._id },
+    { delay: 30000, removeOnComplete: true }
+  );
 };
 
 const createRideRequest = async (riderId, rideData, redisClient) => {
@@ -197,13 +197,13 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
 
     const drivers = await dispatchToNearbyDrivers(ride, initialRadius);
 
-    if (drivers.length === 0) {
-      await cleanupQueue.add(
-        'expand-search',
-        { rideId: ride._id },
-        { delay: 30000, removeOnComplete: true }
-      );
-    }
+    // CORRECTION MAJEURE : On programme le worker d'agrandissement MEME SI on a trouvé des chauffeurs !
+    // S'ils ignorent la requête, le système continuera d'agrandir au lieu de rester bloqué.
+    await cleanupQueue.add(
+      'expand-search',
+      { rideId: ride._id },
+      { delay: 30000, removeOnComplete: true }
+    );
 
     return { ride, drivers };
   } finally {
