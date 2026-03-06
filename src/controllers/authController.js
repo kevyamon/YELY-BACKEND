@@ -1,11 +1,12 @@
 // src/controllers/authController.js
-// CONTROLEUR AUTHENTIFICATION - Alignement Parfait & Anti-Crash
+// CONTROLEUR AUTHENTIFICATION - Alignement Parfait & Anti-Crash (Bouclier Anti-Zombie Actif)
 // STANDARD: Industriel / Bank Grade
 
 const User = require('../models/User');
 const authService = require('../services/authService');
 const { successResponse } = require('../utils/responseHandler');
 const { generateAccessToken, generateRefreshToken, setRefreshTokenCookie, clearRefreshTokenCookie } = require('../utils/tokenService'); 
+const AppError = require('../utils/AppError'); // Import centralisé pour les erreurs
 
 const registerUser = async (req, res, next) => {
   try {
@@ -34,7 +35,7 @@ const registerUser = async (req, res, next) => {
       user: userData, 
       accessToken, 
       refreshToken: refreshTokenStr 
-    }, 'Compte crée avec succès', 201);
+    }, 'Compte créé avec succès', 201);
 
   } catch (error) {
     return next(error);
@@ -46,11 +47,18 @@ const loginUser = async (req, res, next) => {
     const { identifier, password } = req.body;
 
     if (!identifier || !password) {
-      const AppError = require('../utils/AppError');
       throw new AppError("Veuillez fournir un identifiant et un mot de passe.", 400);
     }
 
     const user = await authService.login(identifier, password);
+
+    // 🛡️ BOUCLIER ANTI-ZOMBIE : Interdiction stricte aux comptes supprimés ou bannis
+    if (user.isDeleted) {
+      throw new AppError("Ce compte a été désactivé ou supprimé.", 403);
+    }
+    if (user.isBanned) {
+      throw new AppError(`Ce compte est banni. Motif: ${user.banReason}`, 403);
+    }
 
     const accessToken = generateAccessToken(user._id.toString(), user.role);
     const refreshTokenStr = generateRefreshToken(user._id.toString());
@@ -120,11 +128,15 @@ const refreshToken = async (req, res, next) => {
     }
 
     if (!token) {
-       const AppError = require('../utils/AppError');
        throw new AppError("Session invalide ou expirée.", 401);
     }
     
     const user = await authService.validateSessionForRefresh(token);
+
+    // 🛡️ BOUCLIER ANTI-ZOMBIE (Coupe la boucle de refresh côté Frontend)
+    if (user.isDeleted || user.isBanned) {
+      throw new AppError("Session invalide, compte inactif.", 403);
+    }
 
     const newAccessToken = generateAccessToken(user._id.toString(), user.role);
     const newRefreshToken = generateRefreshToken(user._id.toString());
