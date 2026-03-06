@@ -1,5 +1,5 @@
 // src/services/authService.js
-// SERVICE AUTH - Anti-Bruteforce Actif & Mitigations Timing Attacks
+// SERVICE AUTH - Anti-Bruteforce Actif & Mitigations Timing Attacks & ANTI-ZOMBIE
 // STANDARD: Industriel / Bank Grade
 
 const User = require('../models/User');
@@ -13,10 +13,11 @@ const MAX_ATTEMPTS = SECURITY_CONSTANTS?.MAX_LOGIN_ATTEMPTS || 5;
 const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000;
 
 const register = async (userData) => {
-  const emailExists = await User.findOne({ email: userData.email });
+  // On s'assure que s'il y a un vieux compte supprimé avec ces infos, on l'ignore
+  const emailExists = await User.findOne({ email: userData.email, isDeleted: { $ne: true } });
   if (emailExists) throw new AppError('Cette adresse e-mail est deja associee a un compte.', 409);
 
-  const phoneExists = await User.findOne({ phone: userData.phone });
+  const phoneExists = await User.findOne({ phone: userData.phone, isDeleted: { $ne: true } });
   if (phoneExists) throw new AppError('Ce numero de telephone est deja associe a un compte.', 409);
 
   if (userData.role && ['admin', 'superadmin'].includes(userData.role)) {
@@ -38,6 +39,11 @@ const login = async (identifier, password) => {
   if (!user) {
     await new Promise(resolve => setTimeout(resolve, 500));
     throw new AppError('Identifiants incorrects.', 401);
+  }
+
+  // 🛡️ BOUCLIER STRICT 1 : Rejet des comptes zombies au login manuel
+  if (user.isDeleted) {
+    throw new AppError('Ce compte a ete supprime et ne peut plus se connecter.', 403);
   }
 
   if (user.isBanned) throw new AppError(`Compte suspendu: ${user.banReason}`, 403);
@@ -76,7 +82,8 @@ const login = async (identifier, password) => {
 const forgotPassword = async (email) => {
   const user = await User.findOne({ email: email.toLowerCase().trim() });
   
-  if (!user) return true; 
+  // 🛡️ On ignore silencieusement la demande si le compte est supprimé
+  if (!user || user.isDeleted) return true; 
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const hashedOtp = await bcrypt.hash(otp, 12);
@@ -101,7 +108,8 @@ const resetPasswordWithOtp = async (email, otp, newPassword) => {
   const user = await User.findOne({ email: email.toLowerCase().trim() })
     .select('+resetPasswordOtp +resetPasswordExpires');
 
-  if (!user || !user.resetPasswordExpires || user.resetPasswordExpires < Date.now()) {
+  // 🛡️ Blocage de la réinitialisation sur un zombie
+  if (!user || user.isDeleted || !user.resetPasswordExpires || user.resetPasswordExpires < Date.now()) {
     throw new AppError('Le code est invalide ou a expire.', 400);
   }
 
@@ -132,6 +140,8 @@ const validateSessionForRefresh = async (token) => {
       throw new AppError('L\'utilisateur lie a cette session n\'existe plus.', 401);
     }
 
+    // 🛡️ LE VRAI COUPABLE ÉTAIT ICI ! Destruction des sessions fantômes
+    if (user.isDeleted) throw new AppError('Session invalide, ce compte est supprime.', 403);
     if (user.isBanned) throw new AppError(`Session revoquee. Compte suspendu: ${user.banReason}`, 403);
     
     if (typeof user.syncSubscription === 'function' && user.syncSubscription()) {
@@ -145,8 +155,12 @@ const validateSessionForRefresh = async (token) => {
 };
 
 const updateAvailability = async (userId, isAvailable) => {
-  const user = await User.findByIdAndUpdate(userId, { isAvailable }, { new: true, runValidators: true }).select('isAvailable');
+  const user = await User.findById(userId);
   if (!user) throw new AppError('Utilisateur introuvable.', 404);
+  if (user.isDeleted) throw new AppError('Action impossible sur un compte supprime.', 403);
+
+  user.isAvailable = isAvailable;
+  await user.save(); 
   return user;
 };
 
