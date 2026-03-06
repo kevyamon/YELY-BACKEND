@@ -1,5 +1,5 @@
 // src/server.js
-// SERVEUR YELY - Mode Dev & Production (Rolling Sessions Actives & Redis Optimise & Anti-Zombie)
+// SERVEUR YELY - Mode Dev & Production (Rolling Sessions Actives & Redis Optimisé & Anti-Zombie)
 // STANDARD: Industriel / Bank Grade
 
 const http = require('http');
@@ -90,14 +90,15 @@ io.use(async (socket, next) => {
       if (user) await redis.setex(cacheKey, 900, JSON.stringify(user)).catch(() => {});
     }
     
-    // REJET ABSOLU : Si banni ou supprime, on coupe le cable instantanement
+    // REJET ABSOLU : Si banni ou supprimé, on coupe le câble instantanément
     if (!user || user.isBanned || user.isDeleted) return next(new Error('AUTH_REJECTED'));
     
     socket.user = user;
     socket.lastLocTime = Date.now();
     socket.lastCoords = user.currentLocation?.coordinates || [0,0]; 
     socket.spoofStrikes = 0; 
-    socket.lastDbCheck = Date.now(); // Initialisation du chrono de controle de ban
+    socket.lastDbCheck = Date.now(); 
+    socket.isFirstLocation = true; // <-- CORRECTION: Marqueur de nouvelle session pour le saut spatial
     
     next();
   } catch (err) {
@@ -115,8 +116,7 @@ io.on('connection', (socket) => {
     const now = Date.now();
     const isDev = process.env.NODE_ENV !== 'production';
 
-    // 1. CONTROLE DE SECURITE ASYNCHRONE (Toutes les 5 minutes maximum)
-    // Au lieu de frapper Redis a chaque seconde, on verifie l'etat du compte episodiquement
+    // 1. CONTRÔLE DE SÉCURITÉ ASYNCHRONE (Toutes les 5 minutes)
     if (now - socket.lastDbCheck > 300000) { 
       socket.lastDbCheck = now;
       try {
@@ -128,11 +128,11 @@ io.on('connection', (socket) => {
           return;
         }
       } catch (err) {
-        logger.warn(`[SOCKET] Verif DB echouee pour ${user._id}, session conservee en memoire.`);
+        logger.warn(`[SOCKET] Verif DB echouée pour ${user._id}, session conservée.`);
       }
     }
 
-    // 2. VALIDATION DES DONNEES
+    // 2. VALIDATION DES DONNÉES
     const parseResult = coordsSchema.safeParse(rawData);
     if (!parseResult.success) {
       if (isDev) console.error('[SOCKET] Erreur validation position:', parseResult.error);
@@ -147,7 +147,10 @@ io.on('connection', (socket) => {
     // 4. ANTI-SPOOFING GPS
     const timeDiffSeconds = (now - socket.lastLocTime) / 1000;
     
-    if (timeDiffSeconds > 0) { 
+    // CORRECTION : Tolérance sur la toute première position pour éviter le ban instantané
+    if (socket.isFirstLocation) {
+      socket.isFirstLocation = false;
+    } else if (timeDiffSeconds > 0) { 
       const [prevLng, prevLat] = socket.lastCoords;
       const distanceKm = getDistKm(prevLat, prevLng, coords.latitude, coords.longitude);
       const speedKmH = distanceKm / (timeDiffSeconds / 3600);
@@ -172,9 +175,8 @@ io.on('connection', (socket) => {
     socket.lastLocTime = now;
     socket.lastCoords = [coords.longitude, coords.latitude];
 
-    // 5. APPLICATION DES NOUVELLES COORDONNEES
+    // 5. APPLICATION DES NOUVELLES COORDONNÉES
     try {
-      // Execution asynchrone pour ne pas bloquer le thread du WebSocket
       User.updateOne({ _id: user._id }, {
         currentLocation: { type: 'Point', coordinates: [coords.longitude, coords.latitude] },
         lastLocationAt: new Date()
@@ -213,7 +215,7 @@ io.on('connection', (socket) => {
 const startServer = async () => {
   try {
     await mongoose.connect(env.MONGO_URI);
-    logger.info('[MONGODB] Base de donnees connectee');
+    logger.info('[MONGODB] Base de donnees connectée');
     
     server.listen(env.PORT, '0.0.0.0', () => {
       logger.info(`[SERVER] Serveur Yely actif sur 0.0.0.0:${env.PORT}`);
