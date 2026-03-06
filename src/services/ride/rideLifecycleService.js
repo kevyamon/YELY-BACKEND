@@ -1,12 +1,11 @@
 // src/services/ride/rideLifecycleService.js
-// SERVICE METIER - Cycle de vie, creation, annulation et negociation
+// SERVICE METIER - Cycle de vie, creation, annulation et negociation dynamique
 // STANDARD: Industriel / Bank Grade
 
 const mongoose = require('mongoose');
 const axios = require('axios');
 const { Queue } = require('bullmq');
 const Ride = require('../../models/Ride');
-const Settings = require('../../models/Settings');
 const userRepository = require('../../repositories/userRepository');
 const pricingService = require('../pricingService');
 const AppError = require('../../utils/AppError');
@@ -51,32 +50,73 @@ const getRouteDistance = async (originCoords, destCoords) => {
   }
 };
 
-const dispatchToNearbyDrivers = async (ride) => {
-  const appSettings = await Settings.findOne().lean();
-  const maxDistanceInMeters = appSettings?.searchRadiusMeters || 5000;
-  
+const dispatchToNearbyDrivers = async (ride, radius) => {
   const originCoords = ride.origin.coordinates;
+  
+  const excludedDrivers = [...(ride.rejectedDrivers || []), ...(ride.notifiedDrivers || [])];
 
   const drivers = await userRepository.findAvailableDriversNear(
     originCoords,
-    maxDistanceInMeters,
+    radius,
     ride.forfait,
-    ride.rejectedDrivers
+    excludedDrivers
   );
 
-  logger.info(`[DISPATCH] ${drivers.length} chauffeurs trouves dans un rayon de ${maxDistanceInMeters}m pour la course ${ride._id}.`);
+  if (drivers.length > 0) {
+    logger.info(`[DISPATCH] ${drivers.length} nouveaux chauffeurs trouves dans un rayon de ${radius}m pour la course ${ride._id}.`);
 
-  drivers.forEach(driver => {
-    sendNotification(
-      driver._id,
-      'Nouvelle demande de course',
-      `Course de ${ride.distance} km disponible a proximite.`,
-      'NEW_RIDE_REQUEST',
-      { rideId: ride._id.toString() }
-    ).catch(err => logger.error(`[PUSH ERROR] Echec d'envoi au chauffeur ${driver._id}: ${err.message}`));
-  });
+    const driverIds = drivers.map(d => d._id);
+    await Ride.findByIdAndUpdate(ride._id, { $addToSet: { notifiedDrivers: { $each: driverIds } } });
+
+    drivers.forEach(driver => {
+      sendNotification(
+        driver._id,
+        'Nouvelle demande de course',
+        `Course de ${ride.distance} km disponible a proximite.`,
+        'NEW_RIDE_REQUEST',
+        { rideId: ride._id.toString() }
+      ).catch(err => logger.error(`[PUSH ERROR] Echec d'envoi au chauffeur ${driver._id}: ${err.message}`));
+    });
+  }
 
   return drivers;
+};
+
+const expandSearchRadius = async (io, rideId) => {
+  const ride = await Ride.findOne({ _id: rideId, status: 'searching' });
+  if (!ride) return; 
+
+  const initialRadius = 1000;
+  const maxRadius = initialRadius * 5; 
+  const step = 300;
+
+  const currentRadius = ride.currentSearchRadius || initialRadius;
+  const nextRadius = currentRadius + step;
+
+  if (nextRadius > maxRadius) {
+    logger.info(`[DISPATCH] Rayon max atteint (${maxRadius}m) pour ${rideId}. Lancement du timeout final (60s).`);
+    await cleanupQueue.add(
+      'check-search-timeout',
+      { rideId: ride._id },
+      { delay: 60000, removeOnComplete: true }
+    );
+    return;
+  }
+
+  ride.currentSearchRadius = nextRadius;
+  await ride.save();
+
+  logger.info(`[DISPATCH] Agrandissement du rayon a ${nextRadius}m pour la course ${rideId}`);
+  
+  const drivers = await dispatchToNearbyDrivers(ride, nextRadius);
+
+  if (drivers.length === 0) {
+    await cleanupQueue.add(
+      'expand-search',
+      { rideId: ride._id },
+      { delay: 30000, removeOnComplete: true }
+    );
+  }
 };
 
 const createRideRequest = async (riderId, rideData, redisClient) => {
@@ -110,13 +150,15 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
     const originCoords = [parseFloat(origin.coordinates[0]), parseFloat(origin.coordinates[1])];
     const destCoords = [parseFloat(destination.coordinates[0]), parseFloat(destination.coordinates[1])];
     
-    logger.info(`[DISPATCH] Nouvelle demande. Recherche autour de Lng: ${originCoords[0]}, Lat: ${originCoords[1]} pour ${count} passager(s)`);
+    logger.info(`[DISPATCH] Nouvelle demande. Recherche initiale pour ${count} passager(s)`);
 
     const distance = await getRouteDistance(originCoords, destCoords);
 
     if (distance < 0.1) throw new AppError('Distance invalide.', 400);
 
     const pricingResult = await pricingService.generatePriceOptions(originCoords, destCoords, distance, count);
+    
+    const initialRadius = 1000;
 
     const ride = await Ride.create({
       rider: riderId,
@@ -127,16 +169,20 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       passengersCount: count,
       priceOptions: pricingResult.options, 
       status: 'searching',
-      rejectedDrivers: []
+      rejectedDrivers: [],
+      notifiedDrivers: [],
+      currentSearchRadius: initialRadius
     });
 
-    await cleanupQueue.add(
-      'check-search-timeout',
-      { rideId: ride._id },
-      { delay: 90000, removeOnComplete: true }
-    );
+    const drivers = await dispatchToNearbyDrivers(ride, initialRadius);
 
-    const drivers = await dispatchToNearbyDrivers(ride);
+    if (drivers.length === 0) {
+      await cleanupQueue.add(
+        'expand-search',
+        { rideId: ride._id },
+        { delay: 30000, removeOnComplete: true }
+      );
+    }
 
     return { ride, drivers };
   } finally {
@@ -203,7 +249,6 @@ const emergencyCancelUserRides = async (userId) => {
     await userRepository.updateDriverAvailability(driverId, true);
   }
 
-  // RETOUR CORRIGÉ : On renvoie les courses actives pour pouvoir lire leurs origines/destinations dans le contrôleur
   return { 
     count: activeRides.length, 
     ridesCleared: rideIdsToCancel, 
@@ -281,6 +326,15 @@ const finalizeProposal = async (rideId, riderId, decision) => {
   } finally {
     await session.endSession();
   }
+  
+  if (result.status === 'SEARCHING_AGAIN') {
+    await cleanupQueue.add(
+      'expand-search',
+      { rideId },
+      { delay: 0, removeOnComplete: true }
+    );
+  }
+
   return result;
 };
 
@@ -288,7 +342,7 @@ const cancelSearchTimeout = async (io, rideId) => {
   const ride = await Ride.findOne({ _id: rideId, status: 'searching' });
   if (ride) {
     ride.status = 'cancelled';
-    ride.cancellationReason = 'Temps de recherche expire (1m30)';
+    ride.cancellationReason = 'Temps de recherche expire, aucun chauffeur trouve.';
     await ride.save();
     
     io.to(ride.rider.toString()).emit('search_timeout', {
@@ -297,7 +351,6 @@ const cancelSearchTimeout = async (io, rideId) => {
     
     io.emit('ride_taken_by_other', { rideId }); 
 
-    // DECLENCHEUR TEMPS REEL (Timeout) : Libération au cas où la course expire sans chauffeur
     const poiController = require('../../controllers/poiController');
     if (ride.origin?.address) await poiController.releasePendingPOI(ride.origin.address, io);
     if (ride.destination?.address) await poiController.releasePendingPOI(ride.destination.address, io);
@@ -317,10 +370,11 @@ const releaseStuckNegotiations = async (io, rideId) => {
     
     io.to(rejectedDriverId.toString()).emit('ride_taken_by_other', { rideId });
 
-    const nextDrivers = await dispatchToNearbyDrivers(ride);
-    nextDrivers.forEach(driver => {
-      io.to(driver._id.toString()).emit('new_ride_request', { ride });
-    });
+    await cleanupQueue.add(
+      'expand-search',
+      { rideId: ride._id },
+      { delay: 0, removeOnComplete: true }
+    );
   }
 };
 
@@ -335,5 +389,6 @@ module.exports = {
   finalizeProposal,
   cancelSearchTimeout,
   releaseStuckNegotiations,
-  dispatchToNearbyDrivers
+  dispatchToNearbyDrivers,
+  expandSearchRadius
 };

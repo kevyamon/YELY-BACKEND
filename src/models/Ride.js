@@ -70,6 +70,8 @@ const rideSchema = new mongoose.Schema({
   },
 
   rejectedDrivers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  notifiedDrivers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  currentSearchRadius: { type: Number, default: 1000 },
 
   // Securite : Nettoyage automatique des sessions de negociation orphelines
   negotiationStartedAt: { type: Date },
@@ -84,7 +86,7 @@ const rideSchema = new mongoose.Schema({
   cancellationReason: { type: String },
   rejectionReason: { type: String },
 
-  // AJOUT SENIOR : Masquage Historique Individuel (Soft Delete)
+  // Masquage Historique Individuel (Soft Delete)
   hiddenForRider: { type: Boolean, default: false },
   hiddenForDriver: { type: Boolean, default: false }
 });

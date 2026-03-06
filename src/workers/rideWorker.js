@@ -1,5 +1,5 @@
 // src/workers/rideWorker.js
-// WORKER DE NETTOYAGE - Surveillance des Timeouts
+// WORKER DE NETTOYAGE - Surveillance des Timeouts et Extension de zone
 // CSCSM Level: Bank Grade
 
 const { Worker } = require('bullmq'); 
@@ -12,16 +12,21 @@ const startRideWorker = (io) => {
     'ride-cleanup',
     async (job) => {
       try {
-        if (job.name === 'check-stuck-negotiation') {
+        if (job.name === 'expand-search') {
+          const { rideId } = job.data;
+          logger.info(`[WORKER] Verification et agrandissement du rayon pour : ${rideId}`);
+          await rideService.expandSearchRadius(io, rideId);
+        }
+        else if (job.name === 'check-stuck-negotiation') {
           // Si le chauffeur a verrouillé la course mais n'a rien cliqué après 60s
           const { rideId } = job.data;
           logger.info(`[WORKER] Libération du chauffeur muet pour la course : ${rideId}`);
           await rideService.releaseStuckNegotiations(io, rideId);
         } 
         else if (job.name === 'check-search-timeout') {
-          // 🚀 NOUVEAU : Si personne n'a pris la course après 1m30
+          // Fin du temps de recherche après l'atteinte du rayon maximum
           const { rideId } = job.data;
-          logger.info(`[WORKER] Fin du temps de recherche (1m30) pour la course : ${rideId}`);
+          logger.info(`[WORKER] Fin definitive du temps de recherche pour la course : ${rideId}`);
           await rideService.cancelSearchTimeout(io, rideId);
         }
       } catch (error) {
@@ -45,7 +50,7 @@ const startRideWorker = (io) => {
     logger.error(`[WORKER] Job ${job.name} a échoué : ${err.message}`);
   });
 
-  logger.info('Worker de nettoyage des courses actif');
+  logger.info('Worker de nettoyage et dispatch des courses actif');
   
   return worker;
 };
