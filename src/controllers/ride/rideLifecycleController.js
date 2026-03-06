@@ -274,6 +274,7 @@ const getCurrentRide = async (req, res, next) => {
       ...currentRide,
       id: currentRide._id,
       rideId: currentRide._id,
+      searchRadius: currentRide.currentSearchRadius, // CORRECTION : Mapping pour le Frontend
       riderName: currentRide.rider?.name,
       riderPhone: currentRide.rider?.phone,
       riderProfilePicture: currentRide.rider?.profilePicture,

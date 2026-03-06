@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const axios = require('axios');
 const { Queue } = require('bullmq');
 const Ride = require('../../models/Ride');
+const User = require('../../models/User'); // AJOUT CRITIQUE POUR RECUPERER LE RIDER
 const userRepository = require('../../repositories/userRepository');
 const pricingService = require('../pricingService');
 const AppError = require('../../utils/AppError');
@@ -106,14 +107,31 @@ const expandSearchRadius = async (io, rideId) => {
   ride.currentSearchRadius = nextRadius;
   await ride.save();
 
-  // NOTIFICATION TEMPS REEL POUR L'UX PASSAGER
+  // UX PASSAGER : On l'informe que le radar grandit
   io.to(ride.rider.toString()).emit('search_expanded', { radius: nextRadius });
 
   logger.info(`[DISPATCH] Agrandissement du rayon a ${nextRadius}m pour la course ${rideId}`);
   
   const drivers = await dispatchToNearbyDrivers(ride, nextRadius);
 
-  if (drivers.length === 0) {
+  if (drivers.length > 0) {
+    // CORRECTION CRITIQUE : Il manquait l'émission du Socket pour réveiller l'application du chauffeur !
+    const rider = await User.findById(ride.rider).select('name profilePicture');
+    drivers.forEach(driver => {
+      io.to(driver._id.toString()).emit('new_ride_request', {
+        rideId: ride._id,
+        origin: ride.origin,       
+        destination: ride.destination, 
+        distance: ride.distance,
+        forfait: ride.forfait,
+        passengersCount: ride.passengersCount,
+        priceOptions: ride.priceOptions,
+        riderName: rider?.name,
+        riderProfilePicture: rider?.profilePicture 
+      });
+    });
+  } else {
+    // S'il n'y a personne, on relance la boucle pour dans 30 secondes
     await cleanupQueue.add(
       'expand-search',
       { rideId: ride._id },
