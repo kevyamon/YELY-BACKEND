@@ -1,16 +1,15 @@
 // src/middleware/rateLimitMiddleware.js
 // PROTECTION ANTI-BRUTEFORCE & DOS
-// CSCSM Level: Bank Grade
+// ☢️ ÉTAT ACTUEL : DÉSACTIVÉ POUR LE DÉBOGAGE ET LE DÉVELOPPEMENT INTENSIF
 
 const rateLimit = require('express-rate-limit');
-const { env } = require('../config/env');
 
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  // En dev, on laisse 5000 requêtes. En prod, on met un standard industriel (ex: 2500)
-  max: env.NODE_ENV === 'development' ? 5000 : 2500, 
+  windowMs: 1 * 60 * 1000, // Réduit à 1 minute
+  max: 100000, // Limite absurde (100 000 requêtes)
   standardHeaders: true, 
   legacyHeaders: false, 
+  skip: (req, res) => true, // <-- L'OPTION NUCLÉAIRE : On ignore le limiteur à 100%
   message: {
     status: 429,
     success: false,

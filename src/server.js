@@ -1,5 +1,5 @@
 // src/server.js
-// SERVEUR YELY - Mode Dev & Production (Rolling Sessions Actives & Redis Optimisé)
+// SERVEUR YELY - Mode Dev & Production (Rolling Sessions Actives & Redis Optimisé & Anti-Zombie)
 // STANDARD: Industriel / Bank Grade
 
 const http = require('http');
@@ -83,15 +83,16 @@ io.use(async (socket, next) => {
     if (cachedUser) {
       user = JSON.parse(cachedUser);
     } else {
-      // OPTIMISATION PAYLOAD : On ne prend que le strict nécessaire pour le Socket
+      // OPTIMISATION PAYLOAD : On ne prend que le strict nécessaire
       user = await User.findById(decoded.userId)
-        .select('_id role isBanned currentLocation') 
+        .select('_id role isBanned currentLocation isDeleted') 
         .lean();
       
       if (user) await redis.setex(cacheKey, 900, JSON.stringify(user));
     }
     
-    if (!user || user.isBanned) return next(new Error('AUTH_REJECTED'));
+    // 🛡️ REJET ABSOLU : Si banni ou supprimé, on coupe le câble instantanément
+    if (!user || user.isBanned || user.isDeleted) return next(new Error('AUTH_REJECTED'));
     
     socket.user = user;
     socket.lastLocTime = Date.now();
@@ -117,10 +118,11 @@ io.on('connection', (socket) => {
     if (!isSessionValid) {
       // OPTIMISATION PAYLOAD : Même punition ici en cas de perte de cache
       const dbUser = await User.findById(user._id)
-        .select('_id role isBanned currentLocation')
+        .select('_id role isBanned currentLocation isDeleted')
         .lean();
         
-      if (!dbUser || dbUser.isBanned) {
+      // 🛡️ REJET ABSOLU MÊME EN PLEIN VOL
+      if (!dbUser || dbUser.isBanned || dbUser.isDeleted) {
         if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
         socket.emit('force_disconnect', { reason: 'SESSION_REVOKED' });
         socket.disconnect(true);
