@@ -3,12 +3,14 @@
 // CSCSM Level: Bank Grade
 
 const rateLimit = require('express-rate-limit');
+const { env } = require('../config/env');
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limite chaque IP à 100 requêtes par fenêtre de 15 min
-  standardHeaders: true, // Retourne l'info de limite dans les headers `RateLimit-*`
-  legacyHeaders: false, // Désactive les headers `X-RateLimit-*`
+  // En dev, on laisse 5000 requêtes. En prod, on met un standard industriel (ex: 2500)
+  max: env.NODE_ENV === 'development' ? 5000 : 2500, 
+  standardHeaders: true, 
+  legacyHeaders: false, 
   message: {
     status: 429,
     success: false,

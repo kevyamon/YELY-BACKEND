@@ -23,7 +23,15 @@ const getRedisClient = () => {
       },
     });
 
-    redisClient.on('connect', () => logger.info('[REDIS] Connexion principale etablie avec succes'));
+    redisClient.on('connect', () => {
+      logger.info('[REDIS] Connexion principale etablie avec succes');
+      
+      // AUTO-CORRECTION: Tentative de forçage de la politique mémoire pour éviter les crashs
+      redisClient.config('SET', 'maxmemory-policy', 'noeviction').catch((err) => {
+        logger.warn(`[REDIS] Impossible de forcer "noeviction" (Normal sur les clouds gratuits). Pensez à vider le cache. Détail: ${err.message}`);
+      });
+    });
+
     redisClient.on('error', (err) => logger.error(`[REDIS] Erreur de connexion: ${err.message}`));
 
     // CREATION DES CLIENTS PUB/SUB POUR L'ADAPTATEUR SOCKET.IO
