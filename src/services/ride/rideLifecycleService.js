@@ -106,6 +106,9 @@ const expandSearchRadius = async (io, rideId) => {
   ride.currentSearchRadius = nextRadius;
   await ride.save();
 
+  // NOTIFICATION TEMPS REEL POUR L'UX PASSAGER
+  io.to(ride.rider.toString()).emit('search_expanded', { radius: nextRadius });
+
   logger.info(`[DISPATCH] Agrandissement du rayon a ${nextRadius}m pour la course ${rideId}`);
   
   const drivers = await dispatchToNearbyDrivers(ride, nextRadius);
