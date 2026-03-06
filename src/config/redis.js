@@ -15,7 +15,7 @@ const getRedisClient = () => {
     const redisUrl = env.REDIS_URL || 'redis://localhost:6379';
 
     redisClient = new Redis(redisUrl, {
-      maxRetriesPerRequest: null, // OBLIGATOIRE pour BullMQ
+      maxRetriesPerRequest: null, 
       enableReadyCheck: false,
       retryStrategy(times) {
         const delay = Math.min(times * 50, 2000);
@@ -26,9 +26,9 @@ const getRedisClient = () => {
     redisClient.on('connect', () => {
       logger.info('[REDIS] Connexion principale etablie avec succes');
       
-      // AUTO-CORRECTION: Tentative de forçage de la politique mémoire pour éviter les crashs
-      redisClient.config('SET', 'maxmemory-policy', 'noeviction').catch((err) => {
-        logger.warn(`[REDIS] Impossible de forcer "noeviction" (Normal sur les clouds gratuits). Pensez à vider le cache. Détail: ${err.message}`);
+      // AUTO-CORRECTION: Passage en allkeys-lru pour eviter les crashs de saturation (30MB)
+      redisClient.config('SET', 'maxmemory-policy', 'allkeys-lru').catch((err) => {
+        logger.warn(`[REDIS] Impossible de forcer "allkeys-lru" via le code (Cloud restreint). Configurez-le manuellement sur le dashboard de votre hebergeur. Detail: ${err.message}`);
       });
     });
 

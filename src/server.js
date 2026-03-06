@@ -1,5 +1,5 @@
 // src/server.js
-// SERVEUR YELY - Mode Dev & Production (Rolling Sessions Actives & Redis Optimisé & Anti-Zombie)
+// SERVEUR YELY - Mode Dev & Production (Rolling Sessions Actives & Redis Optimise & Anti-Zombie)
 // STANDARD: Industriel / Bank Grade
 
 const http = require('http');
@@ -83,21 +83,21 @@ io.use(async (socket, next) => {
     if (cachedUser) {
       user = JSON.parse(cachedUser);
     } else {
-      // OPTIMISATION PAYLOAD : On ne prend que le strict nécessaire
       user = await User.findById(decoded.userId)
         .select('_id role isBanned currentLocation isDeleted') 
         .lean();
       
-      if (user) await redis.setex(cacheKey, 900, JSON.stringify(user));
+      if (user) await redis.setex(cacheKey, 900, JSON.stringify(user)).catch(() => {});
     }
     
-    // 🛡️ REJET ABSOLU : Si banni ou supprimé, on coupe le câble instantanément
+    // REJET ABSOLU : Si banni ou supprime, on coupe le cable instantanement
     if (!user || user.isBanned || user.isDeleted) return next(new Error('AUTH_REJECTED'));
     
     socket.user = user;
     socket.lastLocTime = Date.now();
     socket.lastCoords = user.currentLocation?.coordinates || [0,0]; 
     socket.spoofStrikes = 0; 
+    socket.lastDbCheck = Date.now(); // Initialisation du chrono de controle de ban
     
     next();
   } catch (err) {
@@ -112,41 +112,39 @@ io.on('connection', (socket) => {
   if (user.role === 'driver') socket.join('drivers');
 
   socket.on('update_location', async (rawData) => {
-    const cacheKey = `auth:user:${user._id}`;
-    const isSessionValid = await redis.exists(cacheKey);
-    
-    if (!isSessionValid) {
-      // OPTIMISATION PAYLOAD : Même punition ici en cas de perte de cache
-      const dbUser = await User.findById(user._id)
-        .select('_id role isBanned currentLocation isDeleted')
-        .lean();
-        
-      // 🛡️ REJET ABSOLU MÊME EN PLEIN VOL
-      if (!dbUser || dbUser.isBanned || dbUser.isDeleted) {
-        if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
-        socket.emit('force_disconnect', { reason: 'SESSION_REVOKED' });
-        socket.disconnect(true);
-        return;
-      }
-      await redis.setex(cacheKey, 900, JSON.stringify(dbUser));
-    } else {
-      await redis.expire(cacheKey, 900);
-    }
-
+    const now = Date.now();
     const isDev = process.env.NODE_ENV !== 'production';
 
+    // 1. CONTROLE DE SECURITE ASYNCHRONE (Toutes les 5 minutes maximum)
+    // Au lieu de frapper Redis a chaque seconde, on verifie l'etat du compte episodiquement
+    if (now - socket.lastDbCheck > 300000) { 
+      socket.lastDbCheck = now;
+      try {
+        const dbUser = await User.findById(user._id).select('_id isBanned isDeleted').lean();
+        if (!dbUser || dbUser.isBanned || dbUser.isDeleted) {
+          if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
+          socket.emit('force_disconnect', { reason: 'SESSION_REVOKED' });
+          socket.disconnect(true);
+          return;
+        }
+      } catch (err) {
+        logger.warn(`[SOCKET] Verif DB echouee pour ${user._id}, session conservee en memoire.`);
+      }
+    }
+
+    // 2. VALIDATION DES DONNEES
     const parseResult = coordsSchema.safeParse(rawData);
     if (!parseResult.success) {
       if (isDev) console.error('[SOCKET] Erreur validation position:', parseResult.error);
       return; 
     }
-    
     const coords = parseResult.data;
 
+    // 3. RATE LIMITING SOCKET
     const isAllowed = await checkSocketRateLimit(user._id.toString());
     if (!isAllowed) return;
 
-    const now = Date.now();
+    // 4. ANTI-SPOOFING GPS
     const timeDiffSeconds = (now - socket.lastLocTime) / 1000;
     
     if (timeDiffSeconds > 0) { 
@@ -174,11 +172,13 @@ io.on('connection', (socket) => {
     socket.lastLocTime = now;
     socket.lastCoords = [coords.longitude, coords.latitude];
 
+    // 5. APPLICATION DES NOUVELLES COORDONNEES
     try {
-      await User.updateOne({ _id: user._id }, {
+      // Execution asynchrone pour ne pas bloquer le thread du WebSocket
+      User.updateOne({ _id: user._id }, {
         currentLocation: { type: 'Point', coordinates: [coords.longitude, coords.latitude] },
         lastLocationAt: new Date()
-      });
+      }).exec().catch(err => logger.error(`[SOCKET LOC DB] ${err.message}`));
 
       if (user.role === 'driver') {
         await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());
@@ -215,7 +215,6 @@ const startServer = async () => {
     await mongoose.connect(env.MONGO_URI);
     logger.info('[MONGODB] Base de donnees connectee');
     
-    // MODIFICATION CLÉ: Ajout de '0.0.0.0' pour l'exposition publique
     server.listen(env.PORT, '0.0.0.0', () => {
       logger.info(`[SERVER] Serveur Yely actif sur 0.0.0.0:${env.PORT}`);
     });
