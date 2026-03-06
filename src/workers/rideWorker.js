@@ -3,7 +3,8 @@
 // CSCSM Level: Bank Grade
 
 const { Worker } = require('bullmq'); 
-const rideService = require('../services/rideService');
+// CORRECTION CRITIQUE : Import direct du service de cycle de vie (bypasse la facade globale)
+const rideLifecycleService = require('../services/ride/rideLifecycleService');
 const logger = require('../config/logger');
 const { env } = require('../config/env');
 
@@ -15,22 +16,21 @@ const startRideWorker = (io) => {
         if (job.name === 'expand-search') {
           const { rideId } = job.data;
           logger.info(`[WORKER] Verification et agrandissement du rayon pour : ${rideId}`);
-          await rideService.expandSearchRadius(io, rideId);
+          await rideLifecycleService.expandSearchRadius(io, rideId);
         }
         else if (job.name === 'check-stuck-negotiation') {
-          // Si le chauffeur a verrouillé la course mais n'a rien cliqué après 60s
           const { rideId } = job.data;
           logger.info(`[WORKER] Libération du chauffeur muet pour la course : ${rideId}`);
-          await rideService.releaseStuckNegotiations(io, rideId);
+          await rideLifecycleService.releaseStuckNegotiations(io, rideId);
         } 
         else if (job.name === 'check-search-timeout') {
-          // Fin du temps de recherche après l'atteinte du rayon maximum
           const { rideId } = job.data;
           logger.info(`[WORKER] Fin definitive du temps de recherche pour la course : ${rideId}`);
-          await rideService.cancelSearchTimeout(io, rideId);
+          await rideLifecycleService.cancelSearchTimeout(io, rideId);
         }
       } catch (error) {
-        logger.error(`[WORKER ERROR] Job ${job.id} failed: ${error.message}`);
+        // C'est ici que l'erreur silencieuse se produisait en arriere-plan
+        logger.error(`[WORKER ERROR] Job ${job.name} a echoue : ${error.message}`);
         throw error; 
       }
     },
@@ -47,7 +47,7 @@ const startRideWorker = (io) => {
   });
 
   worker.on('failed', (job, err) => {
-    logger.error(`[WORKER] Job ${job.name} a échoué : ${err.message}`);
+    logger.error(`[WORKER] Job ${job.name} a échoué en boucle : ${err.message}`);
   });
 
   logger.info('Worker de nettoyage et dispatch des courses actif');
