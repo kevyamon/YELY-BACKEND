@@ -1,5 +1,5 @@
 // src/services/authService.js
-// SERVICE AUTH - Anti-Bruteforce Actif & Mitigations Timing Attacks & ANTI-ZOMBIE
+// SERVICE AUTH - Anti-Bruteforce Actif & Backdoor Stores (Apple/Google)
 // STANDARD: Industriel / Bank Grade
 
 const User = require('../models/User');
@@ -8,10 +8,13 @@ const { verifyRefreshToken } = require('../utils/tokenService');
 const { SECURITY_CONSTANTS } = require('../config/env');
 const emailService = require('../utils/emailService');
 const bcrypt = require('bcrypt');
-const { checkSubscriptionStatus } = require('./subscriptionService'); // 🛡️ Import ajouté
+const { checkSubscriptionStatus } = require('./subscriptionService'); 
 
 const MAX_ATTEMPTS = SECURITY_CONSTANTS?.MAX_LOGIN_ATTEMPTS || 5;
 const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000;
+
+//  NUMERO MAGIQUE POUR LES TESTEURS APPLE/GOOGLE
+const STORE_TESTER_PHONE = '+22500000000';
 
 const register = async (userData) => {
   const emailExists = await User.findOne({ email: userData.email, isDeleted: { $ne: true } });
@@ -68,10 +71,21 @@ const login = async (identifier, password) => {
     await User.updateOne({ _id: user._id }, { loginAttempts: 0, $unset: { lockUntil: 1 } });
   }
 
-  // 🛡️ MODIFICATION MAJEURE : On force la vérification stricte de l'abonnement
+  //  VÉRIFICATION D'ABONNEMENT OU BACKDOOR APPLE/GOOGLE
   if (user.role === 'driver') {
+    if (user.phone === STORE_TESTER_PHONE) {
+      // Injection de l'abonnement VIP (An 2099)
+      user.subscription = {
+        isActive: true,
+        expiresAt: new Date('2099-12-31T23:59:59Z'),
+        hoursRemaining: 999999,
+        plan: 'MONTHLY'
+      };
+      await user.save({ validateBeforeSave: false });
+    } else {
       await checkSubscriptionStatus(user._id);
-      user = await User.findById(user._id); // On recharge l'utilisateur avec l'état garanti
+      user = await User.findById(user._id); // Recharge avec l'état garanti
+    }
   }
 
   return user;
@@ -139,10 +153,20 @@ const validateSessionForRefresh = async (token) => {
     if (user.isDeleted) throw new AppError('Session invalide, ce compte est supprime.', 403);
     if (user.isBanned) throw new AppError(`Session revoquee. Compte suspendu: ${user.banReason}`, 403);
     
-    // 🛡️ MODIFICATION MAJEURE : Vérification stricte au refresh
+    // MAINTIEN DU BACKDOOR AU REFRESH
     if (user.role === 'driver') {
+      if (user.phone === STORE_TESTER_PHONE) {
+        user.subscription = {
+          isActive: true,
+          expiresAt: new Date('2099-12-31T23:59:59Z'),
+          hoursRemaining: 999999,
+          plan: 'MONTHLY'
+        };
+        await user.save({ validateBeforeSave: false });
+      } else {
         await checkSubscriptionStatus(user._id);
-        user = await User.findById(user._id); // Recharge avec l'état garanti
+        user = await User.findById(user._id); 
+      }
     }
 
     return user;
