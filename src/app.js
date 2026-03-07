@@ -1,4 +1,4 @@
-// src/app.js [MODIFIÉ]
+// src/app.js
 // CONFIGURATION EXPRESS FORTERESSE - Versioning API & Securite Flux
 // CSCSM Level: Bank Grade
 
@@ -25,7 +25,10 @@ const userRoutes = require('./routes/userRoutes');
 const healthRoutes = require('./routes/healthRoutes');
 const poiRoutes = require('./routes/poiRoutes');
 
-// Initialisation de Sentry au tout début pour capter les erreurs globales
+// Extraction des origines autorisees en tableau
+const allowedOriginsList = env.ALLOWED_ORIGINS.split(',').map(url => url.trim());
+
+// Initialisation de Sentry au tout debut pour capter les erreurs globales
 if (env.SENTRY_DSN) {
   Sentry.init({
     dsn: env.SENTRY_DSN,
@@ -57,7 +60,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'"],
       imgSrc: ["'self'", "data:", "https://res.cloudinary.com"],
-      connectSrc: ["'self'", env.FRONTEND_URL],
+      connectSrc: ["'self'", ...allowedOriginsList], // Injection du tableau dynamique
     },
   },
   crossOriginEmbedderPolicy: false,
@@ -66,8 +69,8 @@ app.use(helmet({
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    const allowedOrigins = [env.FRONTEND_URL];
-    if (allowedOrigins.includes(origin) || env.NODE_ENV === 'development') {
+    
+    if (allowedOriginsList.includes(origin) || env.NODE_ENV === 'development') {
       callback(null, true);
     } else {
       logger.warn(`[CORS] Origine rejetee: ${origin}`);

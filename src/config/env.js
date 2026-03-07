@@ -23,7 +23,8 @@ const envSchema = z.object({
   JWT_ACCESS_EXPIRATION: z.string().default('15m'),
   JWT_REFRESH_EXPIRATION: z.string().default('30d'),
   
-  FRONTEND_URL: z.string().url('FRONTEND_URL doit etre une URL valide'),
+  // MODIFICATION ICI : On passe d'une seule URL a une liste d'origines autorisees
+  ALLOWED_ORIGINS: z.string().min(1, 'ALLOWED_ORIGINS requis (urls separees par des virgules)'),
   
   CLOUDINARY_CLOUD_NAME: z.string().min(1, 'Cloudinary Cloud Name requis'),
   CLOUDINARY_API_KEY: z.string().min(1, 'Cloudinary API Key requise'),
