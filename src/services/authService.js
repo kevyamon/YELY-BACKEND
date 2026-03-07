@@ -216,6 +216,6 @@ module.exports = {
   login,
   forgotPassword,
   resetPasswordWithOtp,
-  validateSessionForRefresh,
+  validateSessionForRefresh, 
   updateAvailability
 };
