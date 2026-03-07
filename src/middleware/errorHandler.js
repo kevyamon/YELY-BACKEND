@@ -7,6 +7,7 @@ const logger = require('../config/logger');
 const CONSTANTS = require('../utils/constants');
 const AppError = require('../utils/AppError');
 const { env } = require('../config/env');
+const emailService = require('../utils/emailService');
 
 const errorHandler = (err, req, res, next) => {
   let error = { ...err };
@@ -21,10 +22,10 @@ const errorHandler = (err, req, res, next) => {
   if (error.code === 11000) {
     const field = Object.keys(error.keyValue)[0];
     const message = field === 'email' 
-      ? 'Un compte existe déjà avec cette adresse e-mail. Veuillez vous connecter.' 
+      ? 'Un compte existe deja avec cette adresse e-mail. Veuillez vous connecter.' 
       : field === 'phone'
-      ? 'Ce numéro de téléphone est déjà associé à un autre compte.'
-      : 'Ces informations sont déjà utilisées dans notre système.';
+      ? 'Ce numero de telephone est deja associe a un autre compte.'
+      : 'Ces informations sont deja utilisees dans notre systeme.';
     error = new AppError(message, 409);
     error.isOperational = true;
   }
@@ -35,7 +36,7 @@ const errorHandler = (err, req, res, next) => {
   }
 
   if (error.name === 'ValidationError') {
-    error = new AppError('Certaines données fournies sont invalides. Veuillez vérifier votre saisie.', 400);
+    error = new AppError('Certaines donnees fournies sont invalides. Veuillez verifier votre saisie.', 400);
     error.isOperational = true;
   }
 
@@ -45,7 +46,7 @@ const errorHandler = (err, req, res, next) => {
   }
   
   if (error.name === 'TokenExpiredError') {
-    error = new AppError('Votre session a expiré. Veuillez vous reconnecter.', 401);
+    error = new AppError('Votre session a expire. Veuillez vous reconnecter.', 401);
     error.isOperational = true;
   }
 
@@ -60,7 +61,29 @@ const errorHandler = (err, req, res, next) => {
     stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
   };
 
-  // Envoi silencieux à Sentry des erreurs critiques (non opérationnelles ou plantage serveur)
+  // DETECTION DES DEPASSEMENTS DE QUOTAS (Services Externes)
+  const errorMsgStr = error.message ? error.message.toLowerCase() : '';
+  const isQuotaError = 
+    errorMsgStr.includes('quota') || 
+    errorMsgStr.includes('rate limit') || 
+    errorMsgStr.includes('too many requests') || 
+    errorMsgStr.includes('max memory') || 
+    error.name === 'MongoTimeoutError';
+
+  if (isQuotaError && env.NODE_ENV === 'production') {
+    logger.error(`[ALERTE QUOTA] Un service externe atteint ses limites !`, { message: error.message });
+    
+    try {
+      emailService.sendAdminAlert(
+        `Limite de Quota Atteinte`, 
+        `Une erreur liee aux quotas a ete detectee en production.\n\nErreur : ${error.message}\nRoute : ${req.originalUrl}\nRequest ID : ${requestId}`
+      );
+    } catch (mailErr) {
+      logger.error(`[ALERTE QUOTA] Echec de l'envoi de l'email d'alerte`, mailErr);
+    }
+  }
+
+  // Envoi silencieux a Sentry des erreurs critiques (non operationnelles ou plantage serveur)
   if (env.SENTRY_DSN && (!error.isOperational || statusCode >= 500)) {
     Sentry.captureException(err, {
       tags: { requestId, route: req.originalUrl },
@@ -79,7 +102,7 @@ const errorHandler = (err, req, res, next) => {
     status: error.status || 'error',
     message: error.isOperational 
       ? error.message 
-      : 'Une erreur interne est survenue. Notre équipe technique a été automatiquement notifiée.',
+      : 'Une erreur interne est survenue. Notre equipe technique a ete automatiquement notifiee.',
     requestId,
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });

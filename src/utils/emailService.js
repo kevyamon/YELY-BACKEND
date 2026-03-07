@@ -55,7 +55,7 @@ const sendOtpEmail = async (to, otp) => {
       {
         sender: { email: process.env.EMAIL_FROM, name: "Yely Support" },
         to: [{ email: to }],
-        subject: `🔐 ${otp} est votre code de sécurité Yely`,
+        subject: `Code de securite Yely: ${otp}`,
         htmlContent: htmlContent
       },
       {
@@ -74,4 +74,37 @@ const sendOtpEmail = async (to, otp) => {
   }
 };
 
-module.exports = { sendOtpEmail };
+const sendAdminAlert = async (subject, textContent) => {
+  try {
+    const adminEmail = process.env.ADMIN_EMAIL;
+    
+    if (!adminEmail) {
+      console.warn("[EMAIL WARN] ADMIN_EMAIL non defini. Alerte non envoyee.");
+      return false;
+    }
+
+    await axios.post(
+      'https://api.brevo.com/v3/smtp/email',
+      {
+        sender: { email: process.env.EMAIL_FROM, name: "Yely System Alert" },
+        to: [{ email: adminEmail }],
+        subject: `ALERTE SYSTEME : ${subject}`,
+        textContent: textContent
+      },
+      {
+        headers: {
+          'accept': 'application/json',
+          'api-key': process.env.BREVO_API_KEY,
+          'content-type': 'application/json'
+        }
+      }
+    );
+    return true;
+  } catch (error) {
+    const errorDetails = error.response ? JSON.stringify(error.response.data) : error.message;
+    console.error("[EMAIL ERROR] Echec d'envoi alerte admin :", errorDetails);
+    return false;
+  }
+};
+
+module.exports = { sendOtpEmail, sendAdminAlert };
