@@ -1,13 +1,12 @@
 // src/middleware/authMiddleware.js
-// AUTHENTIFICATION FORTERESSE - Validation ObjectId, RBAC, Anti-tampering & CACHE REDIS (Tolérant aux pannes)
-// CSCSM Level: Bank Grade
+// AUTHENTIFICATION FORTERESSE - Validation ObjectId, RBAC, Anti-tampering (Temps Réel)
+// STANDARD: Bank Grade
 
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const { verifyAccessToken } = require('../utils/tokenService');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
-const redisClient = require('../config/redis');
 
 /**
  * Valide qu'une chaîne est un ObjectId MongoDB valide
@@ -47,34 +46,13 @@ const protect = async (req, res, next) => {
       throw new AppError('Token corrompu.', 401);
     }
 
-    // 4. Vérification dans le cache Redis (AVEC FALLBACK SECURISÉ)
-    const cacheKey = `auth:user:${decoded.userId}`;
-    let user = null;
-    let cachedUser = null;
-
-    // Tentative de lecture Redis sécurisée
-    try {
-      cachedUser = await redisClient.get(cacheKey);
-    } catch (redisError) {
-      logger.warn(`[REDIS FALLBACK] Impossible de lire le cache pour ${decoded.userId}, bascule vers MongoDB.`);
-    }
-
-    if (cachedUser) {
-      user = JSON.parse(cachedUser);
-    } else {
-      // Récupération Utilisateur (Data Scrubbing .lean())
-      user = await User.findById(decoded.userId).select('-password -__v').lean();
+    // 4. Récupération Utilisateur en Temps Réel (Data Scrubbing .lean() pour la performance)
+    // MODIFICATION : Suppression du cache Redis. Indispensable pour que le déblocage 
+    // des abonnements par les admins soit perçu instantanément par les chauffeurs.
+    const user = await User.findById(decoded.userId).select('-password -__v').lean();
       
-      if (!user) {
-        throw new AppError('L\'utilisateur appartenant à ce token n\'existe plus.', 401);
-      }
-      
-      // Tentative d'écriture Redis sécurisée
-      try {
-        await redisClient.setex(cacheKey, 900, JSON.stringify(user));
-      } catch (redisError) {
-        // On ne fait rien, ce n'est pas grave si on ne peut pas mettre en cache
-      }
+    if (!user) {
+      throw new AppError('L\'utilisateur appartenant à ce token n\'existe plus.', 401);
     }
 
     // 5. Vérification Ban
@@ -83,16 +61,9 @@ const protect = async (req, res, next) => {
       throw new AppError(`Compte suspendu: ${user.banReason || 'Raison non spécifiée'}`, 403);
     }
 
-    // 6. Synchronisation dynamique du rôle (Évite la déconnexion forcée)
+    // 6. Synchronisation dynamique du rôle
     if (decoded.role && decoded.role !== user.role) {
       logger.info(`[AUTH SYNC] Rôle Token (${decoded.role}) différent de la DB (${user.role}) pour ${user.email}. Application du nouveau rôle en temps réel.`);
-      
-      // Tentative de purge Redis sécurisée
-      try {
-        await redisClient.del(cacheKey); 
-      } catch (redisError) {
-        // Silencieux
-      }
     }
 
     // 7. Attachement User Sécurisé
@@ -118,7 +89,7 @@ const authorize = (...roles) => {
 };
 
 /**
- * Middleware authentification optionnelle (Avec Fallback Sécurisé)
+ * Middleware authentification optionnelle
  */
 const optionalAuth = async (req, res, next) => {
   try {
@@ -130,27 +101,9 @@ const optionalAuth = async (req, res, next) => {
     if (!token) return next();
 
     const decoded = verifyAccessToken(token);
-    const cacheKey = `auth:user:${decoded.userId}`;
     
-    let user = null;
-    let cachedUser = null;
-
-    try {
-      cachedUser = await redisClient.get(cacheKey);
-    } catch (redisError) {
-      // Silencieux
-    }
-    
-    if (cachedUser) {
-      user = JSON.parse(cachedUser);
-    } else {
-      user = await User.findById(decoded.userId).select('name email role isBanned').lean();
-      if (user) {
-        try {
-          await redisClient.setex(cacheKey, 900, JSON.stringify(user));
-        } catch (redisError) {}
-      }
-    }
+    // MODIFICATION : Lecture directe DB pour garantir la fraîcheur des données
+    const user = await User.findById(decoded.userId).select('name email role isBanned').lean();
 
     if (user && !user.isBanned) {
       req.user = user;
