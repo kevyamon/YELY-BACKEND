@@ -1,19 +1,19 @@
 // src/services/authService.js
-// SERVICE AUTH - Anti-Bruteforce Actif & Backdoor Stores (Apple/Google)
+// SERVICE AUTH - Synchronisation Parfaite & Backdoor Stores (Apple/Google)
 // STANDARD: Industriel / Bank Grade
 
 const User = require('../models/User');
+const Transaction = require('../models/Transaction'); // AJOUT CRITIQUE : Pour vérifier l'état PENDING
 const AppError = require('../utils/AppError');
 const { verifyRefreshToken } = require('../utils/tokenService');
 const { SECURITY_CONSTANTS } = require('../config/env');
 const emailService = require('../utils/emailService');
 const bcrypt = require('bcrypt');
-const { checkSubscriptionStatus } = require('./subscriptionService'); 
 
 const MAX_ATTEMPTS = SECURITY_CONSTANTS?.MAX_LOGIN_ATTEMPTS || 5;
 const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000;
 
-//  NUMERO MAGIQUE POUR LES TESTEURS APPLE/GOOGLE
+// NUMERO MAGIQUE POUR LES TESTEURS APPLE/GOOGLE
 const STORE_TESTER_PHONE = '+22500000000';
 
 const register = async (userData) => {
@@ -71,10 +71,9 @@ const login = async (identifier, password) => {
     await User.updateOne({ _id: user._id }, { loginAttempts: 0, $unset: { lockUntil: 1 } });
   }
 
-  //  VÉRIFICATION D'ABONNEMENT OU BACKDOOR APPLE/GOOGLE
+  // MODIFICATION MAJEURE : Synchronisation Mathématique et Injection de l'état PENDING
   if (user.role === 'driver') {
     if (user.phone === STORE_TESTER_PHONE) {
-      // Injection de l'abonnement VIP (An 2099)
       user.subscription = {
         isActive: true,
         expiresAt: new Date('2099-12-31T23:59:59Z'),
@@ -82,10 +81,25 @@ const login = async (identifier, password) => {
         plan: 'MONTHLY'
       };
       await user.save({ validateBeforeSave: false });
+      user = user.toObject();
+      user.subscription.isPending = false;
     } else {
-      await checkSubscriptionStatus(user._id);
-      user = await User.findById(user._id); // Recharge avec l'état garanti
+      // 1. On force la synchronisation (corrige les abonnements si isActive est resté sur false par erreur)
+      const changed = user.syncSubscription();
+      if (changed) {
+        await user.save({ validateBeforeSave: false });
+      }
+      
+      // 2. On vérifie s'il y a une capture en attente
+      const pendingTx = await Transaction.findOne({ user: user._id, status: 'PENDING' });
+      
+      // 3. Conversion en objet simple pour injecter des champs dynamiques
+      user = user.toObject();
+      user.subscription = user.subscription || {};
+      user.subscription.isPending = !!pendingTx; 
     }
+  } else {
+    user = user.toObject();
   }
 
   return user;
@@ -153,7 +167,7 @@ const validateSessionForRefresh = async (token) => {
     if (user.isDeleted) throw new AppError('Session invalide, ce compte est supprime.', 403);
     if (user.isBanned) throw new AppError(`Session revoquee. Compte suspendu: ${user.banReason}`, 403);
     
-    // MAINTIEN DU BACKDOOR AU REFRESH
+    // MODIFICATION MAJEURE : Application de la même logique stricte qu'au Login
     if (user.role === 'driver') {
       if (user.phone === STORE_TESTER_PHONE) {
         user.subscription = {
@@ -163,10 +177,21 @@ const validateSessionForRefresh = async (token) => {
           plan: 'MONTHLY'
         };
         await user.save({ validateBeforeSave: false });
+        user = user.toObject();
+        user.subscription.isPending = false;
       } else {
-        await checkSubscriptionStatus(user._id);
-        user = await User.findById(user._id); 
+        const changed = user.syncSubscription();
+        if (changed) {
+          await user.save({ validateBeforeSave: false });
+        }
+        const pendingTx = await Transaction.findOne({ user: user._id, status: 'PENDING' });
+        
+        user = user.toObject();
+        user.subscription = user.subscription || {};
+        user.subscription.isPending = !!pendingTx;
       }
+    } else {
+      user = user.toObject();
     }
 
     return user;
