@@ -3,7 +3,8 @@
 // STANDARD: Industriel / Bank Grade
 
 const User = require('../models/User');
-const Transaction = require('../models/Transaction'); // AJOUT CRITIQUE : Pour vérifier l'état PENDING
+const Transaction = require('../models/Transaction');
+const Settings = require('../models/Settings'); // NOUVEAU: Import des settings
 const AppError = require('../utils/AppError');
 const { verifyRefreshToken } = require('../utils/tokenService');
 const { SECURITY_CONSTANTS } = require('../config/env');
@@ -13,8 +14,8 @@ const bcrypt = require('bcrypt');
 const MAX_ATTEMPTS = SECURITY_CONSTANTS?.MAX_LOGIN_ATTEMPTS || 5;
 const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000;
 
-// NUMERO MAGIQUE POUR LES TESTEURS APPLE/GOOGLE
-const STORE_TESTER_PHONE = '+22500000000';
+// NUMERO MAGIQUE POUR LES TESTEURS APPLE/GOOGLE (Correction à 8 zéros)
+const STORE_TESTER_PHONE = '+2250000000';
 
 const register = async (userData) => {
   const emailExists = await User.findOne({ email: userData.email, isDeleted: { $ne: true } });
@@ -71,32 +72,34 @@ const login = async (identifier, password) => {
     await User.updateOne({ _id: user._id }, { loginAttempts: 0, $unset: { lockUntil: 1 } });
   }
 
-  // MODIFICATION MAJEURE : Synchronisation Mathématique et Injection de l'état PENDING
   if (user.role === 'driver') {
-    if (user.phone === STORE_TESTER_PHONE) {
+    const settings = await Settings.findOne();
+    const isGlobalFreeAccess = settings?.isGlobalFreeAccess || false;
+
+    if (user.phone === STORE_TESTER_PHONE || isGlobalFreeAccess) {
       user.subscription = {
         isActive: true,
         expiresAt: new Date('2099-12-31T23:59:59Z'),
         hoursRemaining: 999999,
         plan: 'MONTHLY'
       };
-      await user.save({ validateBeforeSave: false });
+      if (user.phone === STORE_TESTER_PHONE) {
+        await User.updateOne({ _id: user._id }, { subscription: user.subscription });
+      }
       user = user.toObject();
       user.subscription.isPending = false;
+      user.subscription.isGlobalFreeAccess = isGlobalFreeAccess; // Flag pour le frontend
     } else {
-      // 1. On force la synchronisation (corrige les abonnements si isActive est resté sur false par erreur)
       const changed = user.syncSubscription();
       if (changed) {
         await user.save({ validateBeforeSave: false });
       }
-      
-      // 2. On vérifie s'il y a une capture en attente
       const pendingTx = await Transaction.findOne({ user: user._id, status: 'PENDING' });
       
-      // 3. Conversion en objet simple pour injecter des champs dynamiques
       user = user.toObject();
       user.subscription = user.subscription || {};
       user.subscription.isPending = !!pendingTx; 
+      user.subscription.isGlobalFreeAccess = false;
     }
   } else {
     user = user.toObject();
@@ -167,18 +170,20 @@ const validateSessionForRefresh = async (token) => {
     if (user.isDeleted) throw new AppError('Session invalide, ce compte est supprime.', 403);
     if (user.isBanned) throw new AppError(`Session revoquee. Compte suspendu: ${user.banReason}`, 403);
     
-    // MODIFICATION MAJEURE : Application de la même logique stricte qu'au Login
     if (user.role === 'driver') {
-      if (user.phone === STORE_TESTER_PHONE) {
+      const settings = await Settings.findOne();
+      const isGlobalFreeAccess = settings?.isGlobalFreeAccess || false;
+
+      if (user.phone === STORE_TESTER_PHONE || isGlobalFreeAccess) {
         user.subscription = {
           isActive: true,
           expiresAt: new Date('2099-12-31T23:59:59Z'),
           hoursRemaining: 999999,
           plan: 'MONTHLY'
         };
-        await user.save({ validateBeforeSave: false });
         user = user.toObject();
         user.subscription.isPending = false;
+        user.subscription.isGlobalFreeAccess = isGlobalFreeAccess;
       } else {
         const changed = user.syncSubscription();
         if (changed) {
@@ -189,6 +194,7 @@ const validateSessionForRefresh = async (token) => {
         user = user.toObject();
         user.subscription = user.subscription || {};
         user.subscription.isPending = !!pendingTx;
+        user.subscription.isGlobalFreeAccess = false;
       }
     } else {
       user = user.toObject();

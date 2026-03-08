@@ -250,6 +250,22 @@ const getAllUsers = async (query, userRole, requesterId) => {
   return { users, pagination: { page, total, pages: Math.ceil(total / limit) } };
 };
 
+// A AJOUTER A LA FIN DU FICHIER src/services/adminService.js EXISTANT (avant le module.exports)
+
+const toggleGlobalFreeAccess = async (isActive, requesterId) => {
+  let settings = await Settings.findOne();
+  if (!settings) settings = new Settings();
+  
+  settings.isGlobalFreeAccess = isActive;
+  settings.updatedBy = requesterId;
+  await settings.save();
+  
+  await logSystemAction(requesterId, 'TOGGLE_FREE_ACCESS', settings._id, `Gratuite globale pour les chauffeurs: ${isActive}`);
+  return { isGlobalFreeAccess: settings.isGlobalFreeAccess };
+};
+
+
+
 module.exports = {
   updateUserRole,
   toggleUserBan,
@@ -260,5 +276,7 @@ module.exports = {
   getFinanceData,
   togglePromo,
   updateWaveLinks,
-  getAllUsers
+  getAllUsers,
+  toggleGlobalFreeAccess
+
 };

@@ -19,7 +19,6 @@ const {
 router.get('/stats', protect, authorize('admin', 'superadmin'), adminController.getDashboardStats);
 router.get('/users', protect, authorize('admin', 'superadmin'), adminController.getAllUsers);
 router.get('/validations', protect, authorize('admin', 'superadmin'), adminController.getValidationQueue);
-// AJOUT SENIOR: Route pour lire le journal d'audit
 router.get('/logs', protect, authorize('admin', 'superadmin'), adminController.getAuditLogs);
 
 router.post('/approve/:id', 
@@ -42,8 +41,9 @@ router.get('/finance', protect, authorize('superadmin'), adminController.getFina
 router.put('/finance/links', protect, authorize('superadmin'), adminController.updateWaveLinks);
 router.put('/promo/toggle', protect, authorize('superadmin'), adminController.togglePromo);
 
-// NOUVEAU: Bouton Reduire la Charge
+// OPÉRATIONS SPÉCIALES ET CHARGE
 router.put('/load-reduce/toggle', protect, authorize('superadmin'), adminController.toggleLoadReduce);
+router.put('/free-access/toggle', protect, authorize('superadmin'), adminController.toggleGlobalFreeAccess);
 
 router.post('/update-role', protect, authorize('superadmin'), validate(updateRoleSchema), adminController.updateAdminStatus);
 router.post('/toggle-ban', protect, authorize('superadmin'), validate(toggleBanSchema), adminController.toggleUserBan);

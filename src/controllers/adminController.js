@@ -269,6 +269,29 @@ const toggleLoadReduce = async (req, res) => {
   }
 };
 
+// A AJOUTER A LA FIN DU FICHIER src/controllers/adminController.js EXISTANT (avant le module.exports)
+
+const toggleGlobalFreeAccess = async (req, res) => {
+  try {
+    const result = await adminService.toggleGlobalFreeAccess(req.body.isActive, req.user._id);
+
+    try {
+      const io = req.app.get('socketio');
+      if (io) {
+        // Notifier tous les clients du changement de gratuité
+        io.emit('free_access_updated', { isGlobalFreeAccess: result.isGlobalFreeAccess });
+      }
+    } catch (socketError) {
+      logger.error(`[SOCKET FREE ACCESS] Echec: ${socketError.message}`);
+    }
+
+    return successResponse(res, result, "Statut de gratuite mis a jour avec succes.");
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+
 module.exports = {
   updateAdminStatus,
   toggleUserBan,
@@ -282,5 +305,7 @@ module.exports = {
   togglePromo,
   updateWaveLinks,
   getAuditLogs,
-  toggleLoadReduce
+  toggleLoadReduce,
+  toggleGlobalFreeAccess
+
 };
