@@ -6,6 +6,21 @@ const Redis = require('ioredis');
 const { env } = require('./env');
 const logger = require('./logger');
 
+// SILENCIEUX GLOBAL: Interception des avertissements intempestifs de la librairie de Workers
+// Ces messages spamment les logs car les fournisseurs Cloud (Render, Upstash) verrouillent la configuration d'eviction.
+const originalConsoleLog = console.log;
+const originalConsoleWarn = console.warn;
+
+console.log = function (...args) {
+  if (typeof args[0] === 'string' && args[0].includes('Eviction policy is')) return;
+  originalConsoleLog.apply(console, args);
+};
+
+console.warn = function (...args) {
+  if (typeof args[0] === 'string' && args[0].includes('Eviction policy is')) return;
+  originalConsoleWarn.apply(console, args);
+};
+
 let redisClient = null;
 
 const getRedisClient = () => {
@@ -25,11 +40,7 @@ const getRedisClient = () => {
 
     redisClient.on('connect', () => {
       logger.info('[REDIS] Connexion principale etablie avec succes');
-      
-      // AUTO-CORRECTION: Passage en allkeys-lru pour eviter les crashs de saturation (30MB)
-      redisClient.config('SET', 'maxmemory-policy', 'allkeys-lru').catch((err) => {
-        logger.warn(`[REDIS] Impossible de forcer "allkeys-lru" via le code (Cloud restreint). Configurez-le manuellement sur le dashboard de votre hebergeur. Detail: ${err.message}`);
-      });
+      // La tentative de modification de maxmemory-policy a ete retiree ici pour eviter l'erreur "Unsupported CONFIG parameter".
     });
 
     redisClient.on('error', (err) => logger.error(`[REDIS] Erreur de connexion: ${err.message}`));
