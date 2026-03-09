@@ -6,6 +6,7 @@ const subscriptionService = require('../services/subscriptionService');
 const { successResponse } = require('../utils/responseHandler');
 const Transaction = require('../models/Transaction');
 const User = require('../models/User');
+const Settings = require('../models/Settings'); // IMPORT DU MODELE SETTINGS POUR LE VIP
 const logger = require('../config/logger');
 const AppError = require('../utils/AppError');
 
@@ -13,11 +14,21 @@ const getConfig = async (req, res, next) => {
   try {
     const config = await subscriptionService.getSubscriptionPricing();
     
+    // RECUPERATION EN TEMPS REEL DU STATUT VIP
+    const settings = await Settings.findOne();
+    
     if (!config.weekly.link || !config.monthly.link) {
-      logger.warn("[CONFIG WARNING]: Liens de paiement manquants dans les variables d'environnement ou la base de données.");
+      logger.warn("[CONFIG WARNING]: Liens de paiement manquants dans les variables d'environnement ou la base de donnees.");
     }
 
-    return successResponse(res, config, "Configuration tarifaire récupérée avec succès.", 200);
+    // ON INJECTE LE STATUT VIP DANS LA REPONSE DE CONFIGURATION
+    const enrichedConfig = {
+      ...config,
+      isGlobalFreeAccess: settings?.isGlobalFreeAccess || false,
+      promoMessage: settings?.promoMessage || ""
+    };
+
+    return successResponse(res, enrichedConfig, "Configuration tarifaire recuperee avec succes.", 200);
   } catch (error) {
     return next(error);
   }
@@ -28,7 +39,7 @@ const submitProof = async (req, res, next) => {
     const { planId, senderPhone } = req.body;
     
     if (!planId || !senderPhone || !req.file) {
-      throw new AppError("Veuillez fournir un plan, un numéro de téléphone et une capture d'écran valide.", 400);
+      throw new AppError("Veuillez fournir un plan, un numero de telephone et une capture d'ecran valide.", 400);
     }
 
     const transaction = await subscriptionService.submitProof(
@@ -40,7 +51,7 @@ const submitProof = async (req, res, next) => {
     return successResponse(
       res, 
       { transactionId: transaction._id }, 
-      "Preuve reçue. Un administrateur va vérifier votre paiement. Accès prévu sous 15 minutes.", 
+      "Preuve recue. Un administrateur va verifier votre paiement. Acces prevu sous 15 minutes.", 
       201
     );
 
@@ -69,7 +80,7 @@ const getStatus = async (req, res, next) => {
         { $set: { 'subscription.expiresAt': exactExpiresAt } }
       );
       
-      logger.info(`[SUBSCRIPTION FIX] Date d'expiration générée et figée pour l'utilisateur ${req.user._id}`);
+      logger.info(`[SUBSCRIPTION FIX] Date d'expiration generee et figee pour l'utilisateur ${req.user._id}`);
     }
 
     return successResponse(res, {
