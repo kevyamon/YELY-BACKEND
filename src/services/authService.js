@@ -4,7 +4,7 @@
 
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
-const Settings = require('../models/Settings'); // NOUVEAU: Import des settings
+const Settings = require('../models/Settings'); 
 const AppError = require('../utils/AppError');
 const { verifyRefreshToken } = require('../utils/tokenService');
 const { SECURITY_CONSTANTS } = require('../config/env');
@@ -14,7 +14,7 @@ const bcrypt = require('bcrypt');
 const MAX_ATTEMPTS = SECURITY_CONSTANTS?.MAX_LOGIN_ATTEMPTS || 5;
 const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000;
 
-// NUMERO MAGIQUE POUR LES TESTEURS APPLE/GOOGLE (Correction à 8 zéros)
+// NUMERO MAGIQUE POUR LES TESTEURS APPLE/GOOGLE (Correction a 8 zeros)
 const STORE_TESTER_PHONE = '+2250000000';
 
 const register = async (userData) => {
@@ -32,7 +32,7 @@ const register = async (userData) => {
   return user;
 };
 
-const login = async (identifier, password) => {
+const login = async (identifier, password, clientPlatform) => {
   const isEmail = identifier.includes('@');
   const normalizedId = isEmail ? identifier.toLowerCase().trim() : identifier.replace(/\s/g, '');
 
@@ -47,6 +47,13 @@ const login = async (identifier, password) => {
 
   if (user.isDeleted) throw new AppError('Ce compte a ete supprime et ne peut plus se connecter.', 403);
   if (user.isBanned) throw new AppError(`Compte suspendu: ${user.banReason}`, 403);
+
+  // Verrou Architectural: Controle strict de la plateforme pour les chauffeurs
+  if (user.role === 'driver' && user.phone !== STORE_TESTER_PHONE) {
+    if (!clientPlatform || clientPlatform.toLowerCase() !== 'android') {
+      throw new AppError('DEVICE_NOT_SUPPORTED', 403);
+    }
+  }
 
   if (user.lockUntil && user.lockUntil > Date.now()) {
     const minutesLeft = Math.ceil((user.lockUntil - Date.now()) / 60000);
@@ -88,7 +95,7 @@ const login = async (identifier, password) => {
       }
       user = user.toObject();
       user.subscription.isPending = false;
-      user.subscription.isGlobalFreeAccess = isGlobalFreeAccess; // Flag pour le frontend
+      user.subscription.isGlobalFreeAccess = isGlobalFreeAccess;
     } else {
       const changed = user.syncSubscription();
       if (changed) {
@@ -153,7 +160,7 @@ const resetPasswordWithOtp = async (email, otp, newPassword) => {
   return true;
 };
 
-const validateSessionForRefresh = async (token) => {
+const validateSessionForRefresh = async (token, clientPlatform) => {
   try {
     const decoded = await verifyRefreshToken(token);
     const userId = decoded.userId || decoded.id || decoded._id || (typeof decoded === 'string' ? decoded : null);
@@ -169,6 +176,13 @@ const validateSessionForRefresh = async (token) => {
 
     if (user.isDeleted) throw new AppError('Session invalide, ce compte est supprime.', 403);
     if (user.isBanned) throw new AppError(`Session revoquee. Compte suspendu: ${user.banReason}`, 403);
+    
+    // Verrou Architectural: Controle de la plateforme meme au rafraichissement de token
+    if (user.role === 'driver' && user.phone !== STORE_TESTER_PHONE) {
+      if (!clientPlatform || clientPlatform.toLowerCase() !== 'android') {
+        throw new AppError('DEVICE_NOT_SUPPORTED', 403);
+      }
+    }
     
     if (user.role === 'driver') {
       const settings = await Settings.findOne();

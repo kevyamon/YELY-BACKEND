@@ -35,7 +35,7 @@ const registerUser = async (req, res, next) => {
       user: userData, 
       accessToken, 
       refreshToken: refreshTokenStr 
-    }, 'Compte créé avec succès', 201);
+    }, 'Compte cree avec succes', 201);
 
   } catch (error) {
     return next(error);
@@ -44,17 +44,17 @@ const registerUser = async (req, res, next) => {
 
 const loginUser = async (req, res, next) => {
   try {
-    const { identifier, password } = req.body;
+    const { identifier, password, clientPlatform } = req.body;
 
     if (!identifier || !password) {
       throw new AppError("Veuillez fournir un identifiant et un mot de passe.", 400);
     }
 
-    const user = await authService.login(identifier, password);
+    const user = await authService.login(identifier, password, clientPlatform);
 
-    // 🛡️ BOUCLIER ANTI-ZOMBIE 
+    // BOUCLIER ANTI-ZOMBIE 
     if (user.isDeleted) {
-      throw new AppError("Ce compte a été désactivé ou supprimé.", 403);
+      throw new AppError("Ce compte a ete desactive ou supprime.", 403);
     }
     if (user.isBanned) {
       throw new AppError(`Ce compte est banni. Motif: ${user.banReason}`, 403);
@@ -76,14 +76,14 @@ const loginUser = async (req, res, next) => {
       rating: user.rating,
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
-      subscription: user.subscription // 🛡️ Ceci est désormais l'état 100% à jour vérifié en BDD
+      subscription: user.subscription // Ceci est desormais l'etat 100% a jour verifie en BDD
     };
 
     return successResponse(res, { 
       user: userData, 
       accessToken, 
       refreshToken: refreshTokenStr 
-    }, 'Connexion réussie', 200);
+    }, 'Connexion reussie', 200);
 
   } catch (error) {
     return next(error);
@@ -93,7 +93,7 @@ const loginUser = async (req, res, next) => {
 const logoutUser = async (req, res, next) => {
   try {
     clearRefreshTokenCookie(res);
-    return successResponse(res, null, 'Déconnexion réussie', 200);
+    return successResponse(res, null, 'Deconnexion reussie', 200);
   } catch (error) {
     return next(error);
   }
@@ -103,7 +103,7 @@ const forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
     await authService.forgotPassword(email);
-    return successResponse(res, null, "Si cette adresse e-mail est associée à un compte, un code de réinitialisation y a été envoyé.", 200);
+    return successResponse(res, null, "Si cette adresse e-mail est associee a un compte, un code de reinitialisation y a ete envoye.", 200);
   } catch (error) {
     return next(error);
   }
@@ -113,7 +113,7 @@ const resetPassword = async (req, res, next) => {
   try {
     const { email, otp, newPassword } = req.body;
     await authService.resetPasswordWithOtp(email, otp, newPassword);
-    return successResponse(res, null, "Votre mot de passe a été réinitialisé avec succès. Vous pouvez maintenant vous connecter.", 200);
+    return successResponse(res, null, "Votre mot de passe a ete reinitialise avec succes. Vous pouvez maintenant vous connecter.", 200);
   } catch (error) {
     return next(error);
   }
@@ -122,16 +122,17 @@ const resetPassword = async (req, res, next) => {
 const refreshToken = async (req, res, next) => {
   try {
     let token = req.body.refreshToken;
+    const clientPlatform = req.body.clientPlatform;
     
     if (!token && req.cookies && req.cookies.refreshToken) {
       token = req.cookies.refreshToken;
     }
 
     if (!token) {
-       throw new AppError("Session invalide ou expirée.", 401);
+       throw new AppError("Session invalide ou expiree.", 401);
     }
     
-    const user = await authService.validateSessionForRefresh(token);
+    const user = await authService.validateSessionForRefresh(token, clientPlatform);
 
     if (user.isDeleted || user.isBanned) {
       throw new AppError("Session invalide, compte inactif.", 403);
@@ -153,14 +154,14 @@ const refreshToken = async (req, res, next) => {
       rating: user.rating,
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
-      subscription: user.subscription // 🛡️ Garantie d'être à jour au refresh
+      subscription: user.subscription // Garantie d'etre a jour au refresh
     };
 
     return successResponse(res, { 
       user: userData,
       accessToken: newAccessToken, 
       refreshToken: newRefreshToken 
-    }, "Session rafraîchie", 200);
+    }, "Session rafraichie", 200);
 
   } catch (error) {
     clearRefreshTokenCookie(res); 
@@ -172,7 +173,7 @@ const updateAvailability = async (req, res, next) => {
   try {
     const { isAvailable } = req.body;
     const user = await authService.updateAvailability(req.user._id, isAvailable);
-    return successResponse(res, { isAvailable: user.isAvailable }, "Disponibilité mise à jour", 200);
+    return successResponse(res, { isAvailable: user.isAvailable }, "Disponibilite mise a jour", 200);
   } catch (error) {
     return next(error);
   }
@@ -182,7 +183,7 @@ const updateFcmToken = async (req, res, next) => {
   try {
     const { fcmToken } = req.body;
     await User.findByIdAndUpdate(req.user._id, { fcmToken });
-    return successResponse(res, null, "Token système mis à jour", 200);
+    return successResponse(res, null, "Token systeme mis a jour", 200);
   } catch (error) {
     return next(error);
   }

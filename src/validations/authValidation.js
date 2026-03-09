@@ -1,5 +1,5 @@
 // src/validations/authValidation.js
-// CONTRATS DE DONNÉES AUTH - Zod Strict
+// CONTRATS DE DONNEES AUTH - Zod Strict
 // CSCSM Level: Bank Grade
 
 const { z } = require('zod');
@@ -12,8 +12,8 @@ const DISPOSABLE_DOMAINS = [
 const registerSchema = z.object({
   name: z.string()
     .min(2, 'Votre nom doit contenir au moins 2 lettres.')
-    .max(50, 'Votre nom est un peu trop long (maximum 50 caractères).')
-    .regex(/^[a-zA-Z\u00C0-\u00FF\s'-]+$/, 'Votre nom ne doit contenir ni chiffres ni caractères spéciaux.')
+    .max(50, 'Votre nom est un peu trop long (maximum 50 caracteres).')
+    .regex(/^[a-zA-Z\u00C0-\u00FF\s'-]+$/, 'Votre nom ne doit contenir ni chiffres ni caracteres speciaux.')
     .trim(),
     
   email: z.string()
@@ -23,17 +23,17 @@ const registerSchema = z.object({
     .refine((email) => {
       const domain = email.split('@')[1];
       return !DISPOSABLE_DOMAINS.includes(domain);
-    }, 'Les adresses e-mail temporaires ne sont pas autorisées.'),
+    }, 'Les adresses e-mail temporaires ne sont pas autorisees.'),
 
   phone: z.string()
-    .regex(/^\+?[0-9\s]{8,20}$/, 'Veuillez fournir un numéro de téléphone valide.')
+    .regex(/^\+?[0-9\s]{8,20}$/, 'Veuillez fournir un numero de telephone valide.')
     .trim(),
 
   password: z.string()
-    .min(8, 'Votre mot de passe doit faire au moins 8 caractères.')
+    .min(8, 'Votre mot de passe doit faire au moins 8 caracteres.')
     .max(128, 'Votre mot de passe est trop long.')
     .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/, 
-      'Pour votre sécurité, le mot de passe doit inclure une majuscule, un chiffre et un symbole.'),
+      'Pour votre securite, le mot de passe doit inclure une majuscule, un chiffre et un symbole.'),
 
   role: z.enum(['rider', 'driver']).default('rider')
 }).strict();
@@ -45,12 +45,14 @@ const loginSchema = z.object({
     .trim(),
     
   password: z.string()
-    .min(1, 'Le mot de passe est requis.')
+    .min(1, 'Le mot de passe est requis.'),
+    
+  clientPlatform: z.string().optional()
 }).strict();
 
 const availabilitySchema = z.object({
   isAvailable: z.boolean({
-    required_error: 'Le statut de disponibilité est requis.',
+    required_error: 'Le statut de disponibilite est requis.',
     invalid_type_error: 'La valeur fournie est invalide.'
   })
 }).strict();
@@ -69,14 +71,14 @@ const resetPasswordSchema = z.object({
     .trim(),
     
   otp: z.string()
-    .length(6, 'Le code de sécurité doit contenir exactement 6 chiffres.')
+    .length(6, 'Le code de securite doit contenir exactement 6 chiffres.')
     .regex(/^\d+$/, 'Le code ne doit contenir que des chiffres.'),
     
   newPassword: z.string()
-    .min(8, 'Le nouveau mot de passe doit faire au moins 8 caractères.')
+    .min(8, 'Le nouveau mot de passe doit faire au moins 8 caracteres.')
     .max(128, 'Le nouveau mot de passe est trop long.')
     .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/, 
-      'Pour votre sécurité, le mot de passe doit inclure une majuscule, un chiffre et un symbole.')
+      'Pour votre securite, le mot de passe doit inclure une majuscule, un chiffre et un symbole.')
 }).strict();
 
 module.exports = {
