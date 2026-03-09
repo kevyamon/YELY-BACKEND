@@ -4,6 +4,7 @@
 
 const rideService = require('../../services/rideService');
 const User = require('../../models/User');
+const Settings = require('../../models/Settings'); // 🛡️ IMPORT AJOUTÉ
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 const { successResponse } = require('../../utils/responseHandler');
@@ -62,7 +63,6 @@ const completeRide = async (req, res, next) => {
       throw new AppError('L\'identifiant de la course est manquant.', 400);
     }
 
-    // MODIFICATION : Récupération de l'instance socketio et injection dans le service
     const io = req.app.get('socketio');
     const ride = await rideService.completeRideSession(req.user._id, rideId, io);
     
@@ -79,6 +79,28 @@ const completeRide = async (req, res, next) => {
     });
     
     logger.info(`[RIDE EXECUTION] Course ${rideId} terminée. Driver ID: ${req.user._id}. Prix final: ${ride.price}`);
+
+    // 🔥 LE PIÈGE DE FIN DE COURSE (Vérification d'abonnement post-course)
+    try {
+      const settings = await Settings.findOne();
+      
+      // Si la gratuité globale est désactivée
+      if (settings && !settings.isGlobalFreeAccess) {
+        const driver = await User.findById(req.user._id).populate('subscription');
+        
+        // Et que le chauffeur n'a pas d'abonnement actif (ou qu'il vient de périmer)
+        if (!driver.subscription || !driver.subscription.isActive) {
+          if (io) {
+            io.to(driver._id.toString()).emit('FORCE_SUBSCRIPTION_LOCK', {
+              message: "Votre période de grâce est terminée. Veuillez activer un Pass Yély pour continuer à recevoir des courses."
+            });
+            logger.info(`[SUBSCRIPTION LOCK] Chauffeur ${req.user._id} verrouillé à la fin de la course.`);
+          }
+        }
+      }
+    } catch (lockError) {
+      logger.error(`[RIDE SUBSCRIPTION CHECK] Erreur non bloquante: ${lockError.message}`);
+    }
     
     return successResponse(res, { 
       status: 'completed', 

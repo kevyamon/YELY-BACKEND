@@ -41,7 +41,7 @@ router.get('/finance', protect, authorize('superadmin'), adminController.getFina
 router.put('/finance/links', protect, authorize('superadmin'), adminController.updateWaveLinks);
 router.put('/promo/toggle', protect, authorize('superadmin'), adminController.togglePromo);
 
-// OPÉRATIONS SPÉCIALES ET CHARGE
+// 🔥 OPÉRATIONS SPÉCIALES ET CHARGE
 router.put('/load-reduce/toggle', protect, authorize('superadmin'), adminController.toggleLoadReduce);
 router.put('/free-access/toggle', protect, authorize('superadmin'), adminController.toggleGlobalFreeAccess);
 

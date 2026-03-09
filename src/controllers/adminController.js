@@ -7,6 +7,7 @@ const adminService = require('../services/adminService');
 const notificationService = require('../services/notificationService');
 const Transaction = require('../models/Transaction');
 const AuditLog = require('../models/AuditLog'); 
+const Settings = require('../models/Settings'); // 🛡️ IMPORT AJOUTÉ
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const logger = require('../config/logger');
 
@@ -241,11 +242,10 @@ const getAuditLogs = async (req, res) => {
 
 const toggleLoadReduce = async (req, res) => {
   try {
-    let settings = await require('../models/Settings').findOne();
-    if (!settings) settings = await require('../models/Settings').create({});
+    let settings = await Settings.findOne();
+    if (!settings) settings = await Settings.create({});
 
     settings.isLoadReduced = !settings.isLoadReduced;
-    
     settings.weeklyCounter = 0;
     settings.monthlyCounter = 0;
     
@@ -269,28 +269,66 @@ const toggleLoadReduce = async (req, res) => {
   }
 };
 
-// A AJOUTER A LA FIN DU FICHIER src/controllers/adminController.js EXISTANT (avant le module.exports)
-
+// 🔥 NOUVEAU : LE CERVEAU DU MODE VIP (GRATUITÉ)
 const toggleGlobalFreeAccess = async (req, res) => {
   try {
-    const result = await adminService.toggleGlobalFreeAccess(req.body.isActive, req.user._id);
+    const { isGlobalFreeAccess, promoMessage } = req.body;
 
-    try {
-      const io = req.app.get('socketio');
-      if (io) {
-        // Notifier tous les clients du changement de gratuité
-        io.emit('free_access_updated', { isGlobalFreeAccess: result.isGlobalFreeAccess });
-      }
-    } catch (socketError) {
-      logger.error(`[SOCKET FREE ACCESS] Echec: ${socketError.message}`);
+    let settings = await Settings.findOne();
+    if (!settings) {
+      settings = new Settings();
     }
 
-    return successResponse(res, result, "Statut de gratuite mis a jour avec succes.");
+    // Mise à jour de l'état
+    if (isGlobalFreeAccess !== undefined) {
+      settings.isGlobalFreeAccess = isGlobalFreeAccess;
+    }
+    if (promoMessage) {
+      settings.promoMessage = promoMessage;
+    }
+    
+    settings.updatedBy = req.user._id;
+    await settings.save();
+
+    // 📢 1. ALERTE TEMPS RÉEL (Socket) - Émis à tout le monde
+    const io = req.app.get('socketio');
+    if (io) {
+      io.emit('PROMO_MODE_CHANGED', {
+        isGlobalFreeAccess: settings.isGlobalFreeAccess,
+        promoMessage: settings.promoMessage
+      });
+    }
+
+    // 📩 2. ALERTE PUSH NOTIFICATION (Pour ceux qui ont l'app fermée)
+    const pushTitle = settings.isGlobalFreeAccess ? "🎉 Mode VIP Activé !" : "Fin de la période promotionnelle";
+    const pushBody = settings.isGlobalFreeAccess 
+      ? "L'accès à Yély est désormais 100% gratuit ! Connectez-vous et roulez sans abonnement." 
+      : "Le mode gratuit est terminé. Veuillez activer un Pass pour continuer à recevoir des courses.";
+
+    try {
+      if (notificationService.sendPushNotificationToTopic) {
+        await notificationService.sendPushNotificationToTopic('drivers', {
+          title: pushTitle,
+          body: pushBody,
+          data: { type: 'PROMO_UPDATE', isGlobalFreeAccess: settings.isGlobalFreeAccess.toString() }
+        });
+      }
+    } catch (pushErr) {
+      logger.warn(`[Admin] Echec non-bloquant du Push Promo: ${pushErr.message}`);
+    }
+
+    logger.info(`[AUDIT CONFIG] Mode VIP set to ${settings.isGlobalFreeAccess} by ${req.user.email}`);
+
+    return successResponse(res, {
+      isGlobalFreeAccess: settings.isGlobalFreeAccess,
+      promoMessage: settings.promoMessage
+    }, `Mode VIP ${settings.isGlobalFreeAccess ? 'activé' : 'désactivé'} avec succès.`);
+
   } catch (error) {
+    logger.error(`[FREE ACCESS ERROR]: ${error.message}`);
     return errorResponse(res, error.message, 500);
   }
 };
-
 
 module.exports = {
   updateAdminStatus,
@@ -306,6 +344,5 @@ module.exports = {
   updateWaveLinks,
   getAuditLogs,
   toggleLoadReduce,
-  toggleGlobalFreeAccess
-
+  toggleGlobalFreeAccess // 🔥 Expose la fonction
 };
