@@ -7,7 +7,7 @@ const adminService = require('../services/adminService');
 const notificationService = require('../services/notificationService');
 const Transaction = require('../models/Transaction');
 const AuditLog = require('../models/AuditLog'); 
-const Settings = require('../models/Settings'); // 🛡️ IMPORT AJOUTÉ
+const Settings = require('../models/Settings'); // IMPORT AJOUTE
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const logger = require('../config/logger');
 
@@ -233,10 +233,10 @@ const getAuditLogs = async (req, res) => {
     return successResponse(res, {
       logs,
       pagination: { page, total, pages: Math.ceil(total / limit) }
-    }, "Journal récupéré.");
+    }, "Journal recupere.");
   } catch (error) {
     logger.error(`[AUDIT LOGS ERROR]: ${error.message}`);
-    return errorResponse(res, "Impossible de récupérer le journal.", 500);
+    return errorResponse(res, "Impossible de recuperer le journal.", 500);
   }
 };
 
@@ -262,14 +262,14 @@ const toggleLoadReduce = async (req, res) => {
 
     logger.info(`[AUDIT CONFIG] Load Reduction set to ${settings.isLoadReduced} by ${req.user.email}`);
     return successResponse(res, { isLoadReduced: settings.isLoadReduced }, 
-      settings.isLoadReduced ? "Mode Réduction de charge activé." : "Mode Réduction de charge désactivé."
+      settings.isLoadReduced ? "Mode Reduction de charge active." : "Mode Reduction de charge desactive."
     );
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
 };
 
-// 🔥 NOUVEAU : LE CERVEAU DU MODE VIP (GRATUITÉ)
+// LE CERVEAU DU MODE VIP (GRATUITE ET COMPENSATION)
 const toggleGlobalFreeAccess = async (req, res) => {
   try {
     const { isGlobalFreeAccess, promoMessage } = req.body;
@@ -279,18 +279,40 @@ const toggleGlobalFreeAccess = async (req, res) => {
       settings = new Settings();
     }
 
-    // Mise à jour de l'état
+    const wasActive = settings.isGlobalFreeAccess;
+
     if (isGlobalFreeAccess !== undefined) {
       settings.isGlobalFreeAccess = isGlobalFreeAccess;
     }
     if (promoMessage) {
       settings.promoMessage = promoMessage;
     }
+
+    // LOGIQUE DE GEL ET DE COMPENSATION EQUITABLE
+    if (settings.isGlobalFreeAccess && !wasActive) {
+      // ON ACTIVE LE VIP : On memorise l'heure exacte
+      settings.promoStartedAt = new Date();
+      logger.info(`[VIP MODE] Activation. Gel des abonnements declenche.`);
+    } 
+    else if (!settings.isGlobalFreeAccess && wasActive) {
+      // ON DESACTIVE LE VIP : On calcule le temps ecoule et on rallonge les abonnements
+      if (settings.promoStartedAt) {
+        const durationMs = Date.now() - settings.promoStartedAt.getTime();
+        
+        if (durationMs > 0) {
+          await mongoose.model('User').updateMany(
+            { 'subscription.isActive': true, 'subscription.expiresAt': { $gt: new Date() } },
+            [{ $set: { 'subscription.expiresAt': { $add: ['$subscription.expiresAt', durationMs] } } }]
+          );
+          logger.info(`[VIP MODE] Fin du VIP. Compensation de ${durationMs}ms ajoutee aux abonnements actifs.`);
+        }
+      }
+      settings.promoStartedAt = null;
+    }
     
     settings.updatedBy = req.user._id;
     await settings.save();
 
-    // 📢 1. ALERTE TEMPS RÉEL (Socket) - Émis à tout le monde
     const io = req.app.get('socketio');
     if (io) {
       io.emit('PROMO_MODE_CHANGED', {
@@ -299,11 +321,10 @@ const toggleGlobalFreeAccess = async (req, res) => {
       });
     }
 
-    // 📩 2. ALERTE PUSH NOTIFICATION (Pour ceux qui ont l'app fermée)
-    const pushTitle = settings.isGlobalFreeAccess ? "🎉 Mode VIP Activé !" : "Fin de la période promotionnelle";
+    const pushTitle = settings.isGlobalFreeAccess ? "Mode VIP Active !" : "Fin de la periode VIP";
     const pushBody = settings.isGlobalFreeAccess 
-      ? "L'accès à Yély est désormais 100% gratuit ! Connectez-vous et roulez sans abonnement." 
-      : "Le mode gratuit est terminé. Veuillez activer un Pass pour continuer à recevoir des courses.";
+      ? "L'acces a Yely est desormais gratuit ! Votre abonnement payant est mis en pause." 
+      : "Le mode gratuit est termine. Votre abonnement a ete prolonge pour compenser cette periode.";
 
     try {
       if (notificationService.sendPushNotificationToTopic) {
@@ -322,7 +343,7 @@ const toggleGlobalFreeAccess = async (req, res) => {
     return successResponse(res, {
       isGlobalFreeAccess: settings.isGlobalFreeAccess,
       promoMessage: settings.promoMessage
-    }, `Mode VIP ${settings.isGlobalFreeAccess ? 'activé' : 'désactivé'} avec succès.`);
+    }, `Mode VIP ${settings.isGlobalFreeAccess ? 'active' : 'desactive'} avec succes.`);
 
   } catch (error) {
     logger.error(`[FREE ACCESS ERROR]: ${error.message}`);
@@ -344,5 +365,5 @@ module.exports = {
   updateWaveLinks,
   getAuditLogs,
   toggleLoadReduce,
-  toggleGlobalFreeAccess // 🔥 Expose la fonction
+  toggleGlobalFreeAccess // Expose la fonction
 };

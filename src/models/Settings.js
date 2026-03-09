@@ -6,8 +6,9 @@ const mongoose = require('mongoose');
 
 const settingsSchema = new mongoose.Schema({
   isPromoActive: { type: Boolean, default: false },
-  isGlobalFreeAccess: { type: Boolean, default: false }, // NOUVEAU: Gratuité globale pour les chauffeurs
-  promoMessage: { type: String, default: "🎉 Yély Régal ! Pour fêter notre lancement, Yély vous offre l'accès VIP. Roulez sans abonnement !" },
+  isGlobalFreeAccess: { type: Boolean, default: false }, // Gratuité globale pour les chauffeurs
+  promoMessage: { type: String, default: "Yely Regal ! Pour feter notre lancement, Yely vous offre l'acces VIP. Roulez sans abonnement !" },
+  promoStartedAt: { type: Date, default: null }, // Memorisation du depart VIP pour la compensation
   
   // --- GEOFENCING (ZONE DE SERVICE GLOBALE) ---
   isMapLocked: { type: Boolean, default: true },
