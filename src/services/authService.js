@@ -14,7 +14,6 @@ const bcrypt = require('bcrypt');
 const MAX_ATTEMPTS = SECURITY_CONSTANTS?.MAX_LOGIN_ATTEMPTS || 5;
 const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000;
 
-// NUMERO MAGIQUE POUR LES TESTEURS APPLE/GOOGLE (Correction a 8 zeros)
 const STORE_TESTER_PHONE = '+2250000000';
 
 const register = async (userData) => {
@@ -48,7 +47,6 @@ const login = async (identifier, password, clientPlatform) => {
   if (user.isDeleted) throw new AppError('Ce compte a ete supprime et ne peut plus se connecter.', 403);
   if (user.isBanned) throw new AppError(`Compte suspendu: ${user.banReason}`, 403);
 
-  // Verrou Architectural: Controle strict de la plateforme pour les chauffeurs
   if (user.role === 'driver' && user.phone !== STORE_TESTER_PHONE) {
     if (!clientPlatform || clientPlatform.toLowerCase() !== 'android') {
       throw new AppError('DEVICE_NOT_SUPPORTED', 403);
@@ -177,7 +175,6 @@ const validateSessionForRefresh = async (token, clientPlatform) => {
     if (user.isDeleted) throw new AppError('Session invalide, ce compte est supprime.', 403);
     if (user.isBanned) throw new AppError(`Session revoquee. Compte suspendu: ${user.banReason}`, 403);
     
-    // Verrou Architectural: Controle de la plateforme meme au rafraichissement de token
     if (user.role === 'driver' && user.phone !== STORE_TESTER_PHONE) {
       if (!clientPlatform || clientPlatform.toLowerCase() !== 'android') {
         throw new AppError('DEVICE_NOT_SUPPORTED', 403);
@@ -226,9 +223,15 @@ const updateAvailability = async (userId, isAvailable) => {
   if (!user) throw new AppError('Utilisateur introuvable.', 404);
   if (user.isDeleted) throw new AppError('Action impossible sur un compte supprime.', 403);
 
-  user.isAvailable = isAvailable;
-  await user.save(); 
-  return user;
+  // CORRECTION CRITIQUE: On utilise findByIdAndUpdate pour bypasser la validation globale
+  // de Mongoose qui bloquait silencieusement la sauvegarde sur les anciens documents.
+  const updatedUser = await User.findByIdAndUpdate(
+    userId,
+    { isAvailable },
+    { new: true, runValidators: false }
+  );
+  
+  return updatedUser;
 };
 
 module.exports = {

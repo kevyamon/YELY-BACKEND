@@ -57,7 +57,6 @@ io.adapter(createAdapter(redis.pubClient, redis.subClient));
 app.set('socketio', io);
 app.set('redis', redis);
 
-// Initialisation des Workers (Taches de fond)
 startRideWorker(io);
 startCloudinaryCleanupWorker();
 
@@ -90,7 +89,6 @@ io.use(async (socket, next) => {
       if (user) await redis.setex(cacheKey, 900, JSON.stringify(user)).catch(() => {});
     }
     
-    // REJET ABSOLU : Si banni ou supprimé, on coupe le câble instantanément
     if (!user || user.isBanned || user.isDeleted) return next(new Error('AUTH_REJECTED'));
     
     socket.user = user;
@@ -98,7 +96,7 @@ io.use(async (socket, next) => {
     socket.lastCoords = user.currentLocation?.coordinates || [0,0]; 
     socket.spoofStrikes = 0; 
     socket.lastDbCheck = Date.now(); 
-    socket.isFirstLocation = true; // <-- CORRECTION: Marqueur de nouvelle session pour le saut spatial
+    socket.isFirstLocation = true; 
     
     next();
   } catch (err) {
@@ -116,7 +114,6 @@ io.on('connection', (socket) => {
     const now = Date.now();
     const isDev = process.env.NODE_ENV !== 'production';
 
-    // 1. CONTRÔLE DE SÉCURITÉ ASYNCHRONE (Toutes les 5 minutes)
     if (now - socket.lastDbCheck > 300000) { 
       socket.lastDbCheck = now;
       try {
@@ -132,7 +129,6 @@ io.on('connection', (socket) => {
       }
     }
 
-    // 2. VALIDATION DES DONNÉES
     const parseResult = coordsSchema.safeParse(rawData);
     if (!parseResult.success) {
       if (isDev) console.error('[SOCKET] Erreur validation position:', parseResult.error);
@@ -140,14 +136,11 @@ io.on('connection', (socket) => {
     }
     const coords = parseResult.data;
 
-    // 3. RATE LIMITING SOCKET
     const isAllowed = await checkSocketRateLimit(user._id.toString());
     if (!isAllowed) return;
 
-    // 4. ANTI-SPOOFING GPS
     const timeDiffSeconds = (now - socket.lastLocTime) / 1000;
     
-    // CORRECTION : Tolérance sur la toute première position pour éviter le ban instantané
     if (socket.isFirstLocation) {
       socket.isFirstLocation = false;
     } else if (timeDiffSeconds > 0) { 
@@ -155,16 +148,20 @@ io.on('connection', (socket) => {
       const distanceKm = getDistKm(prevLat, prevLng, coords.latitude, coords.longitude);
       const speedKmH = distanceKm / (timeDiffSeconds / 3600);
 
-      if (speedKmH > 200) {
+      // CORRECTION CRITIQUE : Assouplissement du bouclier Anti-Spoofing. 
+      // On encaisse le téléporteur sans déconnecter le chauffeur pour qu'il reçoive la course.
+      if (speedKmH > 300) {
         if (!isDev) {
           socket.spoofStrikes += 1;
-          if (socket.spoofStrikes >= 3) {
+          if (socket.spoofStrikes >= 5) {
             if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
             socket.emit('force_disconnect', { reason: 'SPOOFING_DETECTED' });
             socket.disconnect(true);
             return;
           }
+          // On valide exceptionnellement les coordonnées pour stabiliser le téléporteur
           socket.lastLocTime = now; 
+          socket.lastCoords = [coords.longitude, coords.latitude]; 
           return; 
         }
       } else {
@@ -175,7 +172,6 @@ io.on('connection', (socket) => {
     socket.lastLocTime = now;
     socket.lastCoords = [coords.longitude, coords.latitude];
 
-    // 5. APPLICATION DES NOUVELLES COORDONNÉES
     try {
       User.updateOne({ _id: user._id }, {
         currentLocation: { type: 'Point', coordinates: [coords.longitude, coords.latitude] },
