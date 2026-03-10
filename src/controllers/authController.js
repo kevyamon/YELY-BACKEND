@@ -28,7 +28,8 @@ const registerUser = async (req, res, next) => {
       rating: user.rating,
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
-      subscription: user.subscription 
+      subscription: user.subscription,
+      vehicle: user.vehicle
     };
 
     return successResponse(res, { 
@@ -76,7 +77,8 @@ const loginUser = async (req, res, next) => {
       rating: user.rating,
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
-      subscription: user.subscription // Ceci est desormais l'etat 100% a jour verifie en BDD
+      subscription: user.subscription,
+      vehicle: user.vehicle 
     };
 
     return successResponse(res, { 
@@ -154,7 +156,8 @@ const refreshToken = async (req, res, next) => {
       rating: user.rating,
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
-      subscription: user.subscription // Garantie d'etre a jour au refresh
+      subscription: user.subscription,
+      vehicle: user.vehicle 
     };
 
     return successResponse(res, { 
