@@ -18,7 +18,13 @@ const updateAdminStatus = async (req, res) => {
 
     try {
       const io = req.app.get('socketio');
-      if (io) io.to(userId.toString()).emit('user_role_updated', { newRole: result.newRole });
+      if (io) {
+        io.to(userId.toString()).emit('user_role_updated', { newRole: result.newRole });
+        
+        if (result.action === 'REVOKE') {
+          io.to(userId.toString()).emit('force_logout', { reason: 'Vos droits administrateur ont ete revoques.' });
+        }
+      }
     } catch (e) { logger.warn(`[SOCKET] Echec non-critique: ${e.message}`); }
 
     logger.warn(`[AUDIT ROLE] ${req.user.email} changed ${result.email} -> ${result.newRole}`);
@@ -386,7 +392,6 @@ const updateAppVersion = async (req, res) => {
   }
 };
 
-// --- AJOUT VAGUE 1 : LECTURE DE LA CONFIGURATION SYSTEME ---
 const getSystemConfig = async (req, res) => {
   try {
     let settings = await Settings.findOne();
@@ -416,5 +421,5 @@ module.exports = {
   toggleLoadReduce,
   toggleGlobalFreeAccess,
   updateAppVersion,
-  getSystemConfig // NOUVEL EXPORT
+  getSystemConfig
 };

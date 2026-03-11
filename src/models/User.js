@@ -49,6 +49,11 @@ const userSchema = new mongoose.Schema({
     },
     default: 'rider'
   },
+  previousRole: {
+    type: String,
+    enum: ['rider', 'driver', null],
+    default: null
+  },
   isBanned: { type: Boolean, default: false, index: true },
   banReason: { type: String, default: '', maxlength: 500 },
   
@@ -57,7 +62,6 @@ const userSchema = new mongoose.Schema({
   loginAttempts: { type: Number, required: true, default: 0 },
   lockUntil: { type: Date },
 
-  // NOUVEAUTÉ : Champs pour la réinitialisation du mot de passe
   resetPasswordOtp: { type: String, select: false },
   resetPasswordExpires: { type: Date, select: false },
   

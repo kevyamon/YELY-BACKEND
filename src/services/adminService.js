@@ -32,7 +32,7 @@ const updateUserRole = async (userId, action, requesterId) => {
 
   const transitions = {
     'PROMOTE': { from: ['rider', 'driver'], to: 'admin' },
-    'REVOKE': { from: ['admin'], to: 'rider' }
+    'REVOKE': { from: ['admin'], to: 'rider' } 
   };
 
   if (!transitions[action].from.includes(user.role)) {
@@ -40,13 +40,23 @@ const updateUserRole = async (userId, action, requesterId) => {
   }
 
   const oldRole = user.role;
-  user.role = transitions[action].to;
+  let targetRole;
+
+  if (action === 'PROMOTE') {
+    user.previousRole = oldRole; 
+    targetRole = 'admin';
+  } else if (action === 'REVOKE') {
+    targetRole = user.previousRole || 'rider'; 
+    user.previousRole = null; 
+  }
+
+  user.role = targetRole;
   await user.save();
 
   await logSystemAction(requesterId, `${action}_USER`, user._id, `De ${oldRole} vers ${user.role}`);
   try { await redisClient.del(`auth:user:${user._id}`); } catch(e) {}
   
-  return { email: user.email, newRole: user.role };
+  return { email: user.email, newRole: user.role, action };
 };
 
 const toggleUserBan = async (userId, reason, requesterId) => {
@@ -70,7 +80,7 @@ const updateMapSettings = async (data, requesterId) => {
 
   settings.isMapLocked = data.isMapLocked;
   settings.serviceCity = data.serviceCity;
-  settings.allowedRadiusKm = data.radius;
+  settings.allowedRadiusKm = data.allowedRadiusKm || data.radius;
   settings.allowedCenter = { type: 'Point', coordinates: data.allowedCenter.coordinates };
   settings.updatedBy = requesterId;
 
@@ -250,8 +260,6 @@ const getAllUsers = async (query, userRole, requesterId) => {
   return { users, pagination: { page, total, pages: Math.ceil(total / limit) } };
 };
 
-// A AJOUTER A LA FIN DU FICHIER src/services/adminService.js EXISTANT (avant le module.exports)
-
 const toggleGlobalFreeAccess = async (isActive, requesterId) => {
   let settings = await Settings.findOne();
   if (!settings) settings = new Settings();
@@ -263,8 +271,6 @@ const toggleGlobalFreeAccess = async (isActive, requesterId) => {
   await logSystemAction(requesterId, 'TOGGLE_FREE_ACCESS', settings._id, `Gratuite globale pour les chauffeurs: ${isActive}`);
   return { isGlobalFreeAccess: settings.isGlobalFreeAccess };
 };
-
-
 
 module.exports = {
   updateUserRole,
@@ -278,5 +284,4 @@ module.exports = {
   updateWaveLinks,
   getAllUsers,
   toggleGlobalFreeAccess
-
 };
