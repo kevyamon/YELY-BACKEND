@@ -6,10 +6,15 @@ const mongoose = require('mongoose');
 
 const settingsSchema = new mongoose.Schema({
   isPromoActive: { type: Boolean, default: false },
-  isGlobalFreeAccess: { type: Boolean, default: false }, // Gratuité globale pour les chauffeurs
+  isGlobalFreeAccess: { type: Boolean, default: false }, // Gratuite globale pour les chauffeurs
   promoMessage: { type: String, default: "Yely Regal ! Pour feter notre lancement, Yely vous offre l'acces VIP. Roulez sans abonnement !" },
   promoStartedAt: { type: Date, default: null }, // Memorisation du depart VIP pour la compensation
   
+  // --- VERSIONING & MISES A JOUR (Vague 1) ---
+  latestVersion: { type: String, default: "1.2.0", trim: true },
+  mandatoryUpdate: { type: Boolean, default: true }, // Bloquant par defaut si active
+  updateUrl: { type: String, default: "https://download-yely.onrender.com", trim: true },
+
   // --- GEOFENCING (ZONE DE SERVICE GLOBALE) ---
   isMapLocked: { type: Boolean, default: true },
   serviceCity: { type: String, default: "Mafere", trim: true },

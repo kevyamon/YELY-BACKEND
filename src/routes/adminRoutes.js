@@ -12,7 +12,8 @@ const {
   toggleBanSchema, 
   mapSettingsSchema, 
   transactionIdParam,
-  rejectTransactionSchema
+  rejectTransactionSchema,
+  updateAppVersionSchema
 } = require('../validations/adminValidation');
 
 // ACCES ADMIN & SUPERADMIN
@@ -41,9 +42,12 @@ router.get('/finance', protect, authorize('superadmin'), adminController.getFina
 router.put('/finance/links', protect, authorize('superadmin'), adminController.updateWaveLinks);
 router.put('/promo/toggle', protect, authorize('superadmin'), adminController.togglePromo);
 
-// 🔥 OPÉRATIONS SPÉCIALES ET CHARGE
+// OPERATIONS SPECIALES ET CHARGE
 router.put('/load-reduce/toggle', protect, authorize('superadmin'), adminController.toggleLoadReduce);
 router.put('/free-access/toggle', protect, authorize('superadmin'), adminController.toggleGlobalFreeAccess);
+
+// --- MISE A JOUR / VERSIONING ---
+router.put('/app-version', protect, authorize('superadmin'), validate(updateAppVersionSchema), adminController.updateAppVersion);
 
 router.post('/update-role', protect, authorize('superadmin'), validate(updateRoleSchema), adminController.updateAdminStatus);
 router.post('/toggle-ban', protect, authorize('superadmin'), validate(toggleBanSchema), adminController.toggleUserBan);

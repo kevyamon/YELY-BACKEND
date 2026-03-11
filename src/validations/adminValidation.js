@@ -13,7 +13,7 @@ const updateRoleSchema = z.object({
 
 const toggleBanSchema = z.object({
   userId: mongoId,
-  reason: z.string().min(4, "La raison doit être explicite").max(500).trim()
+  reason: z.string().min(4, "La raison doit etre explicite").max(500).trim()
 }).strict();
 
 const mapSettingsSchema = z.object({
@@ -36,10 +36,18 @@ const rejectTransactionSchema = z.object({
   reason: z.string().min(5, "Raison de rejet trop courte").max(200).trim()
 }).strict();
 
+// --- AJOUT VERSIONING (Vague 1) ---
+const updateAppVersionSchema = z.object({
+  latestVersion: z.string().min(3, "Format de version invalide").max(20).trim(),
+  mandatoryUpdate: z.boolean(),
+  updateUrl: z.string().url("URL de telechargement invalide")
+}).strict();
+
 module.exports = {
   updateRoleSchema,
   toggleBanSchema,
   mapSettingsSchema,
   transactionIdParam,
-  rejectTransactionSchema
+  rejectTransactionSchema,
+  updateAppVersionSchema
 };

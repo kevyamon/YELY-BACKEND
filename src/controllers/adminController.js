@@ -7,7 +7,7 @@ const adminService = require('../services/adminService');
 const notificationService = require('../services/notificationService');
 const Transaction = require('../models/Transaction');
 const AuditLog = require('../models/AuditLog'); 
-const Settings = require('../models/Settings'); // IMPORT AJOUTE
+const Settings = require('../models/Settings'); 
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const logger = require('../config/logger');
 
@@ -269,7 +269,6 @@ const toggleLoadReduce = async (req, res) => {
   }
 };
 
-// LE CERVEAU DU MODE VIP (GRATUITE ET COMPENSATION)
 const toggleGlobalFreeAccess = async (req, res) => {
   try {
     const { isGlobalFreeAccess, promoMessage } = req.body;
@@ -288,14 +287,11 @@ const toggleGlobalFreeAccess = async (req, res) => {
       settings.promoMessage = promoMessage;
     }
 
-    // LOGIQUE DE GEL ET DE COMPENSATION EQUITABLE
     if (settings.isGlobalFreeAccess && !wasActive) {
-      // ON ACTIVE LE VIP : On memorise l'heure exacte
       settings.promoStartedAt = new Date();
       logger.info(`[VIP MODE] Activation. Gel des abonnements declenche.`);
     } 
     else if (!settings.isGlobalFreeAccess && wasActive) {
-      // ON DESACTIVE LE VIP : On calcule le temps ecoule et on rallonge les abonnements
       if (settings.promoStartedAt) {
         const durationMs = Date.now() - settings.promoStartedAt.getTime();
         
@@ -351,6 +347,47 @@ const toggleGlobalFreeAccess = async (req, res) => {
   }
 };
 
+// --- AJOUT VERSIONING (Vague 1) ---
+const updateAppVersion = async (req, res) => {
+  try {
+    const { latestVersion, mandatoryUpdate, updateUrl } = req.body;
+    
+    let settings = await Settings.findOne();
+    if (!settings) {
+      settings = new Settings();
+    }
+    
+    settings.latestVersion = latestVersion;
+    settings.mandatoryUpdate = mandatoryUpdate;
+    settings.updateUrl = updateUrl;
+    settings.updatedBy = req.user._id;
+    
+    await settings.save();
+
+    // Notification immediate via WebSockets
+    const io = req.app.get('socketio');
+    if (io) {
+      io.emit('APP_VERSION_UPDATED', { 
+        latestVersion, 
+        mandatoryUpdate, 
+        updateUrl 
+      });
+    }
+
+    logger.info(`[AUDIT CONFIG] App Version set to ${latestVersion} by ${req.user.email}`);
+    
+    return successResponse(res, {
+      latestVersion: settings.latestVersion,
+      mandatoryUpdate: settings.mandatoryUpdate,
+      updateUrl: settings.updateUrl
+    }, "Parametres de version mis a jour et diffuses avec succes.");
+
+  } catch (error) {
+    logger.error(`[VERSION UPDATE ERROR]: ${error.message}`);
+    return errorResponse(res, error.message, 500);
+  }
+};
+
 module.exports = {
   updateAdminStatus,
   toggleUserBan,
@@ -365,5 +402,6 @@ module.exports = {
   updateWaveLinks,
   getAuditLogs,
   toggleLoadReduce,
-  toggleGlobalFreeAccess // Expose la fonction
+  toggleGlobalFreeAccess,
+  updateAppVersion // EXPORT AJOUTE
 };
