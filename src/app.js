@@ -53,13 +53,15 @@ app.use((req, res, next) => {
   next();
 });
 
+// CORRECTION SENIOR : Assouplissement ciblé du CSP pour les images
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https://res.cloudinary.com"],
+      // Ajout de blob: pour les previews React et *.cloudinary.com pour tous les sous-domaines
+      imgSrc: ["'self'", "data:", "blob:", "https://res.cloudinary.com", "https://*.cloudinary.com"],
       connectSrc: ["'self'", ...allowedOriginsList], // Injection du tableau dynamique
     },
   },
@@ -108,7 +110,11 @@ app.use(`${API_V1_PREFIX}/health`, healthRoutes);
 app.use(`${API_V1_PREFIX}/auth`, authRoutes);
 app.use(`${API_V1_PREFIX}/users`, userRoutes);
 app.use(`${API_V1_PREFIX}/rides`, rideRoutes);
+
+// CORRECTION SENIOR : Gestion de la route avec ou sans 's' (Alias)
 app.use(`${API_V1_PREFIX}/subscriptions`, subscriptionRoutes);
+app.use(`${API_V1_PREFIX}/subscription`, subscriptionRoutes); 
+
 app.use(`${API_V1_PREFIX}/admin`, adminRoutes);
 app.use(`${API_V1_PREFIX}/notifications`, require('./routes/notificationRoutes'));
 app.use(`${API_V1_PREFIX}/reports`, require('./routes/reportRoutes'));
