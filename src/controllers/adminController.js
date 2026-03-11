@@ -347,7 +347,6 @@ const toggleGlobalFreeAccess = async (req, res) => {
   }
 };
 
-// --- AJOUT VERSIONING (Vague 1) ---
 const updateAppVersion = async (req, res) => {
   try {
     const { latestVersion, mandatoryUpdate, updateUrl } = req.body;
@@ -364,7 +363,6 @@ const updateAppVersion = async (req, res) => {
     
     await settings.save();
 
-    // Notification immediate via WebSockets
     const io = req.app.get('socketio');
     if (io) {
       io.emit('APP_VERSION_UPDATED', { 
@@ -388,6 +386,20 @@ const updateAppVersion = async (req, res) => {
   }
 };
 
+// --- AJOUT VAGUE 1 : LECTURE DE LA CONFIGURATION SYSTEME ---
+const getSystemConfig = async (req, res) => {
+  try {
+    let settings = await Settings.findOne();
+    if (!settings) {
+      settings = await Settings.create({});
+    }
+    return successResponse(res, settings, "Configuration systeme recuperee.");
+  } catch (error) {
+    logger.error(`[ADMIN CONFIG ERROR]: ${error.message}`);
+    return errorResponse(res, "Impossible de recuperer la configuration systeme.", 500);
+  }
+};
+
 module.exports = {
   updateAdminStatus,
   toggleUserBan,
@@ -403,5 +415,6 @@ module.exports = {
   getAuditLogs,
   toggleLoadReduce,
   toggleGlobalFreeAccess,
-  updateAppVersion // EXPORT AJOUTE
+  updateAppVersion,
+  getSystemConfig // NOUVEL EXPORT
 };

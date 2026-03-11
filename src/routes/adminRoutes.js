@@ -46,7 +46,8 @@ router.put('/promo/toggle', protect, authorize('superadmin'), adminController.to
 router.put('/load-reduce/toggle', protect, authorize('superadmin'), adminController.toggleLoadReduce);
 router.put('/free-access/toggle', protect, authorize('superadmin'), adminController.toggleGlobalFreeAccess);
 
-// --- MISE A JOUR / VERSIONING ---
+// --- MISE A JOUR / CONFIGURATION SYSTEME (Vague 1) ---
+router.get('/system-config', protect, authorize('superadmin'), adminController.getSystemConfig);
 router.put('/app-version', protect, authorize('superadmin'), validate(updateAppVersionSchema), adminController.updateAppVersion);
 
 router.post('/update-role', protect, authorize('superadmin'), validate(updateRoleSchema), adminController.updateAdminStatus);
