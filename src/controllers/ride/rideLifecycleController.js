@@ -4,7 +4,7 @@
 
 const rideService = require('../../services/ride/rideLifecycleService'); 
 const poiController = require('../poiController'); 
-const notificationService = require('../../services/notificationService'); // AJOUT SENIOR: Integration des Pushs
+const notificationService = require('../../services/notificationService'); 
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 const { successResponse } = require('../../utils/responseHandler');
@@ -83,16 +83,15 @@ const cancelRide = async (req, res, next) => {
     const ride = await rideService.cancelRideAction(rideId, req.user._id, req.user.role, reason);
     const io = req.app.get('socketio');
 
-    // DECLENCHEUR PUSH : Informer l'autre partie de l'annulation
     if (req.user.role === 'rider' && ride.driver) {
        io.to(ride.driver.toString()).emit('ride_cancelled', { rideId });
        notificationService.sendNotification(
-         ride.driver, "Course annulee", "Le passager a annule la demande.", "SYSTEM", { rideId: rideId.toString() }
+         ride.driver, "Course annulee", "Le passager a annule la demande.", "RIDE_CANCELLED", { rideId: rideId.toString() }
        ).catch(() => {});
     } else if (req.user.role === 'driver') {
        io.to(ride.rider.toString()).emit('ride_cancelled', { rideId });
        notificationService.sendNotification(
-         ride.rider, "Course annulee", "Le chauffeur a du annuler la course.", "SYSTEM", { rideId: rideId.toString() }
+         ride.rider, "Course annulee", "Le chauffeur a du annuler la course.", "RIDE_CANCELLED", { rideId: rideId.toString() }
        ).catch(() => {});
     }
 
@@ -120,7 +119,7 @@ const emergencyCancel = async (req, res, next) => {
           message: 'La course a ete annulee suite a une reinitialisation du client.'
         });
         notificationService.sendNotification(
-          driverId, "Course annulee", "La course a ete annulee (Nettoyage systeme).", "SYSTEM", {}
+          driverId, "Course annulee", "La course a ete annulee (Nettoyage systeme).", "RIDE_CANCELLED", {}
         ).catch(() => {});
       });
     }
@@ -159,9 +158,8 @@ const lockRide = async (req, res, next) => {
       driverProfilePicture: req.user.profilePicture 
     });
 
-    // DECLENCHEUR PUSH : Prevenir le client qu'un chauffeur arrive dans la nego
     notificationService.sendNotification(
-      ride.rider, "Chauffeur trouve", `${req.user.name} est interesse par votre course et prepare son tarif.`, "SYSTEM", { rideId: ride._id.toString() }
+      ride.rider, "Chauffeur trouve", `${req.user.name} est interesse par votre course et prepare son tarif.`, "DRIVER_FOUND", { rideId: ride._id.toString() }
     ).catch(() => {});
 
     return successResponse(res, { 
@@ -191,9 +189,8 @@ const submitPrice = async (req, res, next) => {
       driverProfilePicture: req.user.profilePicture 
     });
 
-    // DECLENCHEUR PUSH : Prevenir le client du tarif exact
     notificationService.sendNotification(
-      ride.rider, "Proposition de prix", `${req.user.name} vous propose ${amount} FCFA.`, "SYSTEM", { rideId: ride._id.toString() }
+      ride.rider, "Proposition de prix", `${req.user.name} vous propose ${amount} FCFA.`, "PRICE_PROPOSAL", { rideId: ride._id.toString() }
     ).catch(() => {});
 
     return successResponse(res, { status: 'negotiating' }, 'Proposition transmise');
@@ -226,9 +223,8 @@ const finalizeRide = async (req, res, next) => {
         destination: result.ride.destination
       });
 
-      // DECLENCHEUR PUSH : Succes pour le chauffeur
       notificationService.sendNotification(
-        driver._id, "Course acceptee", "Le passager a valide votre prix. En route !", "SYSTEM", { rideId: result.ride._id.toString() }
+        driver._id, "Course acceptee", "Le passager a valide votre prix. En route !", "PROPOSAL_ACCEPTED", { rideId: result.ride._id.toString() }
       ).catch(() => {});
 
       return successResponse(res, { 
@@ -247,9 +243,8 @@ const finalizeRide = async (req, res, next) => {
         message: 'Prix refuse'
       });
 
-      // DECLENCHEUR PUSH : Rejet pour le chauffeur
       notificationService.sendNotification(
-        result.rejectedDriverId, "Proposition refusee", "Le passager a decline votre tarif.", "SYSTEM", { rideId: result.ride._id.toString() }
+        result.rejectedDriverId, "Proposition refusee", "Le passager a decline votre tarif.", "PROPOSAL_REJECTED", { rideId: result.ride._id.toString() }
       ).catch(() => {});
 
       const newDrivers = await rideService.dispatchToNearbyDrivers(result.ride);

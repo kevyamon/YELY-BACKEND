@@ -54,7 +54,7 @@ const submitProof = async (req, res, next) => {
           adminUser._id,
           "Nouvelle preuve de paiement",
           `Le numero ${senderPhone} a soumis une preuve pour le plan ${planId}.`,
-          "SYSTEM",
+          "NEW_PAYMENT_PROOF",
           { transactionId: transaction._id.toString() }
         );
       }

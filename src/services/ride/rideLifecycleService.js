@@ -9,7 +9,7 @@ const Ride = require('../../models/Ride');
 const User = require('../../models/User'); 
 const userRepository = require('../../repositories/userRepository');
 const pricingService = require('../pricingService');
-const notificationService = require('../notificationService'); // AJOUT SENIOR: Remplacement import pour uniformite
+const notificationService = require('../notificationService'); 
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 const { env } = require('../../config/env');
@@ -367,9 +367,8 @@ const cancelSearchTimeout = async (io, rideId) => {
       message: "Aucun chauffeur n'est disponible pour le moment."
     });
 
-    // DECLENCHEUR PUSH : Prevenir le client qui est potentiellement hors de l'app
     notificationService.sendNotification(
-      ride.rider, "Recherche expiree", "Aucun chauffeur n'est disponible dans votre zone pour le moment.", "SYSTEM", { rideId: ride._id.toString() }
+      ride.rider, "Recherche expiree", "Aucun chauffeur n'est disponible dans votre zone pour le moment.", "SEARCH_TIMEOUT", { rideId: ride._id.toString() }
     ).catch(() => {});
     
     io.emit('ride_taken_by_other', { rideId }); 
@@ -397,9 +396,8 @@ const releaseStuckNegotiations = async (io, rideId) => {
     
     io.to(rejectedDriverId.toString()).emit('ride_taken_by_other', { rideId });
 
-    // DECLENCHEUR PUSH : Prevenir le chauffeur qui etait en attente
     notificationService.sendNotification(
-      rejectedDriverId, "Delai expire", "Le passager n'a pas repondu a temps, la course a ete relancee.", "SYSTEM", { rideId: ride._id.toString() }
+      rejectedDriverId, "Delai expire", "Le passager n'a pas repondu a temps, la course a ete relancee.", "NEGOTIATION_TIMEOUT", { rideId: ride._id.toString() }
     ).catch(() => {});
 
     await cleanupQueue.add(

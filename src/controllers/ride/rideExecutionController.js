@@ -3,7 +3,7 @@
 // CSCSM Level: Bank Grade
 
 const rideService = require('../../services/ride/rideExecutionService');
-const notificationService = require('../../services/notificationService'); // IMPORT AJOUTE
+const notificationService = require('../../services/notificationService'); 
 const User = require('../../models/User');
 const Settings = require('../../models/Settings');
 const AppError = require('../../utils/AppError');
@@ -25,9 +25,8 @@ const markAsArrived = async (req, res, next) => {
       arrivedAt: ride.arrivedAt 
     });
 
-    // DECLENCHEUR PUSH : Prevenir le client de l'arrivee
     notificationService.sendNotification(
-      ride.rider, "Chauffeur sur place", "Votre chauffeur est arrive au point de rendez-vous.", "SYSTEM", { rideId: ride._id.toString() }
+      ride.rider, "Chauffeur sur place", "Votre chauffeur est arrive au point de rendez-vous.", "DRIVER_ARRIVED", { rideId: ride._id.toString() }
     ).catch(() => {});
     
     logger.info(`[RIDE EXECUTION] Course ${rideId} - Chauffeur sur place (Statut: arrived). Driver ID: ${req.user._id}`);
@@ -53,9 +52,8 @@ const startRide = async (req, res, next) => {
       startedAt: ride.startedAt 
     });
 
-    // DECLENCHEUR PUSH : Depart de la course
     notificationService.sendNotification(
-      ride.rider, "Course demarree", "Votre course a commence. Bonne route !", "SYSTEM", { rideId: ride._id.toString() }
+      ride.rider, "Course demarree", "Votre course a commence. Bonne route !", "RIDE_STARTED", { rideId: ride._id.toString() }
     ).catch(() => {});
     
     logger.info(`[RIDE EXECUTION] Course ${rideId} demarree (Statut: in_progress). Driver ID: ${req.user._id}`);
@@ -89,14 +87,12 @@ const completeRide = async (req, res, next) => {
       finalPrice: ride.price 
     });
 
-    // DECLENCHEUR PUSH : Fin de course pour le client
     notificationService.sendNotification(
-      ride.rider, "Course terminee", "Nous sommes arrives a destination. Merci d'avoir voyage avec Yely !", "SYSTEM", { rideId: ride._id.toString() }
+      ride.rider, "Course terminee", "Nous sommes arrives a destination. Merci d'avoir voyage avec Yely !", "RIDE_COMPLETED", { rideId: ride._id.toString() }
     ).catch(() => {});
     
     logger.info(`[RIDE EXECUTION] Course ${rideId} terminee. Driver ID: ${req.user._id}. Prix final: ${ride.price}`);
 
-    // LE PIEGE DE FIN DE COURSE (Verification d'abonnement post-course)
     try {
       const settings = await Settings.findOne();
       

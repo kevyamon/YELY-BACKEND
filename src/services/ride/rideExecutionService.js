@@ -7,7 +7,7 @@ const Ride = require('../../models/Ride');
 const User = require('../../models/User');
 const userRepository = require('../../repositories/userRepository');
 const poiController = require('../../controllers/poiController'); 
-const notificationService = require('../notificationService'); // IMPORT AJOUTE
+const notificationService = require('../notificationService'); 
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 
@@ -212,9 +212,8 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
         io.to(ride.rider.toString()).emit('ride_arrived', { rideId: ride._id, arrivedAt: ride.arrivedAt });
         io.to(driverId.toString()).emit('ride_arrived', { rideId: ride._id, arrivedAt: ride.arrivedAt });
         
-        // DECLENCHEUR PUSH AUTOMATIQUE (Geofencing) : Arrivee par localisation GPS
         notificationService.sendNotification(
-          ride.rider, "Chauffeur sur place", "Votre chauffeur est arrive au point de rendez-vous.", "SYSTEM", { rideId: ride._id.toString() }
+          ride.rider, "Chauffeur sur place", "Votre chauffeur est arrive au point de rendez-vous.", "DRIVER_ARRIVED", { rideId: ride._id.toString() }
         ).catch(() => {});
 
         logger.info(`[GEOFENCING] Driver ${driverId} arrive chez le client (15m). Statut MAJ vers 'arrived'`);

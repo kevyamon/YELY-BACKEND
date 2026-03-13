@@ -79,8 +79,8 @@ const approveTransaction = async (req, res) => {
         result.driver._id.toString(),
         "Abonnement Active",
         "Votre preuve de paiement a ete validee. Vous pouvez reprendre les courses.",
-        'SYSTEM',
-        { type: 'SUBSCRIPTION_APPROVED' }
+        'SUBSCRIPTION_APPROVED',
+        { transactionId: result.transaction._id.toString() }
       ).catch(notifError => logger.error(`[NON-CRITIQUE] Echec notification apres approbation: ${notifError.message}`));
       
     } catch (notifError) {
@@ -110,8 +110,8 @@ const rejectTransaction = async (req, res) => {
         result.driver._id.toString(),
         "Paiement Rejete",
         `Votre preuve a ete refusee: ${reason}. Veuillez soumettre une image valide.`,
-        'SYSTEM',
-        { type: 'SUBSCRIPTION_REJECTED' }
+        'SUBSCRIPTION_REJECTED',
+        { transactionId: result.transaction._id.toString() }
       ).catch(notifError => logger.error(`[NON-CRITIQUE] Echec notification apres rejet: ${notifError.message}`));
       
     } catch (notifError) {

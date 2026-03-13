@@ -1,6 +1,6 @@
 // src/controllers/reportController.js
 const Report = require('../models/Report');
-const User = require('../models/User'); // AJOUT: Requis pour trouver les admins
+const User = require('../models/User'); 
 const cloudinary = require('cloudinary').v2;
 const fs = require('fs');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
@@ -30,7 +30,6 @@ const submitReport = async (req, res) => {
       io.emit('new_admin_report', report);
     }
 
-    // AJOUT SENIOR: Envoi reel des notifications Push aux administrateurs
     try {
       const admins = await User.find({ role: { $in: ['admin', 'superadmin'] } });
       for (const adminUser of admins) {
@@ -38,7 +37,7 @@ const submitReport = async (req, res) => {
           adminUser._id,
           "Nouveau Signalement",
           "Un utilisateur a soumis un nouveau probleme necessitant votre attention.",
-          "SYSTEM",
+          "NEW_REPORT",
           { reportId: report._id.toString() }
         );
       }
@@ -74,7 +73,7 @@ const resolveReport = async (req, res) => {
       report.user,
       "Signalement Resolu",
       "L'equipe a repondu a votre signalement. Touchez ici pour lire la reponse.",
-      "SYSTEM",
+      "REPORT_RESOLVED",
       { reportId: report._id.toString() }
     );
 
