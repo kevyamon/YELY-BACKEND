@@ -23,7 +23,6 @@ const envSchema = z.object({
   JWT_ACCESS_EXPIRATION: z.string().default('15m'),
   JWT_REFRESH_EXPIRATION: z.string().default('30d'),
   
-  // MODIFICATION ICI : On passe d'une seule URL a une liste d'origines autorisees
   ALLOWED_ORIGINS: z.string().min(1, 'ALLOWED_ORIGINS requis (urls separees par des virgules)'),
   
   CLOUDINARY_CLOUD_NAME: z.string().min(1, 'Cloudinary Cloud Name requis'),
@@ -34,7 +33,10 @@ const envSchema = z.object({
 
   FIREBASE_PROJECT_ID: z.string().min(1, 'Firebase Project ID requis'),
   FIREBASE_CLIENT_EMAIL: z.string().email('Firebase Client Email invalide'),
-  FIREBASE_PRIVATE_KEY: z.string().min(1, 'Firebase Private Key requise').transform(val => val.replace(/\\n/g, '\n')),
+  FIREBASE_PRIVATE_KEY: z.string().min(1, 'Firebase Private Key requise').transform(val => {
+    const strippedKey = val.replace(/^["']|["']$/g, '');
+    return strippedKey.replace(/\\n/g, '\n');
+  }),
 
   BCRYPT_ROUNDS: z.string().transform(Number).optional(),
 
