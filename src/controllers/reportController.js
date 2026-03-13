@@ -1,9 +1,10 @@
 // src/controllers/reportController.js
 const Report = require('../models/Report');
+const User = require('../models/User'); // AJOUT: Requis pour trouver les admins
 const cloudinary = require('cloudinary').v2;
 const fs = require('fs');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
-const notificationService = require('../services/notificationService'); // AJOUT SENIOR: Pour les notifs
+const notificationService = require('../services/notificationService'); 
 
 const submitReport = async (req, res) => {
   try {
@@ -24,27 +25,39 @@ const submitReport = async (req, res) => {
       captures
     });
 
-    // CORRECTION SENIOR: Utilisation du bon nom de variable 'socketio' au lieu de 'io'
     const io = req.app.get('socketio');
     if (io) {
-      // On envoie spécifiquement dans la salle 'admin' si on l'a configurée, sinon on broadcast
       io.emit('new_admin_report', report);
     }
 
-    return successResponse(res, report, 'Votre signalement a été transmis à l\'administration.', 201);
+    // AJOUT SENIOR: Envoi reel des notifications Push aux administrateurs
+    try {
+      const admins = await User.find({ role: { $in: ['admin', 'superadmin'] } });
+      for (const adminUser of admins) {
+        await notificationService.sendNotification(
+          adminUser._id,
+          "Nouveau Signalement",
+          "Un utilisateur a soumis un nouveau probleme necessitant votre attention.",
+          "SYSTEM",
+          { reportId: report._id.toString() }
+        );
+      }
+    } catch (notifErr) {
+      console.error("[NOTIF_ERROR] Echec de l'envoi du push aux admins:", notifErr.message);
+    }
+
+    return successResponse(res, report, 'Votre signalement a ete transmis a l\'administration.', 201);
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
 };
 
 const getMyReports = async (req, res) => {
-  // AJOUT SENIOR: On cache ceux que l'utilisateur a supprimés
   const reports = await Report.find({ user: req.user._id, deletedByUser: false }).sort({ createdAt: -1 });
   return successResponse(res, reports);
 };
 
 const getAllReports = async (req, res) => {
-  // AJOUT SENIOR: On cache ceux que l'admin a supprimés
   const reports = await Report.find({ deletedByAdmin: false }).populate('user', 'name phone email').sort({ createdAt: -1 });
   return successResponse(res, reports);
 };
@@ -56,35 +69,31 @@ const resolveReport = async (req, res) => {
     adminNote: note 
   }, { new: true });
 
-  // AJOUT SENIOR: Envoi de la notification Push + In-App au plaintif
   if (report) {
     await notificationService.sendNotification(
       report.user,
-      "Signalement Résolu ✅",
-      "L'équipe a répondu à votre signalement. Touchez ici pour lire la réponse.",
+      "Signalement Resolu",
+      "L'equipe a repondu a votre signalement. Touchez ici pour lire la reponse.",
       "SYSTEM",
       { reportId: report._id.toString() }
     );
 
-    // CORRECTION SENIOR: Utilisation du bon nom 'socketio'
     const io = req.app.get('socketio');
     if (io) {
       io.to(report.user.toString()).emit('report_resolved', report);
     }
   }
 
-  return successResponse(res, report, 'Signalement marqué comme résolu.');
+  return successResponse(res, report, 'Signalement marque comme resolu.');
 };
 
-// AJOUT SENIOR : Suppression Intelligente côté Admin
 const deleteReport = async (req, res) => {
   try {
     const report = await Report.findById(req.params.id);
     if (!report) return errorResponse(res, "Signalement introuvable.", 404);
 
-    report.deletedByAdmin = true; // L'admin demande à le cacher
+    report.deletedByAdmin = true; 
 
-    // Si le plaintif l'avait DEJA supprimé, on détruit tout pour économiser Cloudinary
     if (report.deletedByUser) {
       if (report.captures && report.captures.length > 0) {
         for (const url of report.captures) {
@@ -96,24 +105,22 @@ const deleteReport = async (req, res) => {
       }
       await Report.findByIdAndDelete(report._id);
     } else {
-      await report.save(); // Sinon on le cache juste pour l'admin
+      await report.save(); 
     }
 
-    return successResponse(res, null, 'Signalement supprimé de votre tableau de bord.');
+    return successResponse(res, null, 'Signalement supprime de votre tableau de bord.');
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
 };
 
-// AJOUT SENIOR : Suppression Intelligente côté Utilisateur
 const deleteMyReport = async (req, res) => {
   try {
     const report = await Report.findOne({ _id: req.params.id, user: req.user._id });
     if (!report) return errorResponse(res, "Signalement introuvable.", 404);
 
-    report.deletedByUser = true; // L'utilisateur demande à le cacher
+    report.deletedByUser = true; 
 
-    // Si l'admin l'avait DEJA supprimé, on détruit tout pour économiser Cloudinary
     if (report.deletedByAdmin) {
       if (report.captures && report.captures.length > 0) {
         for (const url of report.captures) {
@@ -125,10 +132,10 @@ const deleteMyReport = async (req, res) => {
       }
       await Report.findByIdAndDelete(report._id);
     } else {
-      await report.save(); // Sinon on le cache juste pour l'utilisateur
+      await report.save(); 
     }
 
-    return successResponse(res, null, 'Signalement retiré de votre historique.');
+    return successResponse(res, null, 'Signalement retire de votre historique.');
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }

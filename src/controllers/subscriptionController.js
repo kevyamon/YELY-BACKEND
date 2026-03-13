@@ -3,10 +3,11 @@
 // STANDARD: Industriel / Bank Grade (Self-Healing Data)
 
 const subscriptionService = require('../services/subscriptionService');
+const notificationService = require('../services/notificationService');
 const { successResponse } = require('../utils/responseHandler');
 const Transaction = require('../models/Transaction');
 const User = require('../models/User');
-const Settings = require('../models/Settings'); // IMPORT DU MODELE SETTINGS POUR LE VIP
+const Settings = require('../models/Settings');
 const logger = require('../config/logger');
 const AppError = require('../utils/AppError');
 
@@ -14,14 +15,12 @@ const getConfig = async (req, res, next) => {
   try {
     const config = await subscriptionService.getSubscriptionPricing();
     
-    // RECUPERATION EN TEMPS REEL DU STATUT VIP
     const settings = await Settings.findOne();
     
     if (!config.weekly.link || !config.monthly.link) {
       logger.warn("[CONFIG WARNING]: Liens de paiement manquants dans les variables d'environnement ou la base de donnees.");
     }
 
-    // ON INJECTE LE STATUT VIP DANS LA REPONSE DE CONFIGURATION
     const enrichedConfig = {
       ...config,
       isGlobalFreeAccess: settings?.isGlobalFreeAccess || false,
@@ -47,6 +46,21 @@ const submitProof = async (req, res, next) => {
       { planId, senderPhone }, 
       req.file
     );
+
+    try {
+      const admins = await User.find({ role: { $in: ['admin', 'superadmin'] } });
+      for (const adminUser of admins) {
+        await notificationService.sendNotification(
+          adminUser._id,
+          "Nouvelle preuve de paiement",
+          `Le numero ${senderPhone} a soumis une preuve pour le plan ${planId}.`,
+          "SYSTEM",
+          { transactionId: transaction._id.toString() }
+        );
+      }
+    } catch (notifErr) {
+      logger.error(`[NOTIF_ERROR] Echec notification admins (Preuve de paiement): ${notifErr.message}`);
+    }
 
     return successResponse(
       res, 

@@ -2,9 +2,10 @@
 // SOUS-CONTROLEUR - Execution : Arrivee, Demarrage, Cloture, Notation
 // CSCSM Level: Bank Grade
 
-const rideService = require('../../services/rideService');
+const rideService = require('../../services/ride/rideExecutionService');
+const notificationService = require('../../services/notificationService'); // IMPORT AJOUTE
 const User = require('../../models/User');
-const Settings = require('../../models/Settings'); // 🛡️ IMPORT AJOUTÉ
+const Settings = require('../../models/Settings');
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 const { successResponse } = require('../../utils/responseHandler');
@@ -23,6 +24,11 @@ const markAsArrived = async (req, res, next) => {
       rideId: ride._id, 
       arrivedAt: ride.arrivedAt 
     });
+
+    // DECLENCHEUR PUSH : Prevenir le client de l'arrivee
+    notificationService.sendNotification(
+      ride.rider, "Chauffeur sur place", "Votre chauffeur est arrive au point de rendez-vous.", "SYSTEM", { rideId: ride._id.toString() }
+    ).catch(() => {});
     
     logger.info(`[RIDE EXECUTION] Course ${rideId} - Chauffeur sur place (Statut: arrived). Driver ID: ${req.user._id}`);
     
@@ -46,8 +52,13 @@ const startRide = async (req, res, next) => {
       rideId: ride._id, 
       startedAt: ride.startedAt 
     });
+
+    // DECLENCHEUR PUSH : Depart de la course
+    notificationService.sendNotification(
+      ride.rider, "Course demarree", "Votre course a commence. Bonne route !", "SYSTEM", { rideId: ride._id.toString() }
+    ).catch(() => {});
     
-    logger.info(`[RIDE EXECUTION] Course ${rideId} démarrée (Statut: in_progress). Driver ID: ${req.user._id}`);
+    logger.info(`[RIDE EXECUTION] Course ${rideId} demarree (Statut: in_progress). Driver ID: ${req.user._id}`);
     
     return successResponse(res, { status: 'in_progress' }, 'En route');
   } catch (error) {
@@ -77,24 +88,27 @@ const completeRide = async (req, res, next) => {
       rideId: ride._id, 
       finalPrice: ride.price 
     });
-    
-    logger.info(`[RIDE EXECUTION] Course ${rideId} terminée. Driver ID: ${req.user._id}. Prix final: ${ride.price}`);
 
-    // 🔥 LE PIÈGE DE FIN DE COURSE (Vérification d'abonnement post-course)
+    // DECLENCHEUR PUSH : Fin de course pour le client
+    notificationService.sendNotification(
+      ride.rider, "Course terminee", "Nous sommes arrives a destination. Merci d'avoir voyage avec Yely !", "SYSTEM", { rideId: ride._id.toString() }
+    ).catch(() => {});
+    
+    logger.info(`[RIDE EXECUTION] Course ${rideId} terminee. Driver ID: ${req.user._id}. Prix final: ${ride.price}`);
+
+    // LE PIEGE DE FIN DE COURSE (Verification d'abonnement post-course)
     try {
       const settings = await Settings.findOne();
       
-      // Si la gratuité globale est désactivée
       if (settings && !settings.isGlobalFreeAccess) {
         const driver = await User.findById(req.user._id).populate('subscription');
         
-        // Et que le chauffeur n'a pas d'abonnement actif (ou qu'il vient de périmer)
         if (!driver.subscription || !driver.subscription.isActive) {
           if (io) {
             io.to(driver._id.toString()).emit('FORCE_SUBSCRIPTION_LOCK', {
-              message: "Votre période de grâce est terminée. Veuillez activer un Pass Yély pour continuer à recevoir des courses."
+              message: "Votre periode de grace est terminee. Veuillez activer un Pass Yely pour continuer a recevoir des courses."
             });
-            logger.info(`[SUBSCRIPTION LOCK] Chauffeur ${req.user._id} verrouillé à la fin de la course.`);
+            logger.info(`[SUBSCRIPTION LOCK] Chauffeur ${req.user._id} verrouille a la fin de la course.`);
           }
         }
       }
@@ -110,7 +124,7 @@ const completeRide = async (req, res, next) => {
         totalEarnings: updatedDriver.totalEarnings,
         rating: updatedDriver.rating
       }
-    }, 'Course achevée');
+    }, 'Course achevee');
   } catch (error) {
     return next(error);
   }
@@ -122,11 +136,11 @@ const rateRide = async (req, res, next) => {
     const { rating, comment } = req.body;
     
     if (!rideId) throw new AppError('L\'identifiant de la course est manquant.', 400);
-    if (!rating || rating < 1 || rating > 5) throw new AppError('La note doit être comprise entre 1 et 5.', 400);
+    if (!rating || rating < 1 || rating > 5) throw new AppError('La note doit etre comprise entre 1 et 5.', 400);
 
     await rideService.submitRideRating(rideId, rating, comment);
 
-    return successResponse(res, { status: 'rated' }, 'Note enregistrée avec succès');
+    return successResponse(res, { status: 'rated' }, 'Note enregistree avec succes');
   } catch (error) {
     return next(error);
   }
@@ -139,7 +153,7 @@ const getRideHistory = async (req, res, next) => {
     
     const result = await rideService.getRideHistory(req.user, page, limit);
     
-    return successResponse(res, result, 'Historique récupéré');
+    return successResponse(res, result, 'Historique recupere');
   } catch (error) {
     return next(error);
   }
@@ -149,7 +163,7 @@ const hideFromHistory = async (req, res, next) => {
   try {
     const { id } = req.params;
     await rideService.hideRideFromHistory(req.user, id);
-    return successResponse(res, null, 'Course supprimée de votre historique.');
+    return successResponse(res, null, 'Course supprimee de votre historique.');
   } catch (error) {
     return next(error);
   }

@@ -8,6 +8,7 @@ const notificationService = require('../services/notificationService');
 const Transaction = require('../models/Transaction');
 const AuditLog = require('../models/AuditLog'); 
 const Settings = require('../models/Settings'); 
+const User = require('../models/User'); 
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const logger = require('../config/logger');
 
@@ -74,10 +75,11 @@ const approveTransaction = async (req, res) => {
         });
       }
       
-      notificationService.sendPushNotification(
+      notificationService.sendNotification(
         result.driver._id.toString(),
         "Abonnement Active",
         "Votre preuve de paiement a ete validee. Vous pouvez reprendre les courses.",
+        'SYSTEM',
         { type: 'SUBSCRIPTION_APPROVED' }
       ).catch(notifError => logger.error(`[NON-CRITIQUE] Echec notification apres approbation: ${notifError.message}`));
       
@@ -104,10 +106,11 @@ const rejectTransaction = async (req, res) => {
         io.to(result.driver._id.toString()).emit('subscription_rejected', { reason });
       }
       
-      notificationService.sendPushNotification(
+      notificationService.sendNotification(
         result.driver._id.toString(),
         "Paiement Rejete",
         `Votre preuve a ete refusee: ${reason}. Veuillez soumettre une image valide.`,
+        'SYSTEM',
         { type: 'SUBSCRIPTION_REJECTED' }
       ).catch(notifError => logger.error(`[NON-CRITIQUE] Echec notification apres rejet: ${notifError.message}`));
       
@@ -329,12 +332,15 @@ const toggleGlobalFreeAccess = async (req, res) => {
       : "Le mode gratuit est termine. Votre abonnement a ete prolonge pour compenser cette periode.";
 
     try {
-      if (notificationService.sendPushNotificationToTopic) {
-        await notificationService.sendPushNotificationToTopic('drivers', {
-          title: pushTitle,
-          body: pushBody,
-          data: { type: 'PROMO_UPDATE', isGlobalFreeAccess: settings.isGlobalFreeAccess.toString() }
-        });
+      const drivers = await User.find({ role: 'driver', fcmToken: { $ne: null } });
+      for (const driver of drivers) {
+        notificationService.sendNotification(
+          driver._id,
+          pushTitle,
+          pushBody,
+          'PROMO_UPDATE',
+          { isGlobalFreeAccess: settings.isGlobalFreeAccess.toString() }
+        ).catch(() => {});
       }
     } catch (pushErr) {
       logger.warn(`[Admin] Echec non-bloquant du Push Promo: ${pushErr.message}`);

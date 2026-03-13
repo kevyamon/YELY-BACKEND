@@ -3,7 +3,8 @@
 // STANDARD: Industriel / Bank Grade
 
 const rideService = require('../../services/ride/rideLifecycleService'); 
-const poiController = require('../poiController'); // IMPORT SENIOR: Libérateur de lieux
+const poiController = require('../poiController'); 
+const notificationService = require('../../services/notificationService'); // AJOUT SENIOR: Integration des Pushs
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 const { successResponse } = require('../../utils/responseHandler');
@@ -15,14 +16,14 @@ const estimateRide = async (req, res, next) => {
     const { pickupLat, pickupLng, dropoffLat, dropoffLng } = req.query;
     
     if (!pickupLat || !pickupLng || !dropoffLat || !dropoffLng) {
-      throw new AppError('Coordonnées GPS manquantes pour l\'estimation', 400);
+      throw new AppError('Coordonnees GPS manquantes pour l\'estimation', 400);
     }
 
     const origin = [parseFloat(pickupLng), parseFloat(pickupLat)];
     const destination = [parseFloat(dropoffLng), parseFloat(dropoffLat)];
     
     if (origin.some(isNaN) || destination.some(isNaN)) {
-      throw new AppError('Format de coordonnées GPS invalide', 400);
+      throw new AppError('Format de coordonnees GPS invalide', 400);
     }
 
     const distance = await rideService.getRouteDistance(origin, destination);
@@ -33,7 +34,7 @@ const estimateRide = async (req, res, next) => {
       { id: '3', type: 'vip', name: 'VIP', duration: Math.max(1, Math.ceil(distance * 1.5)) }
     ];
 
-    return successResponse(res, { distance, vehicles }, 'Estimation réussie');
+    return successResponse(res, { distance, vehicles }, 'Estimation reussie');
   } catch (error) {
     return next(error);
   }
@@ -46,7 +47,7 @@ const requestRide = async (req, res, next) => {
     
     const { ride, drivers } = await rideService.createRideRequest(req.user._id, req.body, redisClient);
 
-    logger.info(`[DISPATCH] Course ${ride._id} créée (${ride.passengersCount} passagers). ${drivers.length} chauffeurs ciblés.`);
+    logger.info(`[DISPATCH] Course ${ride._id} creee (${ride.passengersCount} passagers). ${drivers.length} chauffeurs cibles.`);
 
     const rider = await User.findById(req.user._id).select('name profilePicture');
 
@@ -73,7 +74,7 @@ const requestRide = async (req, res, next) => {
 const cancelRide = async (req, res, next) => {
   try {
     const rideId = req.params.id || req.body.rideId; 
-    const reason = req.body.reason || `Annulé par le ${req.user.role}`;
+    const reason = req.body.reason || `Annule par le ${req.user.role}`;
     
     if (!rideId) {
       throw new AppError('L\'identifiant de la course est manquant.', 400);
@@ -82,13 +83,19 @@ const cancelRide = async (req, res, next) => {
     const ride = await rideService.cancelRideAction(rideId, req.user._id, req.user.role, reason);
     const io = req.app.get('socketio');
 
+    // DECLENCHEUR PUSH : Informer l'autre partie de l'annulation
     if (req.user.role === 'rider' && ride.driver) {
        io.to(ride.driver.toString()).emit('ride_cancelled', { rideId });
+       notificationService.sendNotification(
+         ride.driver, "Course annulee", "Le passager a annule la demande.", "SYSTEM", { rideId: rideId.toString() }
+       ).catch(() => {});
     } else if (req.user.role === 'driver') {
        io.to(ride.rider.toString()).emit('ride_cancelled', { rideId });
+       notificationService.sendNotification(
+         ride.rider, "Course annulee", "Le chauffeur a du annuler la course.", "SYSTEM", { rideId: rideId.toString() }
+       ).catch(() => {});
     }
 
-    // DECLENCHEUR TEMPS REEL : Libération des lieux en attente suite à l'annulation
     if (ride.origin?.address) {
       await poiController.releasePendingPOI(ride.origin.address, io);
     }
@@ -96,7 +103,7 @@ const cancelRide = async (req, res, next) => {
       await poiController.releasePendingPOI(ride.destination.address, io);
     }
 
-    return successResponse(res, { status: 'cancelled' }, 'Course annulée avec succès');
+    return successResponse(res, { status: 'cancelled' }, 'Course annulee avec succes');
   } catch (error) {
     return next(error);
   }
@@ -110,12 +117,14 @@ const emergencyCancel = async (req, res, next) => {
     if (result.driversFreed && result.driversFreed.length > 0) {
       result.driversFreed.forEach(driverId => {
         io.to(driverId.toString()).emit('ride_cancelled', {
-          message: 'La course a été annulée suite à une réinitialisation du client.'
+          message: 'La course a ete annulee suite a une reinitialisation du client.'
         });
+        notificationService.sendNotification(
+          driverId, "Course annulee", "La course a ete annulee (Nettoyage systeme).", "SYSTEM", {}
+        ).catch(() => {});
       });
     }
 
-    // DECLENCHEUR TEMPS REEL (Urgence) : Libération de tous les lieux bloqués par ces courses
     if (result.cancelledRides && result.cancelledRides.length > 0) {
       for (const ride of result.cancelledRides) {
         if (ride.origin?.address) {
@@ -127,7 +136,7 @@ const emergencyCancel = async (req, res, next) => {
       }
     }
 
-    return successResponse(res, result, 'Base de données nettoyée avec succès');
+    return successResponse(res, result, 'Base de donnees nettoyee avec succes');
   } catch (error) {
     return next(error);
   }
@@ -150,11 +159,16 @@ const lockRide = async (req, res, next) => {
       driverProfilePicture: req.user.profilePicture 
     });
 
+    // DECLENCHEUR PUSH : Prevenir le client qu'un chauffeur arrive dans la nego
+    notificationService.sendNotification(
+      ride.rider, "Chauffeur trouve", `${req.user.name} est interesse par votre course et prepare son tarif.`, "SYSTEM", { rideId: ride._id.toString() }
+    ).catch(() => {});
+
     return successResponse(res, { 
       rideId: ride._id, 
       status: ride.status, 
       priceOptions: ride.priceOptions 
-    }, 'Course verrouillée');
+    }, 'Course verrouillee');
   } catch (error) {
     return next(error);
   }
@@ -165,7 +179,7 @@ const submitPrice = async (req, res, next) => {
     const { rideId, amount } = req.body;
     
     if (!rideId || !amount) {
-      throw new AppError('Données incomplètes pour soumettre un prix.', 400);
+      throw new AppError('Donnees incompletes pour soumettre un prix.', 400);
     }
 
     const ride = await rideService.submitPriceProposal(rideId, req.user._id, amount);
@@ -176,6 +190,11 @@ const submitPrice = async (req, res, next) => {
       driverName: req.user.name,
       driverProfilePicture: req.user.profilePicture 
     });
+
+    // DECLENCHEUR PUSH : Prevenir le client du tarif exact
+    notificationService.sendNotification(
+      ride.rider, "Proposition de prix", `${req.user.name} vous propose ${amount} FCFA.`, "SYSTEM", { rideId: ride._id.toString() }
+    ).catch(() => {});
 
     return successResponse(res, { status: 'negotiating' }, 'Proposition transmise');
   } catch (error) {
@@ -188,7 +207,7 @@ const finalizeRide = async (req, res, next) => {
     const { rideId, decision } = req.body;
     
     if (!rideId || !decision) {
-      throw new AppError('Données incomplètes pour finaliser.', 400);
+      throw new AppError('Donnees incompletes pour finaliser.', 400);
     }
 
     const result = await rideService.finalizeProposal(rideId, req.user._id, decision);
@@ -207,6 +226,11 @@ const finalizeRide = async (req, res, next) => {
         destination: result.ride.destination
       });
 
+      // DECLENCHEUR PUSH : Succes pour le chauffeur
+      notificationService.sendNotification(
+        driver._id, "Course acceptee", "Le passager a valide votre prix. En route !", "SYSTEM", { rideId: result.ride._id.toString() }
+      ).catch(() => {});
+
       return successResponse(res, { 
         status: 'accepted', 
         driver: { 
@@ -216,17 +240,22 @@ const finalizeRide = async (req, res, next) => {
           location: driver.currentLocation,
           profilePicture: driver.profilePicture 
         } 
-      }, 'Course confirmée');
+      }, 'Course confirmee');
 
     } else {
       io.to(result.rejectedDriverId.toString()).emit('proposal_rejected', {
-        message: 'Prix refusé'
+        message: 'Prix refuse'
       });
+
+      // DECLENCHEUR PUSH : Rejet pour le chauffeur
+      notificationService.sendNotification(
+        result.rejectedDriverId, "Proposition refusee", "Le passager a decline votre tarif.", "SYSTEM", { rideId: result.ride._id.toString() }
+      ).catch(() => {});
 
       const newDrivers = await rideService.dispatchToNearbyDrivers(result.ride);
       const rider = await User.findById(req.user._id).select('name profilePicture');
 
-      logger.info(`[DISPATCH-RETRY] Recherche relancée pour ${result.ride._id}. ${newDrivers.length} nouveaux chauffeurs trouvés.`);
+      logger.info(`[DISPATCH-RETRY] Recherche relancee pour ${result.ride._id}. ${newDrivers.length} nouveaux chauffeurs trouves.`);
 
       newDrivers.forEach(driver => {
         io.to(driver._id.toString()).emit('new_ride_request', {
@@ -242,7 +271,7 @@ const finalizeRide = async (req, res, next) => {
         });
       });
 
-      return successResponse(res, { status: 'searching' }, 'Recherche relancée');
+      return successResponse(res, { status: 'searching' }, 'Recherche relancee');
     }
   } catch (error) {
     return next(error);
@@ -274,7 +303,7 @@ const getCurrentRide = async (req, res, next) => {
       ...currentRide,
       id: currentRide._id,
       rideId: currentRide._id,
-      searchRadius: currentRide.currentSearchRadius, // CORRECTION : Mapping pour le Frontend
+      searchRadius: currentRide.currentSearchRadius, 
       riderName: currentRide.rider?.name,
       riderPhone: currentRide.rider?.phone,
       riderProfilePicture: currentRide.rider?.profilePicture,
@@ -284,7 +313,7 @@ const getCurrentRide = async (req, res, next) => {
       driverLocation: currentRide.driver?.currentLocation,
     };
 
-    return successResponse(res, formattedRide, 'Course en cours récupérée');
+    return successResponse(res, formattedRide, 'Course en cours recuperee');
   } catch (error) {
     return next(error);
   }

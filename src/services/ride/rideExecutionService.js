@@ -1,12 +1,13 @@
 // src/services/ride/rideExecutionService.js
-// SERVICE METIER - Execution de la course, Geofencing, Notation et Libération POI
+// SERVICE METIER - Execution de la course, Geofencing, Notation et Liberation POI
 // CSCSM Level: Bank Grade
 
 const mongoose = require('mongoose');
 const Ride = require('../../models/Ride');
 const User = require('../../models/User');
 const userRepository = require('../../repositories/userRepository');
-const poiController = require('../../controllers/poiController'); // Import du libérateur
+const poiController = require('../../controllers/poiController'); 
+const notificationService = require('../notificationService'); // IMPORT AJOUTE
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 
@@ -83,7 +84,6 @@ const startRideSession = async (driverId, rideId) => {
   return ride;
 };
 
-// MODIFICATION SENIOR : Injection de 'io' pour libérer les POIs en attente
 const completeRideSession = async (driverId, rideId, io) => {
   const session = await mongoose.startSession();
   let result;
@@ -138,7 +138,6 @@ const completeRideSession = async (driverId, rideId, io) => {
     await session.endSession();
   }
 
-  // DECLENCHEUR TEMPS RÉEL : On libère les actions fantômes éventuelles sur l'origine ou la destination
   if (result && io) {
     if (result.origin?.address) {
       await poiController.releasePendingPOI(result.origin.address, io);
@@ -212,6 +211,12 @@ const checkRideProgressOnLocationUpdate = async (driverId, coordinates, io) => {
 
         io.to(ride.rider.toString()).emit('ride_arrived', { rideId: ride._id, arrivedAt: ride.arrivedAt });
         io.to(driverId.toString()).emit('ride_arrived', { rideId: ride._id, arrivedAt: ride.arrivedAt });
+        
+        // DECLENCHEUR PUSH AUTOMATIQUE (Geofencing) : Arrivee par localisation GPS
+        notificationService.sendNotification(
+          ride.rider, "Chauffeur sur place", "Votre chauffeur est arrive au point de rendez-vous.", "SYSTEM", { rideId: ride._id.toString() }
+        ).catch(() => {});
+
         logger.info(`[GEOFENCING] Driver ${driverId} arrive chez le client (15m). Statut MAJ vers 'arrived'`);
       }
     }
@@ -273,7 +278,7 @@ const hideRideFromHistory = async (user, rideId) => {
   } else if (ride.rider && ride.rider.toString() === user._id.toString()) {
     ride.hiddenForRider = true;
   } else {
-    throw new AppError("Non autorisé à masquer cette course.", 403);
+    throw new AppError("Non autorise a masquer cette course.", 403);
   }
 
   await ride.save();

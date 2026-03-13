@@ -9,10 +9,10 @@ const Ride = require('../../models/Ride');
 const User = require('../../models/User'); 
 const userRepository = require('../../repositories/userRepository');
 const pricingService = require('../pricingService');
+const notificationService = require('../notificationService'); // AJOUT SENIOR: Remplacement import pour uniformite
 const AppError = require('../../utils/AppError');
 const logger = require('../../config/logger');
 const { env } = require('../../config/env');
-const { sendNotification } = require('../notificationService');
 
 const cleanupQueue = new Queue('ride-cleanup', { 
   connection: { url: env.REDIS_URL } 
@@ -70,7 +70,7 @@ const dispatchToNearbyDrivers = async (ride, radius) => {
     await Ride.findByIdAndUpdate(ride._id, { $addToSet: { notifiedDrivers: { $each: driverIds } } });
 
     drivers.forEach(driver => {
-      sendNotification(
+      notificationService.sendNotification(
         driver._id,
         'Nouvelle demande de course',
         `Course de ${ride.distance} km disponible a proximite.`,
@@ -88,13 +88,13 @@ const expandSearchRadius = async (io, rideId) => {
   if (!ride) return; 
 
   const initialRadius = 1000;
-  const maxRadius = 2500; // FIX : Limite stricte a 5 agrandissements
+  const maxRadius = 2500; 
   const step = 300;
 
   let nextRadius = (ride.currentSearchRadius || initialRadius) + step;
 
   if (nextRadius > maxRadius) {
-    return; // Securite anti-boucle infinie
+    return; 
   }
 
   ride.currentSearchRadius = nextRadius;
@@ -123,7 +123,6 @@ const expandSearchRadius = async (io, rideId) => {
     });
   } 
 
-  // LA CORRECTION CRITIQUE EST ICI : Aiguillage parfait
   if (nextRadius === maxRadius) {
     logger.info(`[DISPATCH] Rayon MAX atteint (${maxRadius}m) pour ${rideId}. Sablier de mort lance (60s).`);
     await cleanupQueue.add(
@@ -367,11 +366,14 @@ const cancelSearchTimeout = async (io, rideId) => {
     io.to(ride.rider.toString()).emit('search_timeout', {
       message: "Aucun chauffeur n'est disponible pour le moment."
     });
+
+    // DECLENCHEUR PUSH : Prevenir le client qui est potentiellement hors de l'app
+    notificationService.sendNotification(
+      ride.rider, "Recherche expiree", "Aucun chauffeur n'est disponible dans votre zone pour le moment.", "SYSTEM", { rideId: ride._id.toString() }
+    ).catch(() => {});
     
     io.emit('ride_taken_by_other', { rideId }); 
 
-    // FIX : Enveloppement dans un try-catch pour eviter que le Worker plante silencieusement 
-    // en cas d'erreur avec le controlleur de POI.
     try {
       const poiController = require('../../controllers/poiController');
       if (ride.origin?.address) await poiController.releasePendingPOI(ride.origin.address, io);
@@ -394,6 +396,11 @@ const releaseStuckNegotiations = async (io, rideId) => {
     await ride.save();
     
     io.to(rejectedDriverId.toString()).emit('ride_taken_by_other', { rideId });
+
+    // DECLENCHEUR PUSH : Prevenir le chauffeur qui etait en attente
+    notificationService.sendNotification(
+      rejectedDriverId, "Delai expire", "Le passager n'a pas repondu a temps, la course a ete relancee.", "SYSTEM", { rideId: ride._id.toString() }
+    ).catch(() => {});
 
     await cleanupQueue.add(
       'expand-search',
