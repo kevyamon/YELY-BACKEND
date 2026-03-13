@@ -7,12 +7,9 @@ const Notification = require('../models/Notification');
 const User = require('../models/User');
 const logger = require('../config/logger');
 
-/**
- * Envoie une notification Push et la sauvegarde en base pour l'historique In-App
- */
 const sendNotification = async (userId, title, message, type = 'SYSTEM', metadata = {}) => {
   try {
-    // 1. Sauvegarde In-App (Toujours effectuée)
+    // 1. Sauvegarde In-App (Toujours effectuee)
     const inAppNotif = await Notification.create({
       recipient: userId,
       title,
@@ -24,11 +21,10 @@ const sendNotification = async (userId, title, message, type = 'SYSTEM', metadat
     // 2. Tentative d'envoi Push (si le token FCM existe)
     const user = await User.findById(userId).select('+fcmToken');
     if (user && user.fcmToken) {
-      // CORRECTION SENIOR : Ajout strict des configurations Android Channel et APNs iOS
-      // Sans cela, les OS modernes rejettent les notifications en arriere-plan.
+      
       const payload = {
         notification: { 
-          title, 
+          title: title, 
           body: message 
         },
         data: {
