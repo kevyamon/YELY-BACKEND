@@ -24,18 +24,38 @@ const sendNotification = async (userId, title, message, type = 'SYSTEM', metadat
     // 2. Tentative d'envoi Push (si le token FCM existe)
     const user = await User.findById(userId).select('+fcmToken');
     if (user && user.fcmToken) {
+      // CORRECTION SENIOR : Ajout strict des configurations Android Channel et APNs iOS
+      // Sans cela, les OS modernes rejettent les notifications en arriere-plan.
       const payload = {
-        notification: { title, body: message },
+        notification: { 
+          title, 
+          body: message 
+        },
         data: {
           ...metadata,
           notificationId: inAppNotif._id.toString(),
           type: type
         },
+        android: {
+          notification: {
+            channelId: 'yely_rides',
+            sound: 'default',
+            priority: 'high'
+          }
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: 'default',
+              badge: 1
+            }
+          }
+        },
         token: user.fcmToken
       };
 
       await admin.messaging().send(payload).catch(err => {
-        logger.warn(`[PUSH] Echec d'envoi à ${userId}: ${err.message}`);
+        logger.warn(`[PUSH] Echec d'envoi a ${userId}: ${err.message}`);
       });
     }
 

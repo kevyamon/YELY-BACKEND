@@ -125,7 +125,7 @@ io.on('connection', (socket) => {
           return;
         }
       } catch (err) {
-        logger.warn(`[SOCKET] Verif DB echouée pour ${user._id}, session conservée.`);
+        logger.warn(`[SOCKET] Verif DB echouee pour ${user._id}, session conservee.`);
       }
     }
 
@@ -146,10 +146,13 @@ io.on('connection', (socket) => {
     } else if (timeDiffSeconds > 0) { 
       const [prevLng, prevLat] = socket.lastCoords;
       const distanceKm = getDistKm(prevLat, prevLng, coords.latitude, coords.longitude);
-      const speedKmH = distanceKm / (timeDiffSeconds / 3600);
+      
+      // CORRECTION SENIOR : Lissage du calcul de vitesse.
+      // Si les sockets arrivent en rafale (rattrapage reseau), timeDiffSeconds approche 0.
+      // On force un minimum de 1 seconde pour eviter les fausses vitesses astronomiques.
+      const effectiveTimeDiff = Math.max(timeDiffSeconds, 1);
+      const speedKmH = distanceKm / (effectiveTimeDiff / 3600);
 
-      // CORRECTION CRITIQUE : Assouplissement du bouclier Anti-Spoofing. 
-      // On encaisse le téléporteur sans déconnecter le chauffeur pour qu'il reçoive la course.
       if (speedKmH > 300) {
         if (!isDev) {
           socket.spoofStrikes += 1;
@@ -159,7 +162,7 @@ io.on('connection', (socket) => {
             socket.disconnect(true);
             return;
           }
-          // On valide exceptionnellement les coordonnées pour stabiliser le téléporteur
+          // On valide exceptionnellement les coordonnees pour stabiliser le teleporteur
           socket.lastLocTime = now; 
           socket.lastCoords = [coords.longitude, coords.latitude]; 
           return; 
@@ -211,7 +214,7 @@ io.on('connection', (socket) => {
 const startServer = async () => {
   try {
     await mongoose.connect(env.MONGO_URI);
-    logger.info('[MONGODB] Base de donnees connectée');
+    logger.info('[MONGODB] Base de donnees connectee');
     
     server.listen(env.PORT, '0.0.0.0', () => {
       logger.info(`[SERVER] Serveur Yely actif sur 0.0.0.0:${env.PORT}`);

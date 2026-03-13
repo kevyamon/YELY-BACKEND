@@ -36,10 +36,11 @@ const rejectTransactionSchema = z.object({
   reason: z.string().min(5, "Raison de rejet trop courte").max(200).trim()
 }).strict();
 
-// --- AJOUT VERSIONING (Vague 1) ---
+// --- AJOUT VERSIONING (Vague 1 & 2) ---
 const updateAppVersionSchema = z.object({
   latestVersion: z.string().min(3, "Format de version invalide").max(20).trim(),
   mandatoryUpdate: z.boolean(),
+  isOta: z.boolean(), // AJOUT : Validation du boolean OTA
   updateUrl: z.string().url("URL de telechargement invalide")
 }).strict();
 

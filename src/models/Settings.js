@@ -10,9 +10,10 @@ const settingsSchema = new mongoose.Schema({
   promoMessage: { type: String, default: "Yely Regal ! Pour feter notre lancement, Yely vous offre l'acces VIP. Roulez sans abonnement !" },
   promoStartedAt: { type: Date, default: null }, // Memorisation du depart VIP pour la compensation
   
-  // --- VERSIONING & MISES A JOUR (Vague 1) ---
+  // --- VERSIONING & MISES A JOUR (Vague 1 & 2) ---
   latestVersion: { type: String, default: "1.2.0", trim: true },
   mandatoryUpdate: { type: Boolean, default: true }, // Bloquant par defaut si active
+  isOta: { type: Boolean, default: false }, // AJOUT : Enregistrement en base de la config OTA
   updateUrl: { type: String, default: "https://download-yely.onrender.com", trim: true },
 
   // --- GEOFENCING (ZONE DE SERVICE GLOBALE) ---
