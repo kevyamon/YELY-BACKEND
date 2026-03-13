@@ -22,28 +22,42 @@ const sendNotification = async (userId, title, message, type = 'SYSTEM', metadat
     const user = await User.findById(userId).select('+fcmToken');
     if (user && user.fcmToken) {
       
+      // PARSEUR DE SECURITE : Firebase Admin SDK exige que le payload "data" 
+      // ne contienne strictement QUE des chaines de caracteres (Strings).
+      const safeData = {
+        notificationId: inAppNotif._id.toString(),
+        type: String(type)
+      };
+
+      if (metadata && typeof metadata === 'object') {
+        Object.keys(metadata).forEach(key => {
+          if (metadata[key] !== null && metadata[key] !== undefined) {
+            safeData[key] = String(metadata[key]);
+          }
+        });
+      }
+      
       const payload = {
         notification: { 
-          title: title, 
-          body: message 
+          title: String(title), 
+          body: String(message) 
         },
-        data: {
-          ...metadata,
-          notificationId: inAppNotif._id.toString(),
-          type: type
-        },
+        data: safeData,
         android: {
+          priority: 'high',
           notification: {
             channelId: 'yely_rides',
             sound: 'default',
-            priority: 'high'
+            defaultVibrateTimings: true,
+            notificationPriority: 'PRIORITY_HIGH'
           }
         },
         apns: {
           payload: {
             aps: {
               sound: 'default',
-              badge: 1
+              badge: 1,
+              contentAvailable: true 
             }
           }
         },
