@@ -2,14 +2,13 @@
 // SERVICE NOTIFICATIONS - Orchestration Push & In-App
 // CSCSM Level: Bank Grade
 
-const admin = require('firebase-admin');
+const admin = require('../config/firebase');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const logger = require('../config/logger');
 
 const sendNotification = async (userId, title, message, type = 'SYSTEM', metadata = {}) => {
   try {
-    // 1. Sauvegarde In-App (Toujours effectuee)
     const inAppNotif = await Notification.create({
       recipient: userId,
       title,
@@ -18,12 +17,9 @@ const sendNotification = async (userId, title, message, type = 'SYSTEM', metadat
       metadata
     });
 
-    // 2. Tentative d'envoi Push (si le token FCM existe)
     const user = await User.findById(userId).select('+fcmToken');
     if (user && user.fcmToken) {
       
-      // PARSEUR DE SECURITE : Firebase Admin SDK exige que le payload "data" 
-      // ne contienne strictement QUE des chaines de caracteres (Strings).
       const safeData = {
         notificationId: inAppNotif._id.toString(),
         type: String(type)
@@ -45,9 +41,11 @@ const sendNotification = async (userId, title, message, type = 'SYSTEM', metadat
         data: safeData,
         android: {
           priority: 'high',
+          ttl: 86400000, 
           notification: {
             channelId: 'yely_rides',
             sound: 'default',
+            clickAction: 'expo.modules.notifications.service.action.DEFAULT',
             defaultVibrateTimings: true,
             notificationPriority: 'PRIORITY_HIGH'
           }
@@ -64,9 +62,14 @@ const sendNotification = async (userId, title, message, type = 'SYSTEM', metadat
         token: user.fcmToken
       };
 
-      await admin.messaging().send(payload).catch(err => {
+      const response = await admin.messaging().send(payload).catch(err => {
         logger.warn(`[PUSH] Echec d'envoi a ${userId}: ${err.message}`);
+        return null;
       });
+
+      if (response) {
+        logger.info(`[PUSH] Succes Google FCM -> ${userId} (Message ID: ${response})`);
+      }
     }
 
     return inAppNotif;
