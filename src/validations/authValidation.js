@@ -50,12 +50,14 @@ const loginSchema = z.object({
   clientPlatform: z.string().optional()
 }).strict();
 
+// CORRECTION : Retrait de .strict() pour eviter que le serveur bloque
+// les petites metadonnees invisibles ajoutees par React Native/Redux
 const availabilitySchema = z.object({
   isAvailable: z.boolean({
     required_error: 'Le statut de disponibilite est requis.',
     invalid_type_error: 'La valeur fournie est invalide.'
   })
-}).strict();
+});
 
 const forgotPasswordSchema = z.object({
   email: z.string()
