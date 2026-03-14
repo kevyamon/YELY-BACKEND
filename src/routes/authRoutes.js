@@ -1,10 +1,13 @@
 // src/routes/authRoutes.js
-// ROUTES AUTH - Validation & Rate Limiting
+// ROUTES AUTH - Validation & Rate Limiting (Redis Distributed)
 // CSCSM Level: Bank Grade
 
 const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
+const RedisStore = require('rate-limit-redis').default || require('rate-limit-redis');
+const redisClient = require('../config/redis');
+
 const { 
   registerUser, 
   loginUser, 
@@ -26,17 +29,16 @@ const {
   resetPasswordSchema
 } = require('../validations/authValidation');
 
-// ═══════════════════════════════════════════════════════════
-// RATE LIMITING SPÉCIFIQUE
-// ═══════════════════════════════════════════════════════════
-
+// RATE LIMITING SPÉCIFIQUE (Connecté à Redis)
 const createAuthLimiter = (maxAttempts, windowMinutes) => {
   return rateLimit({
     windowMs: windowMinutes * 60 * 1000,
     max: maxAttempts,
-    skipSuccessfulRequests: true,
     standardHeaders: true,
     legacyHeaders: false,
+    store: new RedisStore({
+      sendCommand: (...args) => redisClient.call(...args),
+    }),
     handler: (req, res) => {
       res.status(429).json({
         success: false,
@@ -49,14 +51,9 @@ const createAuthLimiter = (maxAttempts, windowMinutes) => {
 
 const registerLimiter = createAuthLimiter(3, 60); 
 const loginLimiter = createAuthLimiter(5, 15);    
-
-// RETOUR EN PROD: Limiteur strict rétabli à 3 demandes par heure max
 const forgotPasswordLimiter = createAuthLimiter(3, 60); 
 
-// ═══════════════════════════════════════════════════════════
 // ROUTES
-// ═══════════════════════════════════════════════════════════
-
 router.post('/register', registerLimiter, validate(registerSchema), registerUser);
 router.post('/login', loginLimiter, validate(loginSchema), loginUser);
 

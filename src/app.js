@@ -42,9 +42,9 @@ const app = express();
 
 app.disable('x-powered-by');
 
-if (env.NODE_ENV === 'production') {
-  app.set('trust proxy', 1);
-}
+// CORRECTION SENIOR : Trust Proxy active globalement pour garantir l'identification IP correcte 
+// derriere Cloudflare/Nginx en dev/staging/prod pour le Rate Limiting.
+app.set('trust proxy', 1);
 
 app.use(requestIdMiddleware);
 
@@ -53,7 +53,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORRECTION SENIOR : Assouplissement ciblé du CSP pour les images
+// Assouplissement cible du CSP pour les images
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -111,7 +111,7 @@ app.use(`${API_V1_PREFIX}/auth`, authRoutes);
 app.use(`${API_V1_PREFIX}/users`, userRoutes);
 app.use(`${API_V1_PREFIX}/rides`, rideRoutes);
 
-// CORRECTION SENIOR : Gestion de la route avec ou sans 's' (Alias)
+// Gestion de la route avec ou sans 's' (Alias)
 app.use(`${API_V1_PREFIX}/subscriptions`, subscriptionRoutes);
 app.use(`${API_V1_PREFIX}/subscription`, subscriptionRoutes); 
 
