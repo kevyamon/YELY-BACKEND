@@ -15,7 +15,7 @@ const notificationSchema = new mongoose.Schema({
   message: { type: String, required: true },
   type: {
     type: String,
-    enum: ['SUBSCRIPTION', 'RIDE', 'PAYMENT', 'SYSTEM', 'PROMO'],
+    // Le validateur enum a ete retire pour permettre le routage dynamique (Deep Linking)
     default: 'SYSTEM'
   },
   metadata: {
@@ -27,7 +27,7 @@ const notificationSchema = new mongoose.Schema({
   timestamps: { createdAt: true, updatedAt: false } 
 });
 
-// Index de purge automatique (optionnel) : supprimer après 90 jours
+// Index de purge automatique (optionnel) : supprimer apres 90 jours
 notificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: 7776000 });
 
 module.exports = mongoose.model('Notification', notificationSchema);
