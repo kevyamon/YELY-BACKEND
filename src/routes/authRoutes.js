@@ -29,8 +29,8 @@ const {
   resetPasswordSchema
 } = require('../validations/authValidation');
 
-// RATE LIMITING SPÉCIFIQUE (Connecté à Redis)
-const createAuthLimiter = (maxAttempts, windowMinutes) => {
+// RATE LIMITING SPÉCIFIQUE (Connecté à Redis avec isolation des préfixes)
+const createAuthLimiter = (maxAttempts, windowMinutes, customPrefix) => {
   return rateLimit({
     windowMs: windowMinutes * 60 * 1000,
     max: maxAttempts,
@@ -38,6 +38,8 @@ const createAuthLimiter = (maxAttempts, windowMinutes) => {
     legacyHeaders: false,
     store: new RedisStore({
       sendCommand: (...args) => redisClient.call(...args),
+      // ISOLATION CRITIQUE : Chaque action (login, register) a son propre compteur indépendant
+      prefix: customPrefix || 'auth_rl:', 
     }),
     handler: (req, res) => {
       res.status(429).json({
@@ -49,9 +51,10 @@ const createAuthLimiter = (maxAttempts, windowMinutes) => {
   });
 };
 
-const registerLimiter = createAuthLimiter(3, 60); 
-const loginLimiter = createAuthLimiter(5, 15);    
-const forgotPasswordLimiter = createAuthLimiter(3, 60); 
+// Application de limites intelligentes avec des préfixes uniques
+const registerLimiter = createAuthLimiter(3, 60, 'rl_register:'); 
+const loginLimiter = createAuthLimiter(5, 15, 'rl_login:');    
+const forgotPasswordLimiter = createAuthLimiter(3, 60, 'rl_forgot:'); 
 
 // ROUTES
 router.post('/register', registerLimiter, validate(registerSchema), registerUser);

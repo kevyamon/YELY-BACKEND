@@ -14,6 +14,9 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
   store: new RedisStore({
     sendCommand: (...args) => redisClient.call(...args),
+    // ISOLATION CRITIQUE : Ce prefixe evite que les requetes API de base 
+    // ne consomment le quota des routes sensibles (comme le login).
+    prefix: 'global_api_rl:', 
   }),
   message: {
     status: 429,
