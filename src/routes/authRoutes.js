@@ -29,16 +29,21 @@ const {
   resetPasswordSchema
 } = require('../validations/authValidation');
 
-// RATE LIMITING SPÉCIFIQUE (Connecté à Redis avec isolation des préfixes)
+// RATE LIMITING SPÉCIFIQUE (Connecté à Redis avec isolation des préfixes et ciblage par identifiant)
 const createAuthLimiter = (maxAttempts, windowMinutes, customPrefix) => {
   return rateLimit({
     windowMs: windowMinutes * 60 * 1000,
     max: maxAttempts,
     standardHeaders: true,
     legacyHeaders: false,
+    keyGenerator: (req) => {
+      // On cible l'identifiant (email ou téléphone) au lieu de l'adresse IP.
+      // Cela permet à plusieurs téléphones sur le même partage de connexion d'avoir leurs propres compteurs.
+      const identity = req.body.identifier || req.body.email || req.body.phone;
+      return identity ? String(identity).toLowerCase().trim() : req.ip;
+    },
     store: new RedisStore({
       sendCommand: (...args) => redisClient.call(...args),
-      // ISOLATION CRITIQUE : Chaque action (login, register) a son propre compteur indépendant
       prefix: customPrefix || 'auth_rl:', 
     }),
     handler: (req, res) => {
