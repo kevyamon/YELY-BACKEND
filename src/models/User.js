@@ -1,10 +1,21 @@
 // src/models/User.js
 // MODELE UTILISATEUR - Profils, Identites & Stats
-// STANDARD: Industriel (Validation assouplie)
+// STANDARD: Industriel (Validation assouplie & Securite Renforcee)
 
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const { SECURITY_CONSTANTS } = require('../config/env');
+
+// Fonction pour pre-hacher avec le poivre (Pepper) cryptographique
+const hashWithPepper = (password) => {
+  const pepper = process.env.PASSWORD_PEPPER;
+  if (!pepper) {
+    console.warn('ATTENTION: VARIABLE D ENVIRONNEMENT PASSWORD_PEPPER MANQUANTE. UTILISATION D UN REPLI MOINS SECURISE.');
+    return crypto.createHash('sha256').update(password).digest('hex');
+  }
+  return crypto.createHmac('sha256', pepper).update(password).digest('hex');
+};
 
 const userSchema = new mongoose.Schema({
   name: { 
@@ -34,7 +45,7 @@ const userSchema = new mongoose.Schema({
   password: { 
     type: String, 
     required: [true, 'Le mot de passe est obligatoire'],
-    minlength: [8, 'Mot de passe trop court'],
+    minlength: [12, 'Mot de passe trop court'],
     select: false 
   },
   profilePicture: { 
@@ -143,7 +154,8 @@ userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
   try {
     const rounds = SECURITY_CONSTANTS?.BCRYPT_ROUNDS || 12;
-    this.password = await bcrypt.hash(this.password, rounds);
+    const pepperedPassword = hashWithPepper(this.password);
+    this.password = await bcrypt.hash(pepperedPassword, rounds);
     next();
   } catch (error) {
     next(new Error('Erreur de securisation du mot de passe: ' + error.message));
@@ -151,7 +163,8 @@ userSchema.pre('save', async function(next) {
 });
 
 userSchema.methods.comparePassword = async function(candidatePassword) {
-  return bcrypt.compare(candidatePassword, this.password);
+  const pepperedPassword = hashWithPepper(candidatePassword);
+  return bcrypt.compare(pepperedPassword, this.password);
 };
 
 const User = mongoose.models.User || mongoose.model('User', userSchema);

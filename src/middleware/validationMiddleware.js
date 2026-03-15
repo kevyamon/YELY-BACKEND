@@ -1,21 +1,21 @@
 // src/middleware/validationMiddleware.js
-// MIDDLEWARE VALIDATION ZOD - Type-safe & Strict
+// MIDDLEWARE VALIDATION ZOD - Type-safe, Strict & Async-Ready
 // CSCSM Level: Bank Grade
 
 const { z } = require('zod');
 
 /**
- * Middleware de validation Zod générique
- * @param {z.ZodSchema} schema - Le schéma Zod à valider
- * @param {string} source - 'body' (défaut), 'query' ou 'params'
+ * Middleware de validation Zod generique (Supporte les validations asynchrones)
+ * @param {z.ZodSchema} schema - Le schema Zod a valider
+ * @param {string} source - 'body' (defaut), 'query' ou 'params'
  */
 const validate = (schema, source = 'body') => {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     try {
-      // Nettoyage et validation (strip unknown keys par défaut avec Zod object)
-      const validData = schema.parse(req[source]);
+      // Nettoyage et validation asynchrone (indispensable pour les appels reseau comme HIBP)
+      const validData = await schema.parseAsync(req[source]);
       
-      // On remplace les données brutes par les données validées/nettoyées
+      // On remplace les donnees brutes par les donnees validees/nettoyees
       req[source] = validData;
       
       next();

@@ -3,11 +3,36 @@
 // CSCSM Level: Bank Grade
 
 const { z } = require('zod');
+const crypto = require('crypto');
 
 const DISPOSABLE_DOMAINS = [
   'tempmail.com', '10minutemail.com', 'guerrillamail.com', 
   'yopmail.com', 'mailinator.com', 'throwaway.com'
 ];
+
+// Verification k-Anonymity via Have I Been Pwned
+const isPasswordPwned = async (password) => {
+  try {
+    const hash = crypto.createHash('sha1').update(password).digest('hex').toUpperCase();
+    const prefix = hash.slice(0, 5);
+    const suffix = hash.slice(5);
+    
+    // Appel externe (ne pas bloquer l'app si l'API externe est down)
+    const response = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`);
+    if (!response.ok) return false; 
+    
+    const text = await response.text();
+    const hashes = text.split('\n');
+    
+    for (let line of hashes) {
+      const [h, count] = line.split(':');
+      if (h === suffix) return true; 
+    }
+    return false;
+  } catch (error) {
+    return false; // Fail-open pour eviter de bloquer les inscriptions sur erreur reseau
+  }
+};
 
 const registerSchema = z.object({
   name: z.string()
@@ -30,10 +55,14 @@ const registerSchema = z.object({
     .trim(),
 
   password: z.string()
-    .min(8, 'Votre mot de passe doit faire au moins 8 caracteres.')
+    .min(12, 'Votre mot de passe doit faire au moins 12 caracteres.')
     .max(128, 'Votre mot de passe est trop long.')
     .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/, 
-      'Pour votre securite, le mot de passe doit inclure une majuscule, un chiffre et un symbole.'),
+      'Pour votre securite, le mot de passe doit inclure une majuscule, un chiffre et un symbole.')
+    .refine(async (password) => {
+      const pwned = await isPasswordPwned(password);
+      return !pwned;
+    }, "Ce mot de passe est apparu dans une fuite de donnees publique. Veuillez en choisir un autre pour votre securite."),
 
   role: z.enum(['rider', 'driver']).default('rider')
 }).strict();
@@ -50,8 +79,6 @@ const loginSchema = z.object({
   clientPlatform: z.string().optional()
 }).strict();
 
-// CORRECTION : Retrait de .strict() pour eviter que le serveur bloque
-// les petites metadonnees invisibles ajoutees par React Native/Redux
 const availabilitySchema = z.object({
   isAvailable: z.boolean({
     required_error: 'Le statut de disponibilite est requis.',
@@ -77,10 +104,14 @@ const resetPasswordSchema = z.object({
     .regex(/^\d+$/, 'Le code ne doit contenir que des chiffres.'),
     
   newPassword: z.string()
-    .min(8, 'Le nouveau mot de passe doit faire au moins 8 caracteres.')
+    .min(12, 'Le nouveau mot de passe doit faire au moins 12 caracteres.')
     .max(128, 'Le nouveau mot de passe est trop long.')
     .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/, 
       'Pour votre securite, le mot de passe doit inclure une majuscule, un chiffre et un symbole.')
+    .refine(async (password) => {
+      const pwned = await isPasswordPwned(password);
+      return !pwned;
+    }, "Ce mot de passe est apparu dans une fuite de donnees publique. Veuillez en choisir un autre pour votre securite.")
 }).strict();
 
 module.exports = {

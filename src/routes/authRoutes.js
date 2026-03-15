@@ -1,5 +1,5 @@
 // src/routes/authRoutes.js
-// ROUTES AUTH - Validation & Rate Limiting (Redis Distributed)
+// ROUTES AUTH - Validation Zod Async & Rate Limiting Hybride (IP + Identifiant)
 // CSCSM Level: Bank Grade
 
 const express = require('express');
@@ -20,6 +20,7 @@ const {
 } = require('../controllers/authController');
 const { protect, optionalAuth } = require('../middleware/authMiddleware');
 const validate = require('../middleware/validationMiddleware');
+const { authLimiter } = require('../middleware/rateLimitMiddleware'); // Ajout du bouclier IP global
 
 const { 
   registerSchema, 
@@ -29,7 +30,7 @@ const {
   resetPasswordSchema
 } = require('../validations/authValidation');
 
-// RATE LIMITING SPÉCIFIQUE (Connecté à Redis avec isolation des préfixes et ciblage par identifiant)
+// RATE LIMITING SPECIFIQUE (Connecte a Redis avec isolation des prefixes et ciblage par identifiant)
 const createAuthLimiter = (maxAttempts, windowMinutes, customPrefix) => {
   return rateLimit({
     windowMs: windowMinutes * 60 * 1000,
@@ -37,8 +38,8 @@ const createAuthLimiter = (maxAttempts, windowMinutes, customPrefix) => {
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => {
-      // On cible l'identifiant (email ou téléphone) au lieu de l'adresse IP.
-      // Cela permet à plusieurs téléphones sur le même partage de connexion d'avoir leurs propres compteurs.
+      // On cible l'identifiant (email ou telephone) au lieu de l'adresse IP.
+      // Cela permet a plusieurs telephones sur le meme partage de connexion d'avoir leurs propres compteurs.
       const identity = req.body.identifier || req.body.email || req.body.phone;
       return identity ? String(identity).toLowerCase().trim() : req.ip;
     },
@@ -49,24 +50,24 @@ const createAuthLimiter = (maxAttempts, windowMinutes, customPrefix) => {
     handler: (req, res) => {
       res.status(429).json({
         success: false,
-        message: `Trop de tentatives. Réessayez dans ${windowMinutes} minutes.`,
+        message: `Trop de tentatives. Reessayez dans ${windowMinutes} minutes.`,
         code: 'RATE_LIMIT_EXCEEDED'
       });
     }
   });
 };
 
-// Application de limites intelligentes avec des préfixes uniques
+// Application de limites intelligentes avec des prefixes uniques
 const registerLimiter = createAuthLimiter(3, 60, 'rl_register:'); 
 const loginLimiter = createAuthLimiter(5, 15, 'rl_login:');    
 const forgotPasswordLimiter = createAuthLimiter(3, 60, 'rl_forgot:'); 
 
-// ROUTES
-router.post('/register', registerLimiter, validate(registerSchema), registerUser);
-router.post('/login', loginLimiter, validate(loginSchema), loginUser);
+// ROUTES (Double bouclier : authLimiter protège l'IP, tes limiters protègent l'identifiant)
+router.post('/register', authLimiter, registerLimiter, validate(registerSchema), registerUser);
+router.post('/login', authLimiter, loginLimiter, validate(loginSchema), loginUser);
 
-router.post('/forgot-password', forgotPasswordLimiter, validate(forgotPasswordSchema), forgotPassword);
-router.post('/reset-password', validate(resetPasswordSchema), resetPassword);
+router.post('/forgot-password', authLimiter, forgotPasswordLimiter, validate(forgotPasswordSchema), forgotPassword);
+router.post('/reset-password', authLimiter, validate(resetPasswordSchema), resetPassword);
 
 router.post('/refresh', refreshToken);
 router.post('/logout', optionalAuth, logoutUser);

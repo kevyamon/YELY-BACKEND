@@ -14,8 +14,6 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
   store: new RedisStore({
     sendCommand: (...args) => redisClient.call(...args),
-    // ISOLATION CRITIQUE : Ce prefixe evite que les requetes API de base 
-    // ne consomment le quota des routes sensibles (comme le login).
     prefix: 'global_api_rl:', 
   }),
   message: {
@@ -25,4 +23,20 @@ const apiLimiter = rateLimit({
   }
 });
 
-module.exports = { apiLimiter };
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: env.NODE_ENV === 'development' ? 100 : 20, // Tolérance à 20 requêtes pour protéger le réseau partagé (NAT)
+  standardHeaders: true, 
+  legacyHeaders: false,
+  store: new RedisStore({
+    sendCommand: (...args) => redisClient.call(...args),
+    prefix: 'auth_api_rl:', 
+  }),
+  message: {
+    status: 429,
+    success: false,
+    message: 'De nombreuses tentatives de connexion suspectes ont été détectées depuis votre réseau. Veuillez patienter 15 minutes.'
+  }
+});
+
+module.exports = { apiLimiter, authLimiter };
