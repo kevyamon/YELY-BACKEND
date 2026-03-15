@@ -45,7 +45,7 @@ const sendNotification = async (userId, title, message, type = 'SYSTEM', metadat
           notification: {
             channelId: 'yely_rides',
             sound: 'default',
-            clickAction: 'expo.modules.notifications.service.action.DEFAULT',
+            // SUPPRESSION CRITIQUE : L'attribut clickAction empêchait l'OS de rediriger naturellement vers l'App
             defaultVibrateTimings: true,
             notificationPriority: 'PRIORITY_HIGH'
           }
