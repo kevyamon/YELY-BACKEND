@@ -23,6 +23,9 @@ const envSchema = z.object({
   JWT_ACCESS_EXPIRATION: z.string().default('15m'),
   JWT_REFRESH_EXPIRATION: z.string().default('30d'),
   
+  // AJOUT DU PEPPER CRYPTOGRAPHIQUE (Bank Grade)
+  PASSWORD_PEPPER: z.string().min(32, 'PASSWORD_PEPPER: 32 caracteres minimum requis pour la securite'),
+  
   ALLOWED_ORIGINS: z.string().min(1, 'ALLOWED_ORIGINS requis (urls separees par des virgules)'),
   
   CLOUDINARY_CLOUD_NAME: z.string().min(1, 'Cloudinary Cloud Name requis'),
@@ -67,6 +70,7 @@ const SECURITY_CONSTANTS = {
   MAX_FILE_SIZE_MB: 5,
   ALLOWED_IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/webp'],
   TOKEN_ROTATION: true,
+  PASSWORD_PEPPER: env.PASSWORD_PEPPER,
 };
 
 module.exports = { 
