@@ -1,5 +1,5 @@
 // src/services/authService.js
-// SERVICE AUTH - Synchronisation Parfaite & Backdoor Stores (Apple/Google)
+// SERVICE AUTH - Synchronisation Parfaite & Zero Trust Migration
 // STANDARD: Industriel / Bank Grade
 
 const User = require('../models/User');
@@ -40,6 +40,7 @@ const login = async (identifier, password, clientPlatform) => {
   }).select('+password +loginAttempts +lockUntil');
 
   if (!user) {
+    // Protection anti-timing attack
     await new Promise(resolve => setTimeout(resolve, 500));
     throw new AppError('Identifiants incorrects.', 401);
   }
@@ -58,9 +59,21 @@ const login = async (identifier, password, clientPlatform) => {
     throw new AppError(`Compte verrouille pour raisons de securite. Reessayez dans ${minutesLeft} minutes.`, 429);
   }
 
+  // 1. Tentative avec le nouveau systeme (Pepper)
   const isMatch = await user.comparePassword(password);
 
   if (!isMatch) {
+    // 2. MIGRATION ZERO TRUST : Verification de l'ancien format
+    const isOldMatch = await bcrypt.compare(password, user.password);
+    
+    if (isOldMatch) {
+      throw new AppError(
+        "⚠️ Mise à jour de sécurité. Vos identifiants sont corrects, mais votre mot de passe utilise un format désormais obsolète. Pour protéger vos données, veuillez utiliser 'Mot de passe oublié' pour en créer un nouveau conforme à nos standards (12 caractères minimum).", 
+        426 // 426 Upgrade Required
+      );
+    }
+
+    // 3. Comportement normal si le mot de passe est reellement faux
     const updates = { $inc: { loginAttempts: 1 } };
     if (user.loginAttempts + 1 >= MAX_ATTEMPTS) {
       updates.lockUntil = Date.now() + LOCK_WINDOW;
@@ -73,10 +86,12 @@ const login = async (identifier, password, clientPlatform) => {
     throw new AppError('Identifiants incorrects.', 401);
   }
 
+  // Connexion reussie, on reinitialise les compteurs
   if (user.loginAttempts > 0 || user.lockUntil) {
     await User.updateOne({ _id: user._id }, { loginAttempts: 0, $unset: { lockUntil: 1 } });
   }
 
+  // Logique de souscription (inchangée)
   if (user.role === 'driver') {
     const settings = await Settings.findOne();
     const isGlobalFreeAccess = settings?.isGlobalFreeAccess || false;
@@ -115,7 +130,6 @@ const login = async (identifier, password, clientPlatform) => {
 
 const forgotPassword = async (email) => {
   const user = await User.findOne({ email: email.toLowerCase().trim() });
-  
   if (!user || user.isDeleted) return true; 
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -223,8 +237,6 @@ const updateAvailability = async (userId, isAvailable) => {
   if (!user) throw new AppError('Utilisateur introuvable.', 404);
   if (user.isDeleted) throw new AppError('Action impossible sur un compte supprime.', 403);
 
-  // CORRECTION CRITIQUE: On utilise findByIdAndUpdate pour bypasser la validation globale
-  // de Mongoose qui bloquait silencieusement la sauvegarde sur les anciens documents.
   const updatedUser = await User.findByIdAndUpdate(
     userId,
     { isAvailable },
