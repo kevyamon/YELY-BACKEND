@@ -17,6 +17,11 @@ const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000;
 const STORE_TESTER_PHONE = '+2250000000';
 
 const register = async (userData) => {
+  // 1. Normalisation stricte : on retire tous les espaces avant sauvegarde
+  if (userData.phone) {
+    userData.phone = userData.phone.replace(/\s/g, '');
+  }
+
   const emailExists = await User.findOne({ email: userData.email, isDeleted: { $ne: true } });
   if (emailExists) throw new AppError('Cette adresse e-mail est deja associee a un compte.', 409);
 
@@ -34,9 +39,15 @@ const register = async (userData) => {
 const login = async (identifier, password, clientPlatform) => {
   const isEmail = identifier.includes('@');
   const normalizedId = isEmail ? identifier.toLowerCase().trim() : identifier.replace(/\s/g, '');
+  const originalId = identifier.trim();
 
+  // 2. Recherche hybride : on cherche la version sans espace ET la version originale (avec espaces)
   let user = await User.findOne({
-    $or: [{ email: normalizedId }, { phone: normalizedId }]
+    $or: [
+      { email: normalizedId }, 
+      { phone: normalizedId },
+      { phone: originalId }
+    ]
   }).select('+password +loginAttempts +lockUntil');
 
   if (!user) {
@@ -68,7 +79,7 @@ const login = async (identifier, password, clientPlatform) => {
     
     if (isOldMatch) {
       throw new AppError(
-        "⚠️ Mise à jour de sécurité. Vos identifiants sont corrects, mais votre mot de passe utilise un format désormais obsolète. Pour protéger vos données, veuillez utiliser 'Mot de passe oublié' pour en créer un nouveau conforme à nos standards (12 caractères minimum).", 
+        "Mise a jour de securite. Vos identifiants sont corrects, mais votre mot de passe utilise un format desormais obsolete. Pour proteger vos donnees, veuillez utiliser 'Mot de passe oublie' pour en creer un nouveau conforme a nos standards (12 caracteres minimum).", 
         426 // 426 Upgrade Required
       );
     }
