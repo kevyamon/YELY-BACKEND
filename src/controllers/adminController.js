@@ -361,7 +361,7 @@ const toggleGlobalFreeAccess = async (req, res) => {
 
 const updateAppVersion = async (req, res) => {
   try {
-    const { latestVersion, mandatoryUpdate, updateUrl } = req.body;
+    const { latestVersion, mandatoryUpdate, updateUrl, isOta } = req.body;
     
     let settings = await Settings.findOne();
     if (!settings) {
@@ -371,6 +371,7 @@ const updateAppVersion = async (req, res) => {
     settings.latestVersion = latestVersion;
     settings.mandatoryUpdate = mandatoryUpdate;
     settings.updateUrl = updateUrl;
+    settings.isOta = isOta;
     settings.updatedBy = req.user._id;
     
     await settings.save();
@@ -380,7 +381,8 @@ const updateAppVersion = async (req, res) => {
       io.emit('APP_VERSION_UPDATED', { 
         latestVersion, 
         mandatoryUpdate, 
-        updateUrl 
+        updateUrl,
+        isOta 
       });
     }
 
@@ -389,7 +391,8 @@ const updateAppVersion = async (req, res) => {
     return successResponse(res, {
       latestVersion: settings.latestVersion,
       mandatoryUpdate: settings.mandatoryUpdate,
-      updateUrl: settings.updateUrl
+      updateUrl: settings.updateUrl,
+      isOta: settings.isOta 
     }, "Parametres de version mis a jour et diffuses avec succes.");
 
   } catch (error) {

@@ -17,7 +17,6 @@ const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000;
 const STORE_TESTER_PHONE = '+2250000000';
 
 const register = async (userData) => {
-  // 1. Normalisation stricte : on retire tous les espaces avant sauvegarde
   if (userData.phone) {
     userData.phone = userData.phone.replace(/\s/g, '');
   }
@@ -41,7 +40,6 @@ const login = async (identifier, password, clientPlatform) => {
   const normalizedId = isEmail ? identifier.toLowerCase().trim() : identifier.replace(/\s/g, '');
   const originalId = identifier.trim();
 
-  // 2. Recherche hybride : on cherche la version sans espace ET la version originale (avec espaces)
   let user = await User.findOne({
     $or: [
       { email: normalizedId }, 
@@ -51,7 +49,6 @@ const login = async (identifier, password, clientPlatform) => {
   }).select('+password +loginAttempts +lockUntil');
 
   if (!user) {
-    // Protection anti-timing attack
     await new Promise(resolve => setTimeout(resolve, 500));
     throw new AppError('Identifiants incorrects.', 401);
   }
@@ -70,21 +67,19 @@ const login = async (identifier, password, clientPlatform) => {
     throw new AppError(`Compte verrouille pour raisons de securite. Reessayez dans ${minutesLeft} minutes.`, 429);
   }
 
-  // 1. Tentative avec le nouveau systeme (Pepper)
   const isMatch = await user.comparePassword(password);
 
   if (!isMatch) {
-    // 2. MIGRATION ZERO TRUST : Verification de l'ancien format
     const isOldMatch = await bcrypt.compare(password, user.password);
     
     if (isOldMatch) {
+      // CORRECTION DU MESSAGE ICI (8 caracteres au lieu de 12)
       throw new AppError(
-        "Mise a jour de securite. Vos identifiants sont corrects, mais votre mot de passe utilise un format desormais obsolete. Pour proteger vos donnees, veuillez utiliser 'Mot de passe oublie' pour en creer un nouveau conforme a nos standards (12 caracteres minimum).", 
-        426 // 426 Upgrade Required
+        "Mise a jour de securite. Vos identifiants sont corrects, mais votre mot de passe utilise un format desormais obsolete. Pour proteger vos donnees, veuillez utiliser 'Mot de passe oublie' pour en creer un nouveau conforme a nos standards (8 caracteres minimum).", 
+        426
       );
     }
 
-    // 3. Comportement normal si le mot de passe est reellement faux
     const updates = { $inc: { loginAttempts: 1 } };
     if (user.loginAttempts + 1 >= MAX_ATTEMPTS) {
       updates.lockUntil = Date.now() + LOCK_WINDOW;
@@ -97,12 +92,10 @@ const login = async (identifier, password, clientPlatform) => {
     throw new AppError('Identifiants incorrects.', 401);
   }
 
-  // Connexion reussie, on reinitialise les compteurs
   if (user.loginAttempts > 0 || user.lockUntil) {
     await User.updateOne({ _id: user._id }, { loginAttempts: 0, $unset: { lockUntil: 1 } });
   }
 
-  // Logique de souscription (inchangée)
   if (user.role === 'driver') {
     const settings = await Settings.findOne();
     const isGlobalFreeAccess = settings?.isGlobalFreeAccess || false;

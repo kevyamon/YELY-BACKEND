@@ -7,7 +7,6 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { SECURITY_CONSTANTS } = require('../config/env');
 
-// Fonction pour pre-hacher avec le poivre (Pepper) cryptographique
 const hashWithPepper = (password) => {
   const pepper = process.env.PASSWORD_PEPPER;
   if (!pepper) {
@@ -45,7 +44,7 @@ const userSchema = new mongoose.Schema({
   password: { 
     type: String, 
     required: [true, 'Le mot de passe est obligatoire'],
-    minlength: [12, 'Mot de passe trop court'],
+    minlength: [8, 'Mot de passe trop court'], // CORRECTION ICI (De 12 a 8)
     select: false 
   },
   profilePicture: { 

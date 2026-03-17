@@ -1,5 +1,5 @@
 // src/validations/authValidation.js
-// CONTRATS DE DONNEES AUTH - Zod Strict
+// CONTRATS DE DONNEES AUTH - Zod
 // CSCSM Level: Bank Grade
 
 const { z } = require('zod');
@@ -10,14 +10,12 @@ const DISPOSABLE_DOMAINS = [
   'yopmail.com', 'mailinator.com', 'throwaway.com'
 ];
 
-// Verification k-Anonymity via Have I Been Pwned
 const isPasswordPwned = async (password) => {
   try {
     const hash = crypto.createHash('sha1').update(password).digest('hex').toUpperCase();
     const prefix = hash.slice(0, 5);
     const suffix = hash.slice(5);
     
-    // Appel externe (ne pas bloquer l'app si l'API externe est down)
     const response = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`);
     if (!response.ok) return false; 
     
@@ -30,12 +28,10 @@ const isPasswordPwned = async (password) => {
     }
     return false;
   } catch (error) {
-    return false; // Fail-open pour eviter de bloquer les inscriptions sur erreur reseau
+    return false; 
   }
 };
 
-// CORRECTION : On retire le .strict() pour eviter les plantages inutiles
-// si le front envoie une meta-donnee inoffensive (ex: platform, timezone)
 const registerSchema = z.object({
   name: z.string()
     .min(2, 'Votre nom doit contenir au moins 2 lettres.')
@@ -56,18 +52,19 @@ const registerSchema = z.object({
     .regex(/^\+?[0-9\s]{8,20}$/, 'Veuillez fournir un numero de telephone valide.')
     .trim(),
 
+  // CORRECTION : 8 caracteres min, 1 chiffre, 1 symbole. Plus de majuscule obligatoire.
   password: z.string()
-    .min(12, 'Votre mot de passe doit faire au moins 12 caracteres.')
+    .min(8, 'Votre mot de passe doit faire au moins 8 caracteres.')
     .max(128, 'Votre mot de passe est trop long.')
-    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/, 
-      'Pour votre securite, le mot de passe doit inclure une majuscule, un chiffre et un symbole.')
+    .regex(/^(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/, 
+      'Pour votre securite, le mot de passe doit inclure au moins un chiffre et un symbole.')
     .refine(async (password) => {
       const pwned = await isPasswordPwned(password);
       return !pwned;
     }, "Ce mot de passe est apparu dans une fuite de donnees publique. Veuillez en choisir un autre pour votre securite."),
 
   role: z.enum(['rider', 'driver']).default('rider')
-}); // .strict() retiré
+}); 
 
 const loginSchema = z.object({
   identifier: z.string()
@@ -79,7 +76,7 @@ const loginSchema = z.object({
     .min(1, 'Le mot de passe est requis.'),
     
   clientPlatform: z.string().optional()
-}); // .strict() retiré
+}); 
 
 const availabilitySchema = z.object({
   isAvailable: z.boolean({
@@ -93,7 +90,7 @@ const forgotPasswordSchema = z.object({
     .email('Veuillez fournir une adresse e-mail valide.')
     .toLowerCase()
     .trim()
-}); // .strict() retiré
+}); 
 
 const resetPasswordSchema = z.object({
   email: z.string()
@@ -105,16 +102,17 @@ const resetPasswordSchema = z.object({
     .length(6, 'Le code de securite doit contenir exactement 6 chiffres.')
     .regex(/^\d+$/, 'Le code ne doit contenir que des chiffres.'),
     
+  // CORRECTION : Meme regle assouplie ici
   newPassword: z.string()
-    .min(12, 'Le nouveau mot de passe doit faire au moins 12 caracteres.')
+    .min(8, 'Le nouveau mot de passe doit faire au moins 8 caracteres.')
     .max(128, 'Le nouveau mot de passe est trop long.')
-    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/, 
-      'Pour votre securite, le mot de passe doit inclure une majuscule, un chiffre et un symbole.')
+    .regex(/^(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/, 
+      'Pour votre securite, le mot de passe doit inclure au moins un chiffre et un symbole.')
     .refine(async (password) => {
       const pwned = await isPasswordPwned(password);
       return !pwned;
     }, "Ce mot de passe est apparu dans une fuite de donnees publique. Veuillez en choisir un autre pour votre securite.")
-}); // .strict() retiré
+}); 
 
 module.exports = {
   registerSchema,
