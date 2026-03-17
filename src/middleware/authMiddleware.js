@@ -25,7 +25,6 @@ const protect = async (req, res, next) => {
       throw new AppError('Vous n\'êtes pas connecté. Veuillez vous connecter.', 401);
     }
 
-    // CORRECTION : Nettoyage et hachage pour comparaison avec la DB
     const cleanToken = cleanTokenString(token);
     const hashedToken = hashToken(cleanToken);
 
@@ -90,7 +89,6 @@ const optionalAuth = async (req, res, next) => {
 
     if (!token) return next();
 
-    // CORRECTION : Meme logique de hachage pour la blacklist
     const cleanToken = cleanTokenString(token);
     const hashedToken = hashToken(cleanToken);
     
@@ -99,6 +97,11 @@ const optionalAuth = async (req, res, next) => {
 
     const decoded = verifyAccessToken(token);
     
+    // VERIFICATION AJOUTEE : On protège la base de données contre les identifiants malformés
+    if (!isValidObjectId(decoded.userId)) {
+      return next();
+    }
+
     const user = await User.findById(decoded.userId).select('name email role isBanned').lean();
 
     if (user && !user.isBanned) {
