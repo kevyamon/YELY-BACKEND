@@ -1,12 +1,13 @@
 // src/services/ride/rideLifecycleService.js
 // SERVICE METIER - Cycle de vie, creation, annulation et negociation dynamique
-// STANDARD: Industriel / Bank Grade
+// STANDARD: Industriel / Bank Grade (Optimise avec Reverse Geocoding Local & Cache Redis)
 
 const mongoose = require('mongoose');
 const axios = require('axios');
 const { Queue } = require('bullmq');
 const Ride = require('../../models/Ride');
 const User = require('../../models/User'); 
+const POI = require('../../models/POI'); 
 const userRepository = require('../../repositories/userRepository');
 const pricingService = require('../pricingService');
 const notificationService = require('../notificationService'); 
@@ -29,6 +30,57 @@ const calculateHaversineDistance = (coords1, coords2) => {
             Math.sin(dLng/2) * Math.sin(dLng/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   return parseFloat((R * c).toFixed(3));
+};
+
+// UTILITAIRE SENIOR : Enrichissement de l'adresse par rapport aux POIs locaux (Zero Latency via Redis)
+const enrichAddressWithPOI = async (address, coords, redisClient) => {
+  try {
+    let pois = [];
+    const cachedPOIs = await redisClient.get('yely_active_pois');
+    
+    if (cachedPOIs) {
+      pois = JSON.parse(cachedPOIs);
+    } else {
+      pois = await POI.find({ isActive: true }).select('name latitude longitude').lean();
+      // Mise en cache pour 1 heure (3600 secondes) pour eviter de surcharger MongoDB
+      await redisClient.set('yely_active_pois', JSON.stringify(pois), 'EX', 3600); 
+    }
+
+    if (!pois || pois.length === 0) return address;
+
+    let nearestPOI = null;
+    let minDistanceKm = Infinity;
+
+    for (const poi of pois) {
+      const distKm = calculateHaversineDistance(coords, [poi.longitude, poi.latitude]);
+      if (distKm < minDistanceKm) {
+        minDistanceKm = distKm;
+        nearestPOI = poi;
+      }
+    }
+
+    const distanceInMeters = Math.round(minDistanceKm * 1000);
+
+    // Si on est dans un rayon de 1.5 km du repere, on l'affiche
+    if (distanceInMeters <= 1500 && nearestPOI) {
+      const formattedDist = distanceInMeters < 1000 ? `${distanceInMeters}m` : `${(distanceInMeters / 1000).toFixed(1)}km`;
+      
+      // Nettoyage de l'adresse generique de Google/LocationIQ
+      let baseAddress = address;
+      if (address.toLowerCase().includes('maféré') || address.toLowerCase().includes('aboisso')) {
+        baseAddress = 'Maféré';
+      } else {
+        baseAddress = address.split(',')[0].trim();
+      }
+      
+      return `${baseAddress} (A ${formattedDist} de : ${nearestPOI.name})`;
+    }
+
+    return address;
+  } catch (error) {
+    logger.warn(`[POI ENRICHMENT] Echec silencieux de la contextualisation : ${error.message}`);
+    return address;
+  }
 };
 
 const getRouteDistance = async (originCoords, destCoords) => {
@@ -170,7 +222,11 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
     const originCoords = [parseFloat(origin.coordinates[0]), parseFloat(origin.coordinates[1])];
     const destCoords = [parseFloat(destination.coordinates[0]), parseFloat(destination.coordinates[1])];
     
-    logger.info(`[DISPATCH] Nouvelle demande. Recherche initiale pour ${count} passager(s)`);
+    // APPLICATION DE L'ENRICHISSEMENT (Depart et Arrivee)
+    const enrichedOriginAddress = await enrichAddressWithPOI(origin.address, originCoords, redisClient);
+    const enrichedDestAddress = await enrichAddressWithPOI(destination.address, destCoords, redisClient);
+    
+    logger.info(`[DISPATCH] Nouvelle demande. Depart: ${enrichedOriginAddress}`);
 
     const distance = await getRouteDistance(originCoords, destCoords);
 
@@ -182,8 +238,8 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
 
     const ride = await Ride.create({
       rider: riderId,
-      origin: { ...origin, coordinates: originCoords },
-      destination: { ...destination, coordinates: destCoords },
+      origin: { ...origin, address: enrichedOriginAddress, coordinates: originCoords },
+      destination: { ...destination, address: enrichedDestAddress, coordinates: destCoords },
       distance,
       forfait: forfait || 'STANDARD',
       passengersCount: count,
