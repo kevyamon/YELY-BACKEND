@@ -332,14 +332,20 @@ const toggleGlobalFreeAccess = async (req, res) => {
       : "Le mode gratuit est termine. Votre abonnement a ete prolonge pour compenser cette periode.";
 
     try {
-      const drivers = await User.find({ role: 'driver', fcmToken: { $ne: null } });
+      const drivers = await User.find({ role: 'driver', fcmToken: { $ne: null } }).select('_id fcmToken');
+      const sentTokens = new Set();
+
       for (const driver of drivers) {
+        const skipPush = sentTokens.has(driver.fcmToken);
+        if (driver.fcmToken) sentTokens.add(driver.fcmToken);
+
         notificationService.sendNotification(
           driver._id,
           pushTitle,
           pushBody,
           'PROMO_UPDATE',
-          { isGlobalFreeAccess: settings.isGlobalFreeAccess.toString() }
+          { isGlobalFreeAccess: settings.isGlobalFreeAccess.toString() },
+          skipPush
         ).catch(() => {});
       }
     } catch (pushErr) {
@@ -386,19 +392,23 @@ const updateAppVersion = async (req, res) => {
       });
     }
 
-    // MODIFICATION SENIOR: Envoi d'un push global pour alerter meme les apps fermees
     try {
-      const users = await User.find({ fcmToken: { $ne: null } });
+      const users = await User.find({ fcmToken: { $ne: null } }).select('_id fcmToken');
+      const sentTokens = new Set();
       const pushTitle = mandatoryUpdate ? "Mise a jour obligatoire requise" : "Nouvelle mise a jour disponible";
       const pushBody = `La version ${latestVersion} de Yely est disponible. Profitez des dernieres ameliorations !`;
       
       for (const u of users) {
+        const skipPush = sentTokens.has(u.fcmToken);
+        if (u.fcmToken) sentTokens.add(u.fcmToken);
+
         notificationService.sendNotification(
           u._id,
           pushTitle,
           pushBody,
           'SYSTEM_UPDATE',
-          { latestVersion, mandatoryUpdate: String(mandatoryUpdate), updateUrl, isOta: String(isOta) }
+          { latestVersion, mandatoryUpdate: String(mandatoryUpdate), updateUrl, isOta: String(isOta) },
+          skipPush
         ).catch(() => {});
       }
     } catch (pushErr) {

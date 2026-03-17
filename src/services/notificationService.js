@@ -7,7 +7,7 @@ const Notification = require('../models/Notification');
 const User = require('../models/User');
 const logger = require('../config/logger');
 
-const sendNotification = async (userId, title, message, type = 'SYSTEM', metadata = {}) => {
+const sendNotification = async (userId, title, message, type = 'SYSTEM', metadata = {}, skipPush = false) => {
   try {
     const inAppNotif = await Notification.create({
       recipient: userId,
@@ -16,6 +16,10 @@ const sendNotification = async (userId, title, message, type = 'SYSTEM', metadat
       type,
       metadata
     });
+
+    if (skipPush) {
+      return inAppNotif;
+    }
 
     const user = await User.findById(userId).select('+fcmToken');
     if (user && user.fcmToken) {
@@ -45,7 +49,6 @@ const sendNotification = async (userId, title, message, type = 'SYSTEM', metadat
           notification: {
             channelId: 'yely_rides',
             sound: 'default',
-            // SUPPRESSION CRITIQUE : L'attribut clickAction empêchait l'OS de rediriger naturellement vers l'App
             defaultVibrateTimings: true,
             notificationPriority: 'PRIORITY_HIGH'
           }
