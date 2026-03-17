@@ -386,6 +386,25 @@ const updateAppVersion = async (req, res) => {
       });
     }
 
+    // MODIFICATION SENIOR: Envoi d'un push global pour alerter meme les apps fermees
+    try {
+      const users = await User.find({ fcmToken: { $ne: null } });
+      const pushTitle = mandatoryUpdate ? "Mise a jour obligatoire requise" : "Nouvelle mise a jour disponible";
+      const pushBody = `La version ${latestVersion} de Yely est disponible. Profitez des dernieres ameliorations !`;
+      
+      for (const u of users) {
+        notificationService.sendNotification(
+          u._id,
+          pushTitle,
+          pushBody,
+          'SYSTEM_UPDATE',
+          { latestVersion, mandatoryUpdate: String(mandatoryUpdate), updateUrl, isOta: String(isOta) }
+        ).catch(() => {});
+      }
+    } catch (pushErr) {
+      logger.warn(`[Admin] Echec non-bloquant du Push Update: ${pushErr.message}`);
+    }
+
     logger.info(`[AUDIT CONFIG] App Version set to ${latestVersion} by ${req.user.email}`);
     
     return successResponse(res, {
