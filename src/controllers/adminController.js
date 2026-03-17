@@ -98,18 +98,19 @@ const approveTransaction = async (req, res) => {
 const rejectTransaction = async (req, res) => {
   try {
     const { reason } = req.body;
-    const result = await adminService.rejectTransaction(req.params.id, reason, req.user._id);
+    const finalReason = reason || "Preuve non conforme ou illisible.";
+    const result = await adminService.rejectTransaction(req.params.id, finalReason, req.user._id);
 
     try {
       const io = req.app.get('socketio');
       if (io) {
-        io.to(result.driver._id.toString()).emit('subscription_rejected', { reason });
+        io.to(result.driver._id.toString()).emit('subscription_rejected', { reason: finalReason });
       }
       
       notificationService.sendNotification(
         result.driver._id.toString(),
         "Paiement Rejete",
-        `Votre preuve a ete refusee: ${reason}. Veuillez soumettre une image valide.`,
+        `Votre preuve a ete refusee: ${finalReason}. Veuillez soumettre une image valide.`,
         'SUBSCRIPTION_REJECTED',
         { transactionId: result.transaction._id.toString() }
       ).catch(notifError => logger.error(`[NON-CRITIQUE] Echec notification apres rejet: ${notifError.message}`));
@@ -393,7 +394,7 @@ const updateAppVersion = async (req, res) => {
     }
 
     try {
-      const users = await User.find({ fcmToken: { $ne: null } }).select('_id fcmToken');
+      const users = await User.find({ fcmToken: { $ne: null }, role: { $ne: 'superadmin' } }).select('_id fcmToken');
       const sentTokens = new Set();
       const pushTitle = mandatoryUpdate ? "Mise a jour obligatoire requise" : "Nouvelle mise a jour disponible";
       const pushBody = `La version ${latestVersion} de Yely est disponible. Profitez des dernieres ameliorations !`;
