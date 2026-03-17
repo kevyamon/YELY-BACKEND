@@ -34,6 +34,8 @@ const isPasswordPwned = async (password) => {
   }
 };
 
+// CORRECTION : On retire le .strict() pour eviter les plantages inutiles
+// si le front envoie une meta-donnee inoffensive (ex: platform, timezone)
 const registerSchema = z.object({
   name: z.string()
     .min(2, 'Votre nom doit contenir au moins 2 lettres.')
@@ -65,7 +67,7 @@ const registerSchema = z.object({
     }, "Ce mot de passe est apparu dans une fuite de donnees publique. Veuillez en choisir un autre pour votre securite."),
 
   role: z.enum(['rider', 'driver']).default('rider')
-}).strict();
+}); // .strict() retiré
 
 const loginSchema = z.object({
   identifier: z.string()
@@ -77,7 +79,7 @@ const loginSchema = z.object({
     .min(1, 'Le mot de passe est requis.'),
     
   clientPlatform: z.string().optional()
-}).strict();
+}); // .strict() retiré
 
 const availabilitySchema = z.object({
   isAvailable: z.boolean({
@@ -91,7 +93,7 @@ const forgotPasswordSchema = z.object({
     .email('Veuillez fournir une adresse e-mail valide.')
     .toLowerCase()
     .trim()
-}).strict();
+}); // .strict() retiré
 
 const resetPasswordSchema = z.object({
   email: z.string()
@@ -112,7 +114,7 @@ const resetPasswordSchema = z.object({
       const pwned = await isPasswordPwned(password);
       return !pwned;
     }, "Ce mot de passe est apparu dans une fuite de donnees publique. Veuillez en choisir un autre pour votre securite.")
-}).strict();
+}); // .strict() retiré
 
 module.exports = {
   registerSchema,
