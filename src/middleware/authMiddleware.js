@@ -5,7 +5,7 @@
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const TokenBlacklist = require('../models/TokenBlacklist');
-const { verifyAccessToken } = require('../utils/tokenService');
+const { verifyAccessToken, hashToken, cleanTokenString } = require('../utils/tokenService');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
 
@@ -25,7 +25,11 @@ const protect = async (req, res, next) => {
       throw new AppError('Vous n\'êtes pas connecté. Veuillez vous connecter.', 401);
     }
 
-    const isBlacklisted = await TokenBlacklist.exists({ token });
+    // CORRECTION : Nettoyage et hachage pour comparaison avec la DB
+    const cleanToken = cleanTokenString(token);
+    const hashedToken = hashToken(cleanToken);
+
+    const isBlacklisted = await TokenBlacklist.exists({ token: hashedToken });
     if (isBlacklisted) {
       logger.warn(`[AUTH SECURITY] Tentative d'utilisation d'un token révoqué - IP: ${req.ip}`);
       throw new AppError('Session expirée ou révoquée. Veuillez vous reconnecter.', 401);
@@ -56,7 +60,7 @@ const protect = async (req, res, next) => {
     }
 
     if (decoded.role && decoded.role !== user.role) {
-      logger.info(`[AUTH SYNC] Rôle Token (${decoded.role}) différent de la DB (${user.role}) pour ${user.email}. Application du nouveau rôle en temps réel.`);
+      logger.info(`[AUTH SYNC] Rôle Token différent de la DB pour ${user.email}.`);
     }
 
     req.user = user;
@@ -86,7 +90,11 @@ const optionalAuth = async (req, res, next) => {
 
     if (!token) return next();
 
-    const isBlacklisted = await TokenBlacklist.exists({ token });
+    // CORRECTION : Meme logique de hachage pour la blacklist
+    const cleanToken = cleanTokenString(token);
+    const hashedToken = hashToken(cleanToken);
+    
+    const isBlacklisted = await TokenBlacklist.exists({ token: hashedToken });
     if (isBlacklisted) return next();
 
     const decoded = verifyAccessToken(token);

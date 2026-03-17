@@ -26,14 +26,13 @@ const hashToken = (token) => {
 
 const cleanTokenString = (token) => {
   if (!token) return null;
-  // Retire les guillemets fantômes que le mobile (SecureStore) peut ajouter
   return token.replace(/^"|"$/g, '').trim();
 };
 
 const generateAccessToken = (userId, role) => {
   return jwt.sign(
     { 
-      userId: userId.toString(), // CORRECTION: Forçage en String
+      userId: userId.toString(),
       role, 
       type: 'access'
     },
@@ -45,9 +44,8 @@ const generateAccessToken = (userId, role) => {
 const generateRefreshToken = (userId) => {
   return jwt.sign(
     { 
-      userId: userId.toString(), // CORRECTION: Forçage en String
+      userId: userId.toString(),
       type: 'refresh',
-      // CORRECTION: randomBytes est compatible avec toutes les versions de Node
       jti: crypto.randomBytes(16).toString('hex') 
     },
     TOKEN_CONFIG.refresh.secret,
@@ -78,7 +76,8 @@ const clearRefreshTokenCookie = (res) => {
 
 const verifyAccessToken = (token) => {
   const cleanToken = cleanTokenString(token);
-  const decoded = jwt.verify(cleanToken, TOKEN_CONFIG.access.secret);
+  // SECURITE : Forcer l'algorithme pour eviter l'Algorithm Switching
+  const decoded = jwt.verify(cleanToken, TOKEN_CONFIG.access.secret, { algorithms: ['HS256'] });
   if (decoded.type !== 'access') throw new Error('Token type mismatch');
   return decoded;
 };
@@ -91,7 +90,8 @@ const verifyRefreshToken = async (token) => {
     const isBlacklisted = await TokenBlacklist.exists({ token: hashedToken });
     if (isBlacklisted) throw new Error('Token revoque (Blacklist)');
 
-    const decoded = jwt.verify(cleanToken, TOKEN_CONFIG.refresh.secret);
+    // SECURITE : Forcer l'algorithme
+    const decoded = jwt.verify(cleanToken, TOKEN_CONFIG.refresh.secret, { algorithms: ['HS256'] });
     if (decoded.type !== 'refresh') throw new Error('Token type mismatch');
     
     return decoded;
@@ -118,5 +118,7 @@ module.exports = {
   clearRefreshTokenCookie,
   verifyAccessToken,
   verifyRefreshToken,
-  revokeRefreshToken
+  revokeRefreshToken,
+  hashToken,
+  cleanTokenString
 };
