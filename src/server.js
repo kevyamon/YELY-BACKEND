@@ -109,6 +109,9 @@ io.on('connection', (socket) => {
   
   socket.join(user._id.toString());
   if (user.role === 'driver') socket.join('drivers');
+  
+  // CORRECTION SENIOR : Ajout de la salle admins pour le ciblage chirurgical
+  if (user.role === 'admin' || user.role === 'superadmin') socket.join('admins');
 
   socket.on('update_location', async (rawData) => {
     const now = Date.now();
@@ -147,9 +150,6 @@ io.on('connection', (socket) => {
       const [prevLng, prevLat] = socket.lastCoords;
       const distanceKm = getDistKm(prevLat, prevLng, coords.latitude, coords.longitude);
       
-      // CORRECTION SENIOR : Lissage du calcul de vitesse.
-      // Si les sockets arrivent en rafale (rattrapage reseau), timeDiffSeconds approche 0.
-      // On force un minimum de 1 seconde pour eviter les fausses vitesses astronomiques.
       const effectiveTimeDiff = Math.max(timeDiffSeconds, 1);
       const speedKmH = distanceKm / (effectiveTimeDiff / 3600);
 
@@ -162,7 +162,6 @@ io.on('connection', (socket) => {
             socket.disconnect(true);
             return;
           }
-          // On valide exceptionnellement les coordonnees pour stabiliser le teleporteur
           socket.lastLocTime = now; 
           socket.lastCoords = [coords.longitude, coords.latitude]; 
           return; 

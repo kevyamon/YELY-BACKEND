@@ -27,7 +27,8 @@ const submitReport = async (req, res) => {
 
     const io = req.app.get('socketio');
     if (io) {
-      io.emit('new_admin_report', report);
+      // CORRECTION SENIOR : Ciblage exclusif de la salle admins
+      io.to('admins').emit('new_admin_report', report);
     }
 
     try {
@@ -80,6 +81,8 @@ const resolveReport = async (req, res) => {
     const io = req.app.get('socketio');
     if (io) {
       io.to(report.user.toString()).emit('report_resolved', report);
+      // CORRECTION SENIOR : Synchronisation inter-admins
+      io.to('admins').emit('admin_report_updated', report);
     }
   }
 
@@ -105,6 +108,12 @@ const deleteReport = async (req, res) => {
       await Report.findByIdAndDelete(report._id);
     } else {
       await report.save(); 
+    }
+
+    const io = req.app.get('socketio');
+    if (io) {
+      // CORRECTION SENIOR : Informe les autres admins pour vider leur dashboard en temps reel
+      io.to('admins').emit('admin_report_deleted', req.params.id);
     }
 
     return successResponse(res, null, 'Signalement supprime de votre tableau de bord.');
