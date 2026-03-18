@@ -27,6 +27,7 @@ const envSchema = z.object({
   PASSWORD_PEPPER: z.string().min(32, 'PASSWORD_PEPPER: 32 caracteres minimum requis pour la securite'),
   
   ALLOWED_ORIGINS: z.string().min(1, 'ALLOWED_ORIGINS requis (urls separees par des virgules)'),
+  FRONTEND_URL: z.string().min(1, 'FRONTEND_URL requis pour les websockets'), // Ajoute cette ligne
   
   CLOUDINARY_CLOUD_NAME: z.string().min(1, 'Cloudinary Cloud Name requis'),
   CLOUDINARY_API_KEY: z.string().min(1, 'Cloudinary API Key requise'),
