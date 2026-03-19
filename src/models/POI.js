@@ -22,17 +22,16 @@ const poiSchema = new mongoose.Schema(
     },
     icon: {
       type: String,
-      default: 'location',
+      default: 'Ionicons/location', // CORRECTION : Mise au format universel par défaut
     },
     iconColor: {
       type: String,
-      default: '#D4AF37', // Or Champagne par défaut
+      default: '#D4AF37', 
     },
     isActive: {
       type: Boolean,
-      default: true, // Permet de désactiver un lieu sans le supprimer définitivement
+      default: true,
     },
-    // AJOUTS SENIOR : Système de file d'attente (Pending State)
     pendingAction: {
       type: String,
       enum: ['NONE', 'UPDATE', 'DELETE'],
@@ -44,7 +43,7 @@ const poiSchema = new mongoose.Schema(
     }
   },
   {
-    timestamps: true, // Ajoute automatiquement createdAt et updatedAt
+    timestamps: true, 
   }
 );
 
