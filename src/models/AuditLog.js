@@ -54,4 +54,7 @@ const auditLogSchema = new mongoose.Schema({
 auditLogSchema.index({ actor: 1, createdAt: -1 });
 auditLogSchema.index({ action: 1 });
 
+// INDEX TTL : Purge automatique des logs après 60 jours (5184000 secondes) pour préserver le stockage MongoDB
+auditLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 5184000 });
+
 module.exports = mongoose.model('AuditLog', auditLogSchema);
