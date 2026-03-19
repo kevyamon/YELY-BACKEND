@@ -284,6 +284,21 @@ const hideRideFromHistory = async (user, rideId) => {
   return true;
 };
 
+const hideAllRidesFromHistory = async (user) => {
+  if (user.role === 'driver') {
+    await Ride.updateMany(
+      { driver: user._id, status: { $in: ['completed', 'cancelled'] } },
+      { $set: { hiddenForDriver: true } }
+    );
+  } else {
+    await Ride.updateMany(
+      { rider: user._id, status: { $in: ['completed', 'cancelled'] } },
+      { $set: { hiddenForRider: true } }
+    );
+  }
+  return true;
+};
+
 module.exports = {
   markRideAsArrived,
   startRideSession,
@@ -291,5 +306,6 @@ module.exports = {
   submitRideRating,
   checkRideProgressOnLocationUpdate,
   getRideHistory,
-  hideRideFromHistory
+  hideRideFromHistory,
+  hideAllRidesFromHistory
 };

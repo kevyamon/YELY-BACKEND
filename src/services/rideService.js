@@ -25,7 +25,6 @@ module.exports = {
   submitRideRating: rideExecutionService.submitRideRating,
   checkRideProgressOnLocationUpdate: rideExecutionService.checkRideProgressOnLocationUpdate,
   getRideHistory: rideExecutionService.getRideHistory,
-  
-  // AJOUT SENIOR : L'export manquant
-  hideRideFromHistory: rideExecutionService.hideRideFromHistory 
+  hideRideFromHistory: rideExecutionService.hideRideFromHistory,
+  hideAllRidesFromHistory: rideExecutionService.hideAllRidesFromHistory
 };

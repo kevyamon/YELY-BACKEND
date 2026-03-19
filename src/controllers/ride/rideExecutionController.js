@@ -158,6 +158,12 @@ const getRideHistory = async (req, res, next) => {
 const hideFromHistory = async (req, res, next) => {
   try {
     const { id } = req.params;
+    
+    if (id === 'all') {
+      await rideService.hideAllRidesFromHistory(req.user);
+      return successResponse(res, null, 'Tout votre historique a ete efface.');
+    }
+    
     await rideService.hideRideFromHistory(req.user, id);
     return successResponse(res, null, 'Course supprimee de votre historique.');
   } catch (error) {
