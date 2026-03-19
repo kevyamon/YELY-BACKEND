@@ -15,7 +15,6 @@ const notificationSchema = new mongoose.Schema({
   message: { type: String, required: true },
   type: {
     type: String,
-    // Le validateur enum a ete retire pour permettre le routage dynamique (Deep Linking)
     default: 'SYSTEM'
   },
   metadata: {
@@ -27,7 +26,7 @@ const notificationSchema = new mongoose.Schema({
   timestamps: { createdAt: true, updatedAt: false } 
 });
 
-// Index de purge automatique (optionnel) : supprimer apres 90 jours
-notificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: 7776000 });
+// Index de purge automatique : supprimer apres 30 jours (2592000 secondes)
+notificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: 2592000 });
 
 module.exports = mongoose.model('Notification', notificationSchema);
