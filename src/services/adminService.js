@@ -1,5 +1,5 @@
 // src/services/adminService.js
-// LOGIQUE DE GOUVERNANCE - Diagnostics d'erreurs stricts et precis (Tolérant aux pannes Redis)
+// LOGIQUE DE GOUVERNANCE - Diagnostics d'erreurs stricts et precis
 // CSCSM Level: Bank Grade
 
 const User = require('../models/User');
@@ -183,22 +183,28 @@ const rejectTransaction = async (transactionId, reason, validatorId) => {
   return { transaction, driver };
 };
 
+// 📈 STATISTIQUES CORRIGÉES : Distinction nette Chauffeurs / Passagers
 const getDashboardStats = async () => {
-  const [totalUsers, activeDrivers, pendingValidations, revenueData] = await Promise.all([
-    User.countDocuments({ role: { $in: ['rider', 'driver'] } }),
+  const [totalRiders, totalDrivers, activeDrivers, pendingValidations, revenueData, settings] = await Promise.all([
+    User.countDocuments({ role: 'rider' }),
+    User.countDocuments({ role: 'driver' }),
     User.countDocuments({ role: 'driver', isAvailable: true }),
     Transaction.countDocuments({ status: 'PENDING' }),
     Transaction.aggregate([
       { $match: { status: 'APPROVED' } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
-    ])
+    ]),
+    Settings.findOne().lean()
   ]);
 
   return {
-    totalUsers,
+    totalUsers: totalRiders + totalDrivers,
+    totalRiders,
+    totalDrivers,
     activeDrivers,
     pendingValidations,
-    totalRevenue: revenueData.length > 0 ? revenueData[0].total : 0
+    totalRevenue: revenueData.length > 0 ? revenueData[0].total : 0,
+    settings // On renvoie les settings pour que le front sache si la promo est active
   };
 };
 
@@ -235,6 +241,7 @@ const updateWaveLinks = async (weeklyLink, monthlyLink, requesterId) => {
   return { waveLinkWeekly: settings.waveLinkWeekly, waveLinkMonthly: settings.waveLinkMonthly };
 };
 
+// 🔍 RECHERCHE AMELIOREE : Filtre par rôle (driver/rider/admin)
 const getAllUsers = async (query, userRole, requesterId) => {
   const page = Math.max(1, parseInt(query.page) || 1);
   const limit = Math.min(50, parseInt(query.limit) || 20);
@@ -243,12 +250,18 @@ const getAllUsers = async (query, userRole, requesterId) => {
   const filter = { _id: { $ne: requesterId } };
   
   if (userRole === 'admin') filter.role = { $ne: 'superadmin' };
+
+  // Filtre par rôle spécifique si demandé (ex: /users?role=driver)
+  if (query.role) {
+    filter.role = query.role;
+  }
   
   if (query.search) {
     const safeSearch = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     filter.$or = [
       { name: new RegExp(safeSearch, 'i') },
-      { email: new RegExp(safeSearch, 'i') }
+      { email: new RegExp(safeSearch, 'i') },
+      { role: new RegExp(safeSearch, 'i') } // Permet de taper "driver" dans la barre de recherche
     ];
   }
 
