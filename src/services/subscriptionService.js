@@ -76,22 +76,34 @@ const getSubscriptionPricing = async () => {
   const isPromo = settings.isPromoActive || false;
   
   const baseWeeklyPrice = 1000;
-  const baseMonthlyPrice = 6000;
+  const baseMonthlyPrice = 3500; // Correction du tarif mensuel normal
 
-  const weeklyPrice = isPromo ? Math.round(baseWeeklyPrice * 0.6) : baseWeeklyPrice;
-  const monthlyPrice = isPromo ? Math.round(baseMonthlyPrice * 0.6) : baseMonthlyPrice;
+  // Logique de prix selon la promotion
+  const weeklyPrice = isPromo ? 700 : baseWeeklyPrice;
+  const monthlyPrice = isPromo ? 2500 : baseMonthlyPrice;
+  
+  // Sélection dynamique des liens Wave
+  // Si promo activée, on utilise les variables PROMO de Railway
+  // Sinon, on cherche en base de données, puis on tombe sur les variables normales de Railway
+  const weeklyLink = isPromo 
+    ? process.env.WAVE_LINK_WEEKLY_PROMO 
+    : (settings.waveLinkWeekly || process.env.WAVE_LINK_WEEKLY || '');
+
+  const monthlyLink = isPromo 
+    ? process.env.WAVE_LINK_MONTHLY_PROMO 
+    : (settings.waveLinkMonthly || process.env.WAVE_LINK_MONTHLY || '');
   
   return {
     isPromoActive: isPromo,
     weekly: {
       price: weeklyPrice,
       originalPrice: baseWeeklyPrice, 
-      link: settings.waveLinkWeekly || process.env.WAVE_LINK_WEEKLY || '' 
+      link: weeklyLink 
     },
     monthly: {
       price: monthlyPrice,
       originalPrice: baseMonthlyPrice,
-      link: settings.waveLinkMonthly || process.env.WAVE_LINK_MONTHLY || ''
+      link: monthlyLink
     }
   };
 };
