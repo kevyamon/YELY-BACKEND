@@ -13,7 +13,9 @@ const AppError = require('../utils/AppError');
 
 const getConfig = async (req, res, next) => {
   try {
-    const config = await subscriptionService.getSubscriptionPricing();
+    // MODIFICATION : On passe l'ID de l'utilisateur pour vérifier s'il est Pionnier
+    const userId = req.user ? req.user._id : null;
+    const config = await subscriptionService.getSubscriptionPricing(userId);
     
     const settings = await Settings.findOne();
     

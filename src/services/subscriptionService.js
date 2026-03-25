@@ -69,32 +69,67 @@ const getNextValidator = async (planType) => {
   return targetValidator || fallbackValidator;
 };
 
-const getSubscriptionPricing = async () => {
+// 🛡️ NOUVELLE FONCTION : Vérifie si le chauffeur fait partie des 20 premiers
+const checkIsPioneer = async (userId) => {
+  if (!userId) return false;
+  
+  const user = await User.findById(userId);
+  if (!user || user.role !== 'driver') return false;
+
+  // On compte combien de chauffeurs ont été créés AVANT ce chauffeur
+  const olderDriversCount = await User.countDocuments({
+    role: 'driver',
+    createdAt: { $lt: user.createdAt }
+  });
+
+  // S'il y a moins de 20 chauffeurs avant lui, il est Pionnier à vie !
+  return olderDriversCount < 20;
+};
+
+// 🛡️ MODIFICATION : On accepte userId pour personnaliser le prix
+const getSubscriptionPricing = async (userId = null) => {
   let settings = await Settings.findOne();
   if (!settings) settings = {};
 
   const isPromo = settings.isPromoActive || false;
+  const isPioneer = await checkIsPioneer(userId);
   
+  // Prix d'affichage barrés (Toujours les mêmes pour montrer l'économie)
   const baseWeeklyPrice = 1000;
-  const baseMonthlyPrice = 3500; // Correction du tarif mensuel normal
+  const baseMonthlyPrice = 3500; 
 
-  // Logique de prix selon la promotion
-  const weeklyPrice = isPromo ? 700 : baseWeeklyPrice;
-  const monthlyPrice = isPromo ? 2500 : baseMonthlyPrice;
-  
-  // Sélection dynamique des liens Wave
-  // Si promo activée, on utilise les variables PROMO de Railway
-  // Sinon, on cherche en base de données, puis on tombe sur les variables normales de Railway
-  const weeklyLink = isPromo 
-    ? process.env.WAVE_LINK_WEEKLY_PROMO 
-    : (settings.waveLinkWeekly || process.env.WAVE_LINK_WEEKLY || '');
+  let weeklyPrice, monthlyPrice, weeklyLink, monthlyLink;
 
-  const monthlyLink = isPromo 
-    ? process.env.WAVE_LINK_MONTHLY_PROMO 
-    : (settings.waveLinkMonthly || process.env.WAVE_LINK_MONTHLY || '');
+  if (isPioneer) {
+    // 👑 TARIFS PIONNIERS (Les 20 Premiers à vie)
+    weeklyPrice = isPromo ? 500 : 700;
+    monthlyPrice = isPromo ? 1500 : 2500;
+    
+    weeklyLink = isPromo 
+      ? process.env.WAVE_LINK_WEEKLY_PIONEER_PROMO 
+      : process.env.WAVE_LINK_WEEKLY_PIONEER;
+      
+    monthlyLink = isPromo 
+      ? process.env.WAVE_LINK_MONTHLY_PIONEER_PROMO 
+      : process.env.WAVE_LINK_MONTHLY_PIONEER;
+      
+  } else {
+    // 🚕 TARIFS NORMAUX
+    weeklyPrice = isPromo ? 700 : baseWeeklyPrice;
+    monthlyPrice = isPromo ? 2500 : baseMonthlyPrice;
+    
+    weeklyLink = isPromo 
+      ? process.env.WAVE_LINK_WEEKLY_PROMO 
+      : (settings.waveLinkWeekly || process.env.WAVE_LINK_WEEKLY || '');
+      
+    monthlyLink = isPromo 
+      ? process.env.WAVE_LINK_MONTHLY_PROMO 
+      : (settings.waveLinkMonthly || process.env.WAVE_LINK_MONTHLY || '');
+  }
   
   return {
     isPromoActive: isPromo,
+    isPioneer: isPioneer, // Le front saura si c'est un boss !
     weekly: {
       price: weeklyPrice,
       originalPrice: baseWeeklyPrice, 
@@ -114,7 +149,8 @@ const submitProof = async (userId, data, file) => {
     throw new AppError("Une validation est deja en cours pour votre compte.", 400);
   }
 
-  const pricingConfig = await getSubscriptionPricing();
+  // On passe le userId pour avoir le bon tarif lors de la création de la transaction
+  const pricingConfig = await getSubscriptionPricing(userId);
   let amount = 0;
   let collectorType = '';
 
@@ -147,7 +183,7 @@ const submitProof = async (userId, data, file) => {
     assignedTo: validatorId,
     auditLog: [{
       action: 'SUBMISSION',
-      note: `Preuve soumise pour le forfait ${data.planId} (Montant: ${amount}F CFA)`
+      note: `Preuve soumise pour le forfait ${data.planId} (Montant: ${amount}F CFA${pricingConfig.isPioneer ? ' - Tarif Pionnier' : ''})`
     }]
   });
 
@@ -165,15 +201,12 @@ const submitProof = async (userId, data, file) => {
   return transaction;
 };
 
-// 🛡️ MODIFICATION MAJEURE ICI : Synchronisation Forcée et Temps Réel
 const checkSubscriptionStatus = async (userId) => {
   const user = await User.findById(userId);
   if (!user || !user.subscription) return false;
 
-  // Si l'abonnement est inactif, on ne va pas plus loin
   if (!user.subscription.isActive) return false;
 
-  // Si on a des heures restantes mais pas de date d'expiration fixée, on la fixe.
   if (!user.subscription.expiresAt && user.subscription.hoursRemaining > 0) {
     const millisecondsRemaining = user.subscription.hoursRemaining * 60 * 60 * 1000;
     user.subscription.expiresAt = new Date(Date.now() + millisecondsRemaining);
@@ -181,7 +214,6 @@ const checkSubscriptionStatus = async (userId) => {
     return true;
   }
 
-  // Vérification stricte de l'expiration
   if (user.subscription.expiresAt && new Date(user.subscription.expiresAt) < new Date()) {
     user.subscription.isActive = false;
     user.subscription.hoursRemaining = 0;
