@@ -444,7 +444,6 @@ const getSystemConfig = async (req, res) => {
   }
 };
 
-// 🚗 NOUVEAU : Contrôleur pour l'historique des courses
 const getAllRides = async (req, res) => {
   try {
     const result = await adminService.getAllRidesHistory(req.query);
@@ -452,6 +451,17 @@ const getAllRides = async (req, res) => {
   } catch (error) {
     logger.error(`[ADMIN RIDES ERROR] Erreur: ${error.message}`);
     return errorResponse(res, "Impossible de recuperer l'historique des courses.", 500);
+  }
+};
+
+const toggleRideArchive = async (req, res) => {
+  try {
+    const ride = await adminService.toggleRideArchive(req.params.id, req.user._id);
+    return successResponse(res, { isArchived: ride.isArchivedByAdmin }, 
+      ride.isArchivedByAdmin ? "Course archivee." : "Course desarchivee."
+    );
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -472,5 +482,6 @@ module.exports = {
   toggleGlobalFreeAccess,
   updateAppVersion,
   getSystemConfig,
-  getAllRides // NOUVEAU
+  getAllRides,
+  toggleRideArchive
 };

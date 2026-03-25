@@ -6,7 +6,7 @@ const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const Settings = require('../models/Settings');
 const AuditLog = require('../models/AuditLog');
-const Ride = require('../models/Ride'); // NOUVEAU: Import du modèle Ride
+const Ride = require('../models/Ride');
 const AppError = require('../utils/AppError');
 const mongoose = require('mongoose');
 const redisClient = require('../config/redis');
@@ -283,24 +283,37 @@ const toggleGlobalFreeAccess = async (isActive, requesterId) => {
   return { isGlobalFreeAccess: settings.isGlobalFreeAccess };
 };
 
-// 🚗 NOUVEAU : Récupération de l'historique de toutes les courses
 const getAllRidesHistory = async (query) => {
   const page = Math.max(1, parseInt(query.page) || 1);
   const limit = Math.min(50, parseInt(query.limit) || 20);
   const skip = (page - 1) * limit;
+  const isArchived = query.isArchived === 'true';
+
+  const filter = { isArchivedByAdmin: isArchived };
 
   const [rides, total] = await Promise.all([
-    Ride.find()
+    Ride.find(filter)
       .populate('driver', 'name phone')
       .populate('rider', 'name phone')
       .sort({ createdAt: -1 }) 
       .skip(skip)
       .limit(limit)
       .lean(),
-    Ride.countDocuments()
+    Ride.countDocuments(filter)
   ]);
 
   return { rides, pagination: { page, total, pages: Math.ceil(total / limit) } };
+};
+
+const toggleRideArchive = async (rideId, requesterId) => {
+  const ride = await Ride.findById(rideId);
+  if (!ride) throw new AppError('Course introuvable.', 404);
+  
+  ride.isArchivedByAdmin = !ride.isArchivedByAdmin;
+  await ride.save();
+  
+  await logSystemAction(requesterId, 'TOGGLE_RIDE_ARCHIVE', ride._id, `Archive statut: ${ride.isArchivedByAdmin}`);
+  return ride;
 };
 
 module.exports = {
@@ -315,5 +328,6 @@ module.exports = {
   updateWaveLinks,
   getAllUsers,
   toggleGlobalFreeAccess,
-  getAllRidesHistory // NOUVEAU
+  getAllRidesHistory,
+  toggleRideArchive
 };

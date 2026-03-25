@@ -88,7 +88,10 @@ const rideSchema = new mongoose.Schema({
 
   // Masquage Historique Individuel (Soft Delete)
   hiddenForRider: { type: Boolean, default: false },
-  hiddenForDriver: { type: Boolean, default: false }
+  hiddenForDriver: { type: Boolean, default: false },
+
+  // Archivage Global Administrateur
+  isArchivedByAdmin: { type: Boolean, default: false }
 });
 
 // Index de performance simples
