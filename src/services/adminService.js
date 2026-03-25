@@ -6,6 +6,7 @@ const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const Settings = require('../models/Settings');
 const AuditLog = require('../models/AuditLog');
+const Ride = require('../models/Ride'); // NOUVEAU: Import du modèle Ride
 const AppError = require('../utils/AppError');
 const mongoose = require('mongoose');
 const redisClient = require('../config/redis');
@@ -183,7 +184,6 @@ const rejectTransaction = async (transactionId, reason, validatorId) => {
   return { transaction, driver };
 };
 
-// 📈 STATISTIQUES CORRIGÉES : Distinction nette Chauffeurs / Passagers
 const getDashboardStats = async () => {
   const [totalRiders, totalDrivers, activeDrivers, pendingValidations, revenueData, settings] = await Promise.all([
     User.countDocuments({ role: 'rider' }),
@@ -204,7 +204,7 @@ const getDashboardStats = async () => {
     activeDrivers,
     pendingValidations,
     totalRevenue: revenueData.length > 0 ? revenueData[0].total : 0,
-    settings // On renvoie les settings pour que le front sache si la promo est active
+    settings 
   };
 };
 
@@ -241,7 +241,6 @@ const updateWaveLinks = async (weeklyLink, monthlyLink, requesterId) => {
   return { waveLinkWeekly: settings.waveLinkWeekly, waveLinkMonthly: settings.waveLinkMonthly };
 };
 
-// 🔍 RECHERCHE AMELIOREE : Filtre par rôle (driver/rider/admin)
 const getAllUsers = async (query, userRole, requesterId) => {
   const page = Math.max(1, parseInt(query.page) || 1);
   const limit = Math.min(50, parseInt(query.limit) || 20);
@@ -251,7 +250,6 @@ const getAllUsers = async (query, userRole, requesterId) => {
   
   if (userRole === 'admin') filter.role = { $ne: 'superadmin' };
 
-  // Filtre par rôle spécifique si demandé (ex: /users?role=driver)
   if (query.role) {
     filter.role = query.role;
   }
@@ -261,7 +259,7 @@ const getAllUsers = async (query, userRole, requesterId) => {
     filter.$or = [
       { name: new RegExp(safeSearch, 'i') },
       { email: new RegExp(safeSearch, 'i') },
-      { role: new RegExp(safeSearch, 'i') } // Permet de taper "driver" dans la barre de recherche
+      { role: new RegExp(safeSearch, 'i') } 
     ];
   }
 
@@ -285,6 +283,26 @@ const toggleGlobalFreeAccess = async (isActive, requesterId) => {
   return { isGlobalFreeAccess: settings.isGlobalFreeAccess };
 };
 
+// 🚗 NOUVEAU : Récupération de l'historique de toutes les courses
+const getAllRidesHistory = async (query) => {
+  const page = Math.max(1, parseInt(query.page) || 1);
+  const limit = Math.min(50, parseInt(query.limit) || 20);
+  const skip = (page - 1) * limit;
+
+  const [rides, total] = await Promise.all([
+    Ride.find()
+      .populate('driver', 'name phone')
+      .populate('rider', 'name phone')
+      .sort({ createdAt: -1 }) 
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Ride.countDocuments()
+  ]);
+
+  return { rides, pagination: { page, total, pages: Math.ceil(total / limit) } };
+};
+
 module.exports = {
   updateUserRole,
   toggleUserBan,
@@ -296,5 +314,6 @@ module.exports = {
   togglePromo,
   updateWaveLinks,
   getAllUsers,
-  toggleGlobalFreeAccess
+  toggleGlobalFreeAccess,
+  getAllRidesHistory // NOUVEAU
 };

@@ -444,6 +444,17 @@ const getSystemConfig = async (req, res) => {
   }
 };
 
+// 🚗 NOUVEAU : Contrôleur pour l'historique des courses
+const getAllRides = async (req, res) => {
+  try {
+    const result = await adminService.getAllRidesHistory(req.query);
+    return successResponse(res, result, "Historique des courses recupere avec succes.");
+  } catch (error) {
+    logger.error(`[ADMIN RIDES ERROR] Erreur: ${error.message}`);
+    return errorResponse(res, "Impossible de recuperer l'historique des courses.", 500);
+  }
+};
+
 module.exports = {
   updateAdminStatus,
   toggleUserBan,
@@ -460,5 +471,6 @@ module.exports = {
   toggleLoadReduce,
   toggleGlobalFreeAccess,
   updateAppVersion,
-  getSystemConfig
+  getSystemConfig,
+  getAllRides // NOUVEAU
 };

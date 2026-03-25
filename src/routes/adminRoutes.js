@@ -20,6 +20,7 @@ const {
 router.get('/stats', protect, authorize('admin', 'superadmin'), adminController.getDashboardStats);
 router.get('/users', protect, authorize('admin', 'superadmin'), adminController.getAllUsers);
 router.get('/validations', protect, authorize('admin', 'superadmin'), adminController.getValidationQueue);
+router.get('/rides', protect, authorize('admin', 'superadmin'), adminController.getAllRides); // NOUVEAU : Route pour les courses
 router.get('/logs', protect, authorize('admin', 'superadmin'), adminController.getAuditLogs);
 
 router.post('/approve/:id', 
@@ -31,7 +32,7 @@ router.post('/approve/:id',
 
 router.post('/reject/:id', 
   protect, 
-  authorize('admin', 'superadmin'), 
+  authorize('superadmin'), 
   validate(transactionIdParam, 'params'), 
   validate(rejectTransactionSchema), 
   adminController.rejectTransaction
