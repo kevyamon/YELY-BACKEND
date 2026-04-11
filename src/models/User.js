@@ -144,15 +144,12 @@ userSchema.pre('validate', function(next) {
   if (this.email) this.email = this.email.toLowerCase().trim();
   
   if (this.phone) {
-    // SECURITE STRICTE : Forcer la conversion en texte pour eviter le typage Number accidentel
     this.phone = String(this.phone).replace(/[\s-]/g, '');
-    
-    // BOUCLIER DE RESTAURATION : Si le frontend a coupe le zero initial (9 chiffres restants)
     if (this.phone.length === 9 && !this.phone.startsWith('+')) {
       this.phone = '0' + this.phone;
     }
   }
-  
+
   if (this.name && this.name !== 'Utilisateur Supprimé') {
     this.name = this.name.replace(/\s+/g, ' ').trim();
   }

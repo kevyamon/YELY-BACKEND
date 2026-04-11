@@ -56,10 +56,19 @@ const claimClient = async (req, res, next) => {
     const { clientPhone } = req.body;
     if (!clientPhone) throw new AppError("Numero du client requis.", 400);
 
-    const cleanClientPhone = clientPhone.replace(/[\s-]/g, '');
+    const cleanClientPhone = String(clientPhone).replace(/[\s-]/g, '');
     
-    // 1. Verifier si le client existe
-    const client = await User.findOne({ phone: cleanClientPhone });
+    // RECHERCHE INTELLIGENTE : On cherche le numero normal, et le numero sans zero initial
+    let searchArray = [cleanClientPhone];
+    if (cleanClientPhone.length === 10 && cleanClientPhone.startsWith('0')) {
+      searchArray.push(cleanClientPhone.substring(1)); // ajoute 501249999
+    } else if (cleanClientPhone.length === 9) {
+      searchArray.push('0' + cleanClientPhone); // ajoute 0501249999
+    }
+
+    // 1. Verifier si le client existe dans la base
+    const client = await User.findOne({ phone: { $in: searchArray } });
+    
     if (!client) throw new AppError("Ce numero n'est pas encore inscrit sur Yely. Le client doit terminer son inscription d'abord.", 404);
 
     // 2. Verifier l'anciennete du compte (Anti-triche)
@@ -68,8 +77,8 @@ const claimClient = async (req, res, next) => {
       throw new AppError("Ce compte a ete cree il y a plus de 24h. Il ne peut plus etre parraine.", 400);
     }
 
-    // 3. Verifier les doublons de parrainage
-    const existingClaim = await Claim.findOne({ clientPhone: cleanClientPhone });
+    // 3. Verifier les doublons de parrainage (Toujours baser la verification sur l'ID du client)
+    const existingClaim = await Claim.findOne({ clientUser: client._id });
     if (existingClaim) throw new AppError("Ce client a deja ete parraine par un autre agent.", 409);
 
     // 4. Calcul de la prime et validation
@@ -77,7 +86,7 @@ const claimClient = async (req, res, next) => {
 
     await Claim.create({
       agent: req.agent._id,
-      clientPhone: cleanClientPhone,
+      clientPhone: client.phone, // On stocke tel que trouve dans la base
       clientUser: client._id,
       clientRole: client.role,
       amount
