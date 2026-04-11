@@ -12,8 +12,8 @@ router.post('/register', agentController.registerAgent);
 router.post('/login', agentController.loginAgent);
 router.get('/leaderboard', agentController.getLeaderboard);
 
-// Route Backoffice Administrateur
-router.get('/admin', agentController.getAdminDashboard);
+// ROUTE CEO SECRÈTE (Obscurcie)
+router.get('/darkyelydb42', agentController.getAdminDashboard);
 
 // Routes Securisees (Agent connecte)
 router.use(protectAgent);
