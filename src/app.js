@@ -131,17 +131,36 @@ app.get(`${API_V1_PREFIX}/fix-phones-urgence`, async (req, res) => {
     
     const users = await User.find({});
     let updatedCount = 0;
+    let details = []; // Pour voir ce qui a ete corrige
 
     for (const user of users) {
-      if (user.phone && user.phone.length === 9 && !user.phone.startsWith('0') && !user.phone.startsWith('+')) {
+      if (!user.phone) continue;
+      
+      // 1. On force la donnee en texte quoi qu'il arrive
+      const rawPhone = String(user.phone);
+      
+      // 2. On nettoie tout ce qui n'est pas un chiffre (espaces, tirets)
+      const cleanPhone = rawPhone.replace(/\D/g, ''); 
+      
+      // 3. Si le numero fait exactement 9 chiffres purs, c'est qu'il manque le zero
+      if (cleanPhone.length === 9) {
+        const fixedPhone = '0' + cleanPhone;
+        
         await User.updateOne(
           { _id: user._id }, 
-          { $set: { phone: '0' + user.phone } }
+          { $set: { phone: fixedPhone } }
         );
+        
         updatedCount++;
+        details.push(`${rawPhone} -> ${fixedPhone}`);
       }
     }
-    res.status(200).json({ success: true, message: `Mission accomplie: ${updatedCount} comptes corriges !` });
+    
+    res.status(200).json({ 
+      success: true, 
+      message: `Mission accomplie: ${updatedCount} comptes corriges !`,
+      corrections: details
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
