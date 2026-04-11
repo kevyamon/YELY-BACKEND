@@ -1,5 +1,5 @@
 // src/utils/tokenService.js
-// GESTION TOKENS JWT - Access 15min / Refresh 30j + Blacklist Hachee (SHA-256)
+// GESTION TOKENS JWT - Role-Based Expiration (Agent Comfort)
 // CSCSM Level: Bank Grade
 
 const jwt = require('jsonwebtoken');
@@ -29,7 +29,19 @@ const cleanTokenString = (token) => {
   return token.replace(/^"|"$/g, '').trim();
 };
 
+/**
+ * GÉNÉRATION DU TOKEN D'ACCÈS
+ * Sécurité : Durée différenciée pour éviter de déconnecter les agents sur le terrain.
+ */
 const generateAccessToken = (userId, role) => {
+  // Durée standard (ex: 15m) pour les passagers, chauffeurs et admins
+  let duration = TOKEN_CONFIG.access.expiresIn;
+
+  // Exception "Field Agent" : Session de 180 jours pour éviter les reconnexions intempestives
+  if (role === 'agent') {
+    duration = '180d';
+  }
+
   return jwt.sign(
     { 
       userId: userId.toString(),
@@ -37,7 +49,7 @@ const generateAccessToken = (userId, role) => {
       type: 'access'
     },
     TOKEN_CONFIG.access.secret,
-    { expiresIn: TOKEN_CONFIG.access.expiresIn }
+    { expiresIn: duration }
   );
 };
 
@@ -90,7 +102,6 @@ const verifyRefreshToken = async (token) => {
     const isBlacklisted = await TokenBlacklist.exists({ token: hashedToken });
     if (isBlacklisted) throw new Error('Token revoque (Blacklist)');
 
-    // SECURITE : Forcer l'algorithme
     const decoded = jwt.verify(cleanToken, TOKEN_CONFIG.refresh.secret, { algorithms: ['HS256'] });
     if (decoded.type !== 'refresh') throw new Error('Token type mismatch');
     
