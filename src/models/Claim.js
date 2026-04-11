@@ -39,4 +39,11 @@ const claimSchema = new mongoose.Schema({
   timestamps: true 
 });
 
+/**
+ * INDEX TTL (Time To Live)
+ * Supprime automatiquement le document 7 jours après sa création.
+ * 7 jours = 604800 secondes.
+ */
+claimSchema.index({ createdAt: 1 }, { expireAfterSeconds: 604800 });
+
 module.exports = mongoose.model('Claim', claimSchema);
