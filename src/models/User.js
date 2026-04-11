@@ -69,6 +69,9 @@ const userSchema = new mongoose.Schema({
   
   isDeleted: { type: Boolean, default: false, index: true },
   
+  // NOUVEAU : Flag pour le parrainage (verrouillage définitif)
+  isClaimed: { type: Boolean, default: false, index: true },
+
   loginAttempts: { type: Number, required: true, default: 0 },
   lockUntil: { type: Date },
 

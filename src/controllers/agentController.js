@@ -47,6 +47,7 @@ const claimClient = async (req, res, next) => {
   try {
     const { clientPhone } = req.body;
     if (!clientPhone) throw new AppError("Numero du client requis.", 400);
+
     const cleanClientPhone = String(clientPhone).replace(/[\s-]/g, '');
     let searchArray = [cleanClientPhone];
     if (cleanClientPhone.length === 10 && cleanClientPhone.startsWith('0')) {
@@ -54,15 +55,24 @@ const claimClient = async (req, res, next) => {
     } else if (cleanClientPhone.length === 9) {
       searchArray.push('0' + cleanClientPhone);
     }
+
     const client = await User.findOne({ phone: { $in: searchArray } });
     if (!client) throw new AppError("Ce numero n'est pas encore inscrit sur Yely.", 404);
+
+    // VERIFICATION 1 : Le client a-t-il déjà été réclamé (Flag permanent sur User)
+    if (client.isClaimed) {
+      throw new AppError("Ce client a deja ete parraine.", 409);
+    }
+
+    // VERIFICATION 2 : Délai de 24h après création
     const hoursSinceCreation = (Date.now() - client.createdAt.getTime()) / (1000 * 60 * 60);
     if (hoursSinceCreation > MAX_HOURS_DELAY) {
       throw new AppError("Ce compte a ete cree il y a plus de 24h.", 400);
     }
-    const existingClaim = await Claim.findOne({ clientUser: client._id });
-    if (existingClaim) throw new AppError("Ce client a deja ete parraine.", 409);
+
     const amount = client.role === 'driver' ? REWARD_DRIVER : REWARD_RIDER;
+
+    // ACTION 1 : Créer la trace Claim (Historique 7j)
     await Claim.create({
       agent: req.agent._id,
       clientPhone: client.phone,
@@ -70,11 +80,18 @@ const claimClient = async (req, res, next) => {
       clientRole: client.role,
       amount
     });
+
+    // ACTION 2 : Marquer le client comme réclamé définitivement
+    client.isClaimed = true;
+    await client.save();
+
+    // ACTION 3 : Créditer l'agent
     const updatedAgent = await Agent.findByIdAndUpdate(
       req.agent._id,
       { $inc: { totalEarned: amount } },
       { new: true }
     );
+
     return successResponse(res, { amountAdded: amount, newTotal: updatedAgent.totalEarned }, "Prime validee !");
   } catch (error) {
     next(error);
@@ -114,7 +131,6 @@ const getAdminDashboard = async (req, res, next) => {
   }
 };
 
-// NOUVEAU : SOLDER UN AGENT PRECIS
 const payoutAgent = async (req, res, next) => {
   try {
     const { agentId } = req.params;
@@ -131,7 +147,6 @@ const payoutAgent = async (req, res, next) => {
   }
 };
 
-// NOUVEAU : TOUT SOLDER (REMETTRE TOUT LE MONDE A ZERO)
 const payoutAllAgents = async (req, res, next) => {
   try {
     const masterPassword = req.headers['x-admin-password'];
