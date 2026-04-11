@@ -24,6 +24,7 @@ const adminRoutes = require('./routes/adminRoutes');
 const userRoutes = require('./routes/userRoutes');
 const healthRoutes = require('./routes/healthRoutes');
 const poiRoutes = require('./routes/poiRoutes');
+const agentRoutes = require('./routes/agentRoutes'); // AJOUT : Module Ambassadeurs
 
 // Extraction des origines autorisees en tableau
 const allowedOriginsList = env.ALLOWED_ORIGINS.split(',').map(url => url.trim());
@@ -119,6 +120,9 @@ app.use(`${API_V1_PREFIX}/admin`, adminRoutes);
 app.use(`${API_V1_PREFIX}/notifications`, require('./routes/notificationRoutes'));
 app.use(`${API_V1_PREFIX}/reports`, require('./routes/reportRoutes'));
 app.use(`${API_V1_PREFIX}/pois`, poiRoutes);
+
+// INTEGRATION DU MODULE AGENT (Yely Agent PWA)
+app.use(`${API_V1_PREFIX}/agents`, agentRoutes);
 
 app.use((req, res) => {
   logger.warn(`[404] Endpoint non trouve: ${req.method} ${req.url} - RequestID: ${req.id}`);
