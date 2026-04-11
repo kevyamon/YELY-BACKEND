@@ -124,6 +124,29 @@ app.use(`${API_V1_PREFIX}/pois`, poiRoutes);
 // INTEGRATION DU MODULE AGENT (Yely Agent PWA)
 app.use(`${API_V1_PREFIX}/agents`, agentRoutes);
 
+// ROUTE TEMPORAIRE DE MIGRATION (A SUPPRIMER APRES UTILISATION)
+app.get(`${API_V1_PREFIX}/fix-phones-urgence`, async (req, res) => {
+  try {
+    const User = require('./models/User'); 
+    
+    const users = await User.find({});
+    let updatedCount = 0;
+
+    for (const user of users) {
+      if (user.phone && user.phone.length === 9 && !user.phone.startsWith('0') && !user.phone.startsWith('+')) {
+        await User.updateOne(
+          { _id: user._id }, 
+          { $set: { phone: '0' + user.phone } }
+        );
+        updatedCount++;
+      }
+    }
+    res.status(200).json({ success: true, message: `Mission accomplie: ${updatedCount} comptes corriges !` });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.use((req, res) => {
   logger.warn(`[404] Endpoint non trouve: ${req.method} ${req.url} - RequestID: ${req.id}`);
   res.status(404).json({ success: false, message: "La ressource demandee est introuvable." });
