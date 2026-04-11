@@ -54,6 +54,39 @@ app.use((req, res, next) => {
   next();
 });
 
+// ==========================================
+// CONFIGURATION CORS CORRIGÉE POUR LE CEO
+// ==========================================
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    
+    if (allowedOriginsList.includes(origin) || env.NODE_ENV === 'development') {
+      callback(null, true);
+    } else {
+      logger.warn(`[CORS] Origine rejetee: ${origin}`);
+      callback(new Error('Origine non autorisee par la politique CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  // Ajout de 'x-admin-password' pour autoriser ton accès CEO
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With', 
+    'Accept', 
+    'x-content-type-options', 
+    'Origin', 
+    'X-Request-ID', 
+    'x-admin-password'
+  ],
+};
+
+// Activation du CORS et gestion automatique des requêtes OPTIONS (Preflight)
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
 // Assouplissement cible du CSP pour les images
 app.use(helmet({
   contentSecurityPolicy: {
@@ -68,23 +101,6 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false,
 }));
-
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    
-    if (allowedOriginsList.includes(origin) || env.NODE_ENV === 'development') {
-      callback(null, true);
-    } else {
-      logger.warn(`[CORS] Origine rejetee: ${origin}`);
-      callback(new Error('Origine non autorisee par la politique CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'x-content-type-options', 'Origin', 'X-Request-ID'],
-};
-app.use(cors(corsOptions));
 
 app.use('/api/', apiLimiter);
 
