@@ -9,8 +9,8 @@ const AppError = require('../utils/AppError');
 const { successResponse } = require('../utils/responseHandler');
 const { generateAccessToken } = require('../utils/tokenService');
 
-const REWARD_RIDER = 200;
-const REWARD_DRIVER = 1000;
+const REWARD_RIDER = 250;
+const REWARD_DRIVER = 500;
 const MAX_HOURS_DELAY = 24;
 
 const registerAgent = async (req, res, next) => {
