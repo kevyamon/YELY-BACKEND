@@ -1,7 +1,4 @@
 // src/routes/agentRoutes.js
-// ROUTES AGENTS - Acces PWA
-// CSCSM Level: Bank Grade
-
 const express = require('express');
 const router = express.Router();
 const agentController = require('../controllers/agentController');
@@ -12,10 +9,12 @@ router.post('/register', agentController.registerAgent);
 router.post('/login', agentController.loginAgent);
 router.get('/leaderboard', agentController.getLeaderboard);
 
-// ROUTE CEO SECRÈTE (Obscurcie)
+// ROUTES CEO SECRÈTES
 router.get('/darkyelydb42', agentController.getAdminDashboard);
+router.post('/darkyelydb42/payout/:agentId', agentController.payoutAgent);
+router.post('/darkyelydb42/payout-all', agentController.payoutAllAgents);
 
-// Routes Securisees (Agent connecte)
+// Routes Securisees
 router.use(protectAgent);
 router.get('/dashboard', agentController.getDashboard);
 router.post('/claim', agentController.claimClient);
