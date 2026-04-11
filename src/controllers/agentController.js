@@ -136,7 +136,15 @@ const getLeaderboard = async (req, res, next) => {
 const getAdminDashboard = async (req, res, next) => {
   try {
     const masterPassword = req.headers['x-admin-password'];
-    if (masterPassword !== (process.env.ADMIN_BACKOFFICE_PWD || 'Mafere2026')) {
+    const envPassword = process.env.ADMIN_BACKOFFICE_PWD;
+
+    // 1. On bloque tout si la variable d'environnement n'est pas definie sur Railway
+    if (!envPassword) {
+      throw new AppError("Erreur de configuration serveur : ADMIN_BACKOFFICE_PWD manquant.", 500);
+    }
+
+    // 2. On compare strictement avec la variable (aucun mot de passe en dur dans le code)
+    if (masterPassword !== envPassword) {
       throw new AppError("Acces refuse.", 403);
     }
 
