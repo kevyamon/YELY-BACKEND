@@ -18,7 +18,12 @@ const STORE_TESTER_PHONE = '+2250000000';
 
 const register = async (userData) => {
   if (userData.phone) {
-    userData.phone = userData.phone.replace(/\s/g, '');
+    userData.phone = String(userData.phone).replace(/\s/g, '');
+    
+    // Bouclier de restauration lors de l'enregistrement
+    if (userData.phone.length === 9 && !userData.phone.startsWith('+')) {
+      userData.phone = '0' + userData.phone;
+    }
   }
 
   const emailExists = await User.findOne({ email: userData.email, isDeleted: { $ne: true } });
@@ -36,9 +41,14 @@ const register = async (userData) => {
 };
 
 const login = async (identifier, password, clientPlatform) => {
-  const isEmail = identifier.includes('@');
-  const normalizedId = isEmail ? identifier.toLowerCase().trim() : identifier.replace(/\s/g, '');
-  const originalId = identifier.trim();
+  const isEmail = String(identifier).includes('@');
+  let normalizedId = isEmail ? String(identifier).toLowerCase().trim() : String(identifier).replace(/\s/g, '');
+  const originalId = String(identifier).trim();
+
+  // Bouclier de restauration lors de la connexion
+  if (!isEmail && normalizedId.length === 9 && !normalizedId.startsWith('+')) {
+    normalizedId = '0' + normalizedId;
+  }
 
   let user = await User.findOne({
     $or: [
@@ -73,7 +83,6 @@ const login = async (identifier, password, clientPlatform) => {
     const isOldMatch = await bcrypt.compare(password, user.password);
     
     if (isOldMatch) {
-      // CORRECTION DU MESSAGE ICI (8 caracteres au lieu de 12)
       throw new AppError(
         "Mise a jour de securite. Vos identifiants sont corrects, mais votre mot de passe utilise un format desormais obsolete. Pour proteger vos donnees, veuillez utiliser 'Mot de passe oublie' pour en creer un nouveau conforme a nos standards (8 caracteres minimum).", 
         426
@@ -133,7 +142,7 @@ const login = async (identifier, password, clientPlatform) => {
 };
 
 const forgotPassword = async (email) => {
-  const user = await User.findOne({ email: email.toLowerCase().trim() });
+  const user = await User.findOne({ email: String(email).toLowerCase().trim() });
   if (!user || user.isDeleted) return true; 
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -156,14 +165,14 @@ const forgotPassword = async (email) => {
 };
 
 const resetPasswordWithOtp = async (email, otp, newPassword) => {
-  const user = await User.findOne({ email: email.toLowerCase().trim() })
+  const user = await User.findOne({ email: String(email).toLowerCase().trim() })
     .select('+resetPasswordOtp +resetPasswordExpires');
 
   if (!user || user.isDeleted || !user.resetPasswordExpires || user.resetPasswordExpires < Date.now()) {
     throw new AppError('Le code est invalide ou a expire.', 400);
   }
 
-  const isValidOtp = await bcrypt.compare(otp.toString(), user.resetPasswordOtp);
+  const isValidOtp = await bcrypt.compare(String(otp), user.resetPasswordOtp);
   if (!isValidOtp) {
     throw new AppError('Le code est invalide ou a expire.', 400);
   }

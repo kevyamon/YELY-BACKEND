@@ -44,7 +44,7 @@ const userSchema = new mongoose.Schema({
   password: { 
     type: String, 
     required: [true, 'Le mot de passe est obligatoire'],
-    minlength: [8, 'Mot de passe trop court'], // CORRECTION ICI (De 12 a 8)
+    minlength: [8, 'Mot de passe trop court'],
     select: false 
   },
   profilePicture: { 
@@ -142,7 +142,17 @@ userSchema.methods.syncSubscription = function() {
 
 userSchema.pre('validate', function(next) {
   if (this.email) this.email = this.email.toLowerCase().trim();
-  if (this.phone) this.phone = this.phone.replace(/[\s-]/g, '');
+  
+  if (this.phone) {
+    // SECURITE STRICTE : Forcer la conversion en texte pour eviter le typage Number accidentel
+    this.phone = String(this.phone).replace(/[\s-]/g, '');
+    
+    // BOUCLIER DE RESTAURATION : Si le frontend a coupe le zero initial (9 chiffres restants)
+    if (this.phone.length === 9 && !this.phone.startsWith('+')) {
+      this.phone = '0' + this.phone;
+    }
+  }
+  
   if (this.name && this.name !== 'Utilisateur Supprimé') {
     this.name = this.name.replace(/\s+/g, ' ').trim();
   }
