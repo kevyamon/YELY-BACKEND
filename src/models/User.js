@@ -1,4 +1,4 @@
-// src/models/User.js
+//src/models/User.js
 // MODELE UTILISATEUR - Profils, Identites & Stats
 // STANDARD: Industriel (Validation assouplie & Securite Renforcee)
 
@@ -69,8 +69,9 @@ const userSchema = new mongoose.Schema({
   
   isDeleted: { type: Boolean, default: false, index: true },
   
-  // NOUVEAU : Flag pour le parrainage (verrouillage définitif)
   isClaimed: { type: Boolean, default: false, index: true },
+
+  hasFollowedFB: { type: Boolean, default: false },
 
   loginAttempts: { type: Number, required: true, default: 0 },
   lockUntil: { type: Date },
@@ -153,7 +154,7 @@ userSchema.pre('validate', function(next) {
     }
   }
 
-  if (this.name && this.name !== 'Utilisateur Supprimé') {
+  if (this.name && this.name !== 'Utilisateur Supprime') {
     this.name = this.name.replace(/\s+/g, ' ').trim();
   }
   next();

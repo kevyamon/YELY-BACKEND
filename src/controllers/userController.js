@@ -1,5 +1,5 @@
-// src/controllers/userController.js
-// CONTRÔLEUR UTILISATEUR - Gestion Profil & Disponibilité
+//src/controllers/userController.js
+// CONTROLEUR UTILISATEUR - Gestion Profil & Disponibilite
 // CSCSM Level: Bank Grade
 
 const User = require('../models/User');
@@ -11,7 +11,7 @@ const AppError = require('../utils/AppError');
 const getProfile = async (req, res, next) => {
   try {
     const user = await userService.getUserProfile(req.user._id);
-    return successResponse(res, user, 'Profil récupéré');
+    return successResponse(res, user, 'Profil recupere');
   } catch (error) {
     return next(error);
   }
@@ -19,14 +19,14 @@ const getProfile = async (req, res, next) => {
 
 const updateProfile = async (req, res, next) => {
   try {
-    const allowedUpdates = ['name', 'phone', 'vehicle'];
+    const allowedUpdates = ['name', 'phone', 'vehicle', 'hasFollowedFB'];
     const updates = Object.keys(req.body);
     const isValidOperation = updates.every(update => allowedUpdates.includes(update));
 
-    if (!isValidOperation) throw new AppError('Mise à jour non autorisée', 400);
+    if (!isValidOperation) throw new AppError('Mise a jour non autorisee', 400);
 
     const user = await userService.updateProfile(req.user._id, req.body);
-    return successResponse(res, user, 'Profil mis à jour');
+    return successResponse(res, user, 'Profil mis a jour');
   } catch (error) {
     return next(error);
   }
@@ -36,7 +36,7 @@ const uploadProfilePicture = async (req, res, next) => {
   try {
     if (!req.file) throw new AppError("Aucune image fournie", 400);
     const user = await userService.uploadProfilePicture(req.user._id, req.file);
-    return successResponse(res, { profilePicture: user.profilePicture }, 'Photo de profil mise à jour');
+    return successResponse(res, { profilePicture: user.profilePicture }, 'Photo de profil mise a jour');
   } catch (error) {
     return next(error);
   }
@@ -51,7 +51,7 @@ const deleteAccount = async (req, res, next) => {
     const redisClient = require('../config/redis');
     try { await redisClient.del(`auth:user:${req.user._id}`); } catch(e) {}
 
-    return successResponse(res, null, 'Compte supprimé définitivement');
+    return successResponse(res, null, 'Compte supprime definitivement');
   } catch (error) {
     return next(error);
   }
@@ -62,7 +62,7 @@ const updateAvailability = async (req, res, next) => {
     const { isAvailable } = req.body;
     
     if (typeof isAvailable !== 'boolean') {
-      throw new AppError('Statut de disponibilité invalide', 400);
+      throw new AppError('Statut de disponibilite invalide', 400);
     }
 
     const user = await User.findByIdAndUpdate(
@@ -71,7 +71,7 @@ const updateAvailability = async (req, res, next) => {
       { new: true, runValidators: true }
     ).select('isAvailable totalRides totalEarnings rating');
 
-    return successResponse(res, user, `Vous êtes maintenant ${isAvailable ? 'en service' : 'hors ligne'}`);
+    return successResponse(res, user, `Vous etes maintenant ${isAvailable ? 'en service' : 'hors ligne'}`);
   } catch (error) {
     return next(error);
   }
