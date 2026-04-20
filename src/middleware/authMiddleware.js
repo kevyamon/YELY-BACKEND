@@ -1,10 +1,10 @@
-// src/middleware/authMiddleware.js
-// AUTHENTIFICATION FORTERESSE - Validation ObjectId, RBAC, Anti-tampering, Blacklist
+//src/middleware/authMiddleware.js
+// AUTHENTIFICATION FORTERESSE - Validation ObjectId, RBAC, Anti-tampering, Blacklist Redis
 // STANDARD: Bank Grade
 
 const mongoose = require('mongoose');
 const User = require('../models/User');
-const TokenBlacklist = require('../models/TokenBlacklist');
+const redisClient = require('../config/redis');
 const { verifyAccessToken, hashToken, cleanTokenString } = require('../utils/tokenService');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
@@ -28,7 +28,8 @@ const protect = async (req, res, next) => {
     const cleanToken = cleanTokenString(token);
     const hashedToken = hashToken(cleanToken);
 
-    const isBlacklisted = await TokenBlacklist.exists({ token: hashedToken });
+    // MIGRATION REDIS : Lecture instantanée en RAM
+    const isBlacklisted = await redisClient.get(`blacklist:${hashedToken}`);
     if (isBlacklisted) {
       logger.warn(`[AUTH SECURITY] Tentative d'utilisation d'un token révoqué - IP: ${req.ip}`);
       throw new AppError('Session expirée ou révoquée. Veuillez vous reconnecter.', 401);
@@ -54,7 +55,7 @@ const protect = async (req, res, next) => {
     }
 
     if (user.isBanned) {
-      logger.warn(`[AUTH BAN] Tentative accès par utilisateur banni: ${user.email}`);
+      logger.warn(`[AUTH BAN] Tentative d'accès par utilisateur banni: ${user.email}`);
       throw new AppError(`Compte suspendu: ${user.banReason || 'Raison non spécifiée'}`, 403);
     }
 
@@ -92,12 +93,13 @@ const optionalAuth = async (req, res, next) => {
     const cleanToken = cleanTokenString(token);
     const hashedToken = hashToken(cleanToken);
     
-    const isBlacklisted = await TokenBlacklist.exists({ token: hashedToken });
+    // MIGRATION REDIS : Lecture instantanée en RAM
+    const isBlacklisted = await redisClient.get(`blacklist:${hashedToken}`);
     if (isBlacklisted) return next();
 
     const decoded = verifyAccessToken(token);
     
-    // VERIFICATION AJOUTEE : On protège la base de données contre les identifiants malformés
+    // VÉRIFICATION AJOUTÉE : On protège la base de données contre les identifiants malformés
     if (!isValidObjectId(decoded.userId)) {
       return next();
     }

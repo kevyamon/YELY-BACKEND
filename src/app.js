@@ -1,5 +1,5 @@
-// src/app.js
-// CONFIGURATION EXPRESS FORTERESSE - Versioning API & Securite Flux
+//src/app.js
+// CONFIGURATION EXPRESS FORTERESSE - Versioning API & Sécurité Flux
 // CSCSM Level: Bank Grade
 
 const express = require('express');
@@ -26,25 +26,25 @@ const healthRoutes = require('./routes/healthRoutes');
 const poiRoutes = require('./routes/poiRoutes');
 const agentRoutes = require('./routes/agentRoutes'); // AJOUT : Module Ambassadeurs
 
-// Extraction des origines autorisees en tableau
+// Extraction des origines autorisées en tableau
 const allowedOriginsList = env.ALLOWED_ORIGINS.split(',').map(url => url.trim());
 
-// Initialisation de Sentry au tout debut pour capter les erreurs globales
+// Initialisation de Sentry au tout début pour capter les erreurs globales
 if (env.SENTRY_DSN) {
   Sentry.init({
     dsn: env.SENTRY_DSN,
     environment: env.NODE_ENV,
     tracesSampleRate: env.NODE_ENV === 'production' ? 0.2 : 1.0,
   });
-  logger.info('[SENTRY] Monitoring des erreurs active.');
+  logger.info('[SENTRY] Monitoring des erreurs activé.');
 }
 
 const app = express();
 
 app.disable('x-powered-by');
 
-// CORRECTION SENIOR : Trust Proxy active globalement pour garantir l'identification IP correcte 
-// derriere Cloudflare/Nginx en dev/staging/prod pour le Rate Limiting.
+// CORRECTION SENIOR : Trust Proxy activé globalement pour garantir l'identification IP correcte 
+// derrière Cloudflare/Nginx en dev/staging/prod pour le Rate Limiting.
 app.set('trust proxy', 1);
 
 app.use(requestIdMiddleware);
@@ -55,7 +55,7 @@ app.use((req, res, next) => {
 });
 
 // ==========================================
-// CONFIGURATION CORS CORRIGÉE POUR LE CEO
+// CONFIGURATION CORS CORRIGÉE
 // ==========================================
 const corsOptions = {
   origin: (origin, callback) => {
@@ -64,13 +64,13 @@ const corsOptions = {
     if (allowedOriginsList.includes(origin) || env.NODE_ENV === 'development') {
       callback(null, true);
     } else {
-      logger.warn(`[CORS] Origine rejetee: ${origin}`);
-      callback(new Error('Origine non autorisee par la politique CORS'));
+      logger.warn(`[CORS] Origine rejetée: ${origin}`);
+      callback(new Error('Origine non autorisée par la politique CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  // Ajout de 'x-admin-password' pour autoriser ton accès CEO
+  // CORRECTION CRITIQUE: Suppression de 'x-admin-password' pour bloquer la backdoor statique
   allowedHeaders: [
     'Content-Type', 
     'Authorization', 
@@ -78,8 +78,7 @@ const corsOptions = {
     'Accept', 
     'x-content-type-options', 
     'Origin', 
-    'X-Request-ID', 
-    'x-admin-password'
+    'X-Request-ID'
   ],
 };
 
@@ -87,7 +86,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
-// Assouplissement cible du CSP pour les images
+// Assouplissement ciblé du CSP pour les images
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -112,13 +111,13 @@ app.use(hpp());
 app.use(mongoSanitize({
   replaceWith: '_',
   onSanitize: ({ req, key }) => {
-    logger.warn(`[SANITIZE] Champ suspect nettoye: ${key} - IP: ${req.ip} - RequestID: ${req.id}`);
+    logger.warn(`[SANITIZE] Champ suspect nettoyé: ${key} - IP: ${req.ip} - RequestID: ${req.id}`);
   }
 }));
 app.use(sanitizationMiddleware);
 
 app.get('/', (req, res) => {
-  res.status(200).send('Yely API (Iron Dome) is running');
+  res.status(200).send('Yély API (Iron Dome) is running');
 });
 
 const API_V1_PREFIX = '/api/v1';
@@ -137,28 +136,28 @@ app.use(`${API_V1_PREFIX}/notifications`, require('./routes/notificationRoutes')
 app.use(`${API_V1_PREFIX}/reports`, require('./routes/reportRoutes'));
 app.use(`${API_V1_PREFIX}/pois`, poiRoutes);
 
-// INTEGRATION DU MODULE AGENT (Yely Agent PWA)
+// INTÉGRATION DU MODULE AGENT (Yély Agent PWA)
 app.use(`${API_V1_PREFIX}/agents`, agentRoutes);
 
-// ROUTE TEMPORAIRE DE MIGRATION (A SUPPRIMER APRES UTILISATION)
+// ROUTE TEMPORAIRE DE MIGRATION (À SUPPRIMER APRÈS UTILISATION)
 app.get(`${API_V1_PREFIX}/fix-phones-urgence`, async (req, res) => {
   try {
     const User = require('./models/User'); 
     
     const users = await User.find({});
     let updatedCount = 0;
-    let details = []; // Pour voir ce qui a ete corrige
+    let details = []; // Pour voir ce qui a été corrigé
 
     for (const user of users) {
       if (!user.phone) continue;
       
-      // 1. On force la donnee en texte quoi qu'il arrive
+      // 1. On force la donnée en texte quoi qu'il arrive
       const rawPhone = String(user.phone);
       
       // 2. On nettoie tout ce qui n'est pas un chiffre (espaces, tirets)
       const cleanPhone = rawPhone.replace(/\D/g, ''); 
       
-      // 3. Si le numero fait exactement 9 chiffres purs, c'est qu'il manque le zero
+      // 3. Si le numéro fait exactement 9 chiffres purs, c'est qu'il manque le zéro
       if (cleanPhone.length === 9) {
         const fixedPhone = '0' + cleanPhone;
         
@@ -174,7 +173,7 @@ app.get(`${API_V1_PREFIX}/fix-phones-urgence`, async (req, res) => {
     
     res.status(200).json({ 
       success: true, 
-      message: `Mission accomplie: ${updatedCount} comptes corriges !`,
+      message: `Mission accomplie: ${updatedCount} comptes corrigés !`,
       corrections: details
     });
   } catch (error) {
@@ -183,8 +182,8 @@ app.get(`${API_V1_PREFIX}/fix-phones-urgence`, async (req, res) => {
 });
 
 app.use((req, res) => {
-  logger.warn(`[404] Endpoint non trouve: ${req.method} ${req.url} - RequestID: ${req.id}`);
-  res.status(404).json({ success: false, message: "La ressource demandee est introuvable." });
+  logger.warn(`[404] Endpoint non trouvé: ${req.method} ${req.url} - RequestID: ${req.id}`);
+  res.status(404).json({ success: false, message: "La ressource demandée est introuvable." });
 });
 
 app.use(errorHandler);

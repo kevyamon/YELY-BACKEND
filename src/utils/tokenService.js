@@ -1,11 +1,11 @@
-// src/utils/tokenService.js
-// GESTION TOKENS JWT - Role-Based Expiration (Agent Comfort)
+//src/utils/tokenService.js
+// GESTION TOKENS JWT - Rôle-Based Expiration (Agent Comfort) & Redis Blacklist
 // CSCSM Level: Bank Grade
 
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { env } = require('../config/env');
-const TokenBlacklist = require('../models/TokenBlacklist'); 
+const redisClient = require('../config/redis');
 
 const isProd = env.NODE_ENV === 'production';
 
@@ -88,7 +88,7 @@ const clearRefreshTokenCookie = (res) => {
 
 const verifyAccessToken = (token) => {
   const cleanToken = cleanTokenString(token);
-  // SECURITE : Forcer l'algorithme pour eviter l'Algorithm Switching
+  // SÉCURITÉ : Forcer l'algorithme pour éviter l'Algorithm Switching
   const decoded = jwt.verify(cleanToken, TOKEN_CONFIG.access.secret, { algorithms: ['HS256'] });
   if (decoded.type !== 'access') throw new Error('Token type mismatch');
   return decoded;
@@ -99,8 +99,9 @@ const verifyRefreshToken = async (token) => {
     const cleanToken = cleanTokenString(token);
     const hashedToken = hashToken(cleanToken);
     
-    const isBlacklisted = await TokenBlacklist.exists({ token: hashedToken });
-    if (isBlacklisted) throw new Error('Token revoque (Blacklist)');
+    // MIGRATION REDIS
+    const isBlacklisted = await redisClient.get(`blacklist:${hashedToken}`);
+    if (isBlacklisted) throw new Error('Token révoqué (Blacklist)');
 
     const decoded = jwt.verify(cleanToken, TOKEN_CONFIG.refresh.secret, { algorithms: ['HS256'] });
     if (decoded.type !== 'refresh') throw new Error('Token type mismatch');
@@ -116,9 +117,11 @@ const revokeRefreshToken = async (token) => {
   try {
     const cleanToken = cleanTokenString(token);
     const hashedToken = hashToken(cleanToken);
-    await TokenBlacklist.create({ token: hashedToken });
+    
+    // MIGRATION REDIS : Ajout à la blacklist avec expiration automatique (30 jours)
+    await redisClient.setEx(`blacklist:${hashedToken}`, 30 * 24 * 60 * 60, 'revoked');
   } catch (err) {
-    if (err.code !== 11000) console.error('[TOKEN] Erreur revocation:', err.message);
+    console.error('[TOKEN] Erreur révocation dans Redis:', err.message);
   }
 };
 

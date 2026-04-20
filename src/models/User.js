@@ -1,6 +1,6 @@
 //src/models/User.js
-// MODELE UTILISATEUR - Profils, Identites & Stats
-// STANDARD: Industriel (Validation assouplie & Securite Renforcee)
+// MODÈLE UTILISATEUR - Profils, Identités & Stats
+// STANDARD: Industriel (Validation assouplie & Sécurité Renforcée)
 
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
@@ -10,7 +10,7 @@ const { SECURITY_CONSTANTS } = require('../config/env');
 const hashWithPepper = (password) => {
   const pepper = process.env.PASSWORD_PEPPER;
   if (!pepper) {
-    console.warn('ATTENTION: VARIABLE D ENVIRONNEMENT PASSWORD_PEPPER MANQUANTE. UTILISATION D UN REPLI MOINS SECURISE.');
+    console.warn('ATTENTION: VARIABLE D ENVIRONNEMENT PASSWORD_PEPPER MANQUANTE. UTILISATION D UN REPLI MOINS SÉCURISÉ.');
     return crypto.createHash('sha256').update(password).digest('hex');
   }
   return crypto.createHmac('sha256', pepper).update(password).digest('hex');
@@ -21,9 +21,9 @@ const userSchema = new mongoose.Schema({
     type: String, 
     required: [true, 'Le nom est obligatoire'],
     trim: true,
-    minlength: [2, 'Le nom doit faire au moins 2 caracteres'],
-    maxlength: [50, 'Le nom ne peut depasser 50 caracteres'],
-    match: [/^[a-zA-Z\u00C0-\u00FF\s'-]+$/, 'Caracteres non autorises dans le nom']
+    minlength: [2, 'Le nom doit faire au moins 2 caractères'],
+    maxlength: [50, 'Le nom ne peut dépasser 50 caractères'],
+    match: [/^[a-zA-Z\u00C0-\u00FF\s'-]+$/, 'Caractères non autorisés dans le nom']
   },
   email: { 
     type: String, 
@@ -36,10 +36,10 @@ const userSchema = new mongoose.Schema({
   },
   phone: { 
     type: String, 
-    required: [true, 'Le telephone est obligatoire'],
+    required: [true, 'Le téléphone est obligatoire'],
     unique: true,
     trim: true,
-    match: [/^\+?[0-9\s]{8,20}$/, 'Format telephone invalide']
+    match: [/^\+?[0-9\s]{8,20}$/, 'Format téléphone invalide']
   },
   password: { 
     type: String, 
@@ -55,7 +55,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     enum: {
       values: ['rider', 'driver', 'admin', 'superadmin'],
-      message: 'Role {VALUE} non autorise'
+      message: 'Rôle {VALUE} non autorisé'
     },
     default: 'rider'
   },
@@ -148,13 +148,11 @@ userSchema.pre('validate', function(next) {
   if (this.email) this.email = this.email.toLowerCase().trim();
   
   if (this.phone) {
+    // CORRECTION : On ne fait plus de supposition sur le zéro initial. On nettoie juste les espaces.
     this.phone = String(this.phone).replace(/[\s-]/g, '');
-    if (this.phone.length === 9 && !this.phone.startsWith('+')) {
-      this.phone = '0' + this.phone;
-    }
   }
 
-  if (this.name && this.name !== 'Utilisateur Supprime') {
+  if (this.name && this.name !== 'Utilisateur Supprimé') {
     this.name = this.name.replace(/\s+/g, ' ').trim();
   }
   next();
@@ -168,7 +166,7 @@ userSchema.pre('save', async function(next) {
     this.password = await bcrypt.hash(pepperedPassword, rounds);
     next();
   } catch (error) {
-    next(new Error('Erreur de securisation du mot de passe: ' + error.message));
+    next(new Error('Erreur de sécurisation du mot de passe: ' + error.message));
   }
 });
 

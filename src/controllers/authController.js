@@ -1,5 +1,5 @@
-// src/controllers/authController.js
-// CONTROLEUR AUTHENTIFICATION - Alignement Parfait & Anti-Crash (Bouclier Anti-Zombie Actif)
+//src/controllers/authController.js
+// CONTRÔLEUR AUTHENTIFICATION - Alignement Parfait & Anti-Crash (Bouclier Anti-Zombie Actif)
 // STANDARD: Industriel / Bank Grade
 
 const User = require('../models/User');
@@ -36,7 +36,7 @@ const registerUser = async (req, res, next) => {
       user: userData, 
       accessToken, 
       refreshToken: refreshTokenStr 
-    }, 'Compte cree avec succes', 201);
+    }, 'Compte créé avec succès', 201);
 
   } catch (error) {
     return next(error);
@@ -55,7 +55,7 @@ const loginUser = async (req, res, next) => {
 
     // BOUCLIER ANTI-ZOMBIE 
     if (user.isDeleted) {
-      throw new AppError("Ce compte a ete desactive ou supprime.", 403);
+      throw new AppError("Ce compte a été désactivé ou supprimé.", 403);
     }
     if (user.isBanned) {
       throw new AppError(`Ce compte est banni. Motif: ${user.banReason}`, 403);
@@ -85,7 +85,7 @@ const loginUser = async (req, res, next) => {
       user: userData, 
       accessToken, 
       refreshToken: refreshTokenStr 
-    }, 'Connexion reussie', 200);
+    }, 'Connexion réussie', 200);
 
   } catch (error) {
     return next(error);
@@ -95,7 +95,7 @@ const loginUser = async (req, res, next) => {
 const logoutUser = async (req, res, next) => {
   try {
     clearRefreshTokenCookie(res);
-    return successResponse(res, null, 'Deconnexion reussie', 200);
+    return successResponse(res, null, 'Déconnexion réussie', 200);
   } catch (error) {
     return next(error);
   }
@@ -105,7 +105,7 @@ const forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
     await authService.forgotPassword(email);
-    return successResponse(res, null, "Si cette adresse e-mail est associee a un compte, un code de reinitialisation y a ete envoye.", 200);
+    return successResponse(res, null, "Si cette adresse e-mail est associée à un compte, un code de réinitialisation y a été envoyé.", 200);
   } catch (error) {
     return next(error);
   }
@@ -115,7 +115,7 @@ const resetPassword = async (req, res, next) => {
   try {
     const { email, otp, newPassword } = req.body;
     await authService.resetPasswordWithOtp(email, otp, newPassword);
-    return successResponse(res, null, "Votre mot de passe a ete reinitialise avec succes. Vous pouvez maintenant vous connecter.", 200);
+    return successResponse(res, null, "Votre mot de passe a été réinitialisé avec succès. Vous pouvez maintenant vous connecter.", 200);
   } catch (error) {
     return next(error);
   }
@@ -131,7 +131,7 @@ const refreshToken = async (req, res, next) => {
     }
 
     if (!token) {
-       throw new AppError("Session invalide ou expiree.", 401);
+       throw new AppError("Session invalide ou expirée.", 401);
     }
     
     const user = await authService.validateSessionForRefresh(token, clientPlatform);
@@ -164,7 +164,7 @@ const refreshToken = async (req, res, next) => {
       user: userData,
       accessToken: newAccessToken, 
       refreshToken: newRefreshToken 
-    }, "Session rafraichie", 200);
+    }, "Session rafraîchie", 200);
 
   } catch (error) {
     clearRefreshTokenCookie(res); 
@@ -176,7 +176,7 @@ const updateAvailability = async (req, res, next) => {
   try {
     const { isAvailable } = req.body;
     const user = await authService.updateAvailability(req.user._id, isAvailable);
-    return successResponse(res, { isAvailable: user.isAvailable }, "Disponibilite mise a jour", 200);
+    return successResponse(res, { isAvailable: user.isAvailable }, "Disponibilité mise à jour", 200);
   } catch (error) {
     return next(error);
   }
@@ -186,7 +186,7 @@ const updateFcmToken = async (req, res, next) => {
   try {
     const { fcmToken } = req.body;
     await User.findByIdAndUpdate(req.user._id, { fcmToken });
-    return successResponse(res, null, "Token systeme mis a jour", 200);
+    return successResponse(res, null, "Token système mis à jour", 200);
   } catch (error) {
     return next(error);
   }

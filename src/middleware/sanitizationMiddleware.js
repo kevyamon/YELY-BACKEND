@@ -1,4 +1,4 @@
-// src/middleware/sanitizationMiddleware.js
+//src/middleware/sanitizationMiddleware.js
 // NETTOYAGE SÉCURITÉ - Protection XSS Profonde & Anti-DoS
 // CSCSM Level: Bank Grade
 
@@ -27,6 +27,12 @@ const sanitizeDeep = (obj, depth = 0) => {
 
   const sanitized = {};
   for (const [key, value] of Object.entries(obj)) {
+    // CORRECTION CRITIQUE: On ne nettoie JAMAIS les mots de passe pour ne pas les corrompre
+    if (key.toLowerCase().includes('password')) {
+      sanitized[key] = value;
+      continue;
+    }
+
     if (typeof value === 'string') {
       sanitized[key] = xss(value, {
         whiteList: {}, 
@@ -52,7 +58,7 @@ const sanitizationMiddleware = (req, res, next) => {
     console.error('[XSS SANITIZE] Erreur critique:', error.message);
     return res.status(400).json({
       success: false,
-      message: "Structure de donnees invalide."
+      message: "Structure de données invalide."
     });
   }
 };
