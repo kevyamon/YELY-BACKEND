@@ -377,6 +377,9 @@ const finalizeProposal = async (rideId, riderId, decision) => {
       if (!ride) throw new AppError('Session invalide.', 404);
 
       if (decision === 'ACCEPTED') {
+        if (!ride.proposedPrice) {
+          throw new AppError('Le chauffeur n\'a pas encore soumis de proposition de prix.', 400);
+        }
         ride.status = 'accepted';
         ride.price = ride.proposedPrice;
         ride.acceptedAt = new Date();

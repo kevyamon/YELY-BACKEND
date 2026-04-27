@@ -175,10 +175,9 @@ io.on('connection', (socket) => {
     socket.lastCoords = [coords.longitude, coords.latitude];
 
     try {
-      User.updateOne({ _id: user._id }, {
-        currentLocation: { type: 'Point', coordinates: [coords.longitude, coords.latitude] },
-        lastLocationAt: new Date()
-      }).exec().catch(err => logger.error(`[SOCKET LOC DB] ${err.message}`));
+      // PILLIER SCALABILITE : On ne met plus à jour la DB à chaque seconde.
+      // La position est déjà dans Redis (geoadd plus bas) pour le dispatch.
+      // On pourrait ajouter un sync périodique ici si nécessaire (ex: toutes les 5 min).
 
       if (user.role === 'driver') {
         await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());

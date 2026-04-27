@@ -10,6 +10,7 @@ const { verifyRefreshToken } = require('../utils/tokenService');
 const { SECURITY_CONSTANTS } = require('../config/env');
 const emailService = require('../utils/emailService');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 
 const MAX_ATTEMPTS = SECURITY_CONSTANTS?.MAX_LOGIN_ATTEMPTS || 5;
 const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000;
@@ -34,7 +35,13 @@ const register = async (userData) => {
     throw new AppError('Action non autorisee.', 403);
   }
 
-  const user = await User.create(userData);
+  const user = await User.create({
+    name: userData.name,
+    email: userData.email,
+    phone: userData.phone,
+    password: userData.password,
+    role: userData.role || 'rider'
+  });
   return user;
 };
 
@@ -142,7 +149,7 @@ const forgotPassword = async (email) => {
   const user = await User.findOne({ email: email.toLowerCase().trim() });
   if (!user || user.isDeleted) return true; 
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otp = crypto.randomInt(100000, 999999).toString();
   const hashedOtp = await bcrypt.hash(otp, 12);
 
   user.resetPasswordOtp = hashedOtp;

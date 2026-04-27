@@ -37,10 +37,7 @@ const generateAccessToken = (userId, role) => {
   // Durée standard (ex: 15m) pour les passagers, chauffeurs et admins
   let duration = TOKEN_CONFIG.access.expiresIn;
 
-  // Exception "Field Agent" : Session de 180 jours pour éviter les reconnexions intempestives
-  if (role === 'agent') {
-    duration = '180d';
-  }
+
 
   return jwt.sign(
     { 

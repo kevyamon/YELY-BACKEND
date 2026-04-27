@@ -139,47 +139,7 @@ app.use(`${API_V1_PREFIX}/pois`, poiRoutes);
 // INTÉGRATION DU MODULE AGENT (Yély Agent PWA)
 app.use(`${API_V1_PREFIX}/agents`, agentRoutes);
 
-// ROUTE TEMPORAIRE DE MIGRATION (À SUPPRIMER APRÈS UTILISATION)
-app.get(`${API_V1_PREFIX}/fix-phones-urgence`, async (req, res) => {
-  try {
-    const User = require('./models/User'); 
-    
-    const users = await User.find({});
-    let updatedCount = 0;
-    let details = []; // Pour voir ce qui a été corrigé
 
-    for (const user of users) {
-      if (!user.phone) continue;
-      
-      // 1. On force la donnée en texte quoi qu'il arrive
-      const rawPhone = String(user.phone);
-      
-      // 2. On nettoie tout ce qui n'est pas un chiffre (espaces, tirets)
-      const cleanPhone = rawPhone.replace(/\D/g, ''); 
-      
-      // 3. Si le numéro fait exactement 9 chiffres purs, c'est qu'il manque le zéro
-      if (cleanPhone.length === 9) {
-        const fixedPhone = '0' + cleanPhone;
-        
-        await User.updateOne(
-          { _id: user._id }, 
-          { $set: { phone: fixedPhone } }
-        );
-        
-        updatedCount++;
-        details.push(`${rawPhone} -> ${fixedPhone}`);
-      }
-    }
-    
-    res.status(200).json({ 
-      success: true, 
-      message: `Mission accomplie: ${updatedCount} comptes corrigés !`,
-      corrections: details
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
 
 app.use((req, res) => {
   logger.warn(`[404] Endpoint non trouvé: ${req.method} ${req.url} - RequestID: ${req.id}`);
