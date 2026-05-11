@@ -139,6 +139,13 @@ app.use(`${API_V1_PREFIX}/pois`, poiRoutes);
 // INTÉGRATION DU MODULE AGENT (Yély Agent PWA)
 app.use(`${API_V1_PREFIX}/agents`, agentRoutes);
 
+// ==========================================
+// MODULE E-COMMERCE (MARKETPLACE)
+// ==========================================
+app.use(`${API_V1_PREFIX}/products`, require('./routes/productRoutes'));
+app.use(`${API_V1_PREFIX}/orders`, require('./routes/orderRoutes'));
+app.use(`${API_V1_PREFIX}/ledger`, require('./routes/ledgerRoutes'));
+
 
 
 app.use((req, res) => {

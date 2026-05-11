@@ -14,6 +14,19 @@ const rideSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'User' 
   },
+
+  type: {
+    type: String,
+    enum: ['RIDE', 'DELIVERY'],
+    default: 'RIDE',
+    index: true
+  },
+
+  orderId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Order',
+    default: null
+  },
   
   // Geolocalisation : Format GeoJSON strict exige pour le bon dispatch
   origin: {

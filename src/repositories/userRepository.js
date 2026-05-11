@@ -6,7 +6,7 @@ const User = require('../models/User');
 const logger = require('../config/logger');
 const redisClient = require('../config/redis');
 
-const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait, rejectedDriverIds = []) => {
+const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait, rejectedDriverIds = [], missionType = 'RIDE') => {
   const safeLng = Number(coordinates[0]);
   const safeLat = Number(coordinates[1]);
 
@@ -19,7 +19,6 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
 
   try {
     // 1. RECHERCHE DANS REDIS (Haute Performance)
-    // On récupère les IDs des chauffeurs dans le rayon
     const driverIds = await redisClient.geosearch(
       'active_drivers',
       'FROMLONLAT', safeLng, safeLat,
@@ -32,16 +31,24 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
       return [];
     }
 
-    // 2. FILTRAGE DB (Seulement pour les IDs trouvés)
+    // 2. FILTRAGE DB
     const query = {
       _id: { $in: driverIds },
       role: 'driver',
       isAvailable: true,
-      isBanned: false
+      isBanned: false,
+      'ledger.isBlocked': false // Sécurité Financière : Bloquer si trop de dettes
     };
 
+    // Filtrage par type de mission
+    if (missionType === 'DELIVERY') {
+      query['deliveryPreferences.isDeliveryActive'] = true;
+    } else {
+      query['deliveryPreferences.isVtcActive'] = true;
+    }
+
     if (rejectedDriverIds && rejectedDriverIds.length > 0) {
-      query._id.$nin = rejectedDriverIds;
+      query._id = { $in: driverIds, $nin: rejectedDriverIds };
     }
 
     const drivers = await User.find(query)

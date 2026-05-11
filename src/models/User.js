@@ -54,14 +54,28 @@ const userSchema = new mongoose.Schema({
   role: {
     type: String,
     enum: {
-      values: ['rider', 'driver', 'admin', 'superadmin'],
+      values: ['rider', 'driver', 'seller', 'admin', 'superadmin'],
       message: 'Rôle {VALUE} non autorisé'
     },
     default: 'rider'
   },
+  
+  // Préférences de missions (Uniquement pour driver)
+  deliveryPreferences: {
+    isVtcActive: { type: Boolean, default: true },
+    isDeliveryActive: { type: Boolean, default: true }
+  },
+
+  // Système d'Ardoise (Ledger) pour le cash
+  ledger: {
+    currentCashDebt: { type: Number, default: 0 },
+    maxCashDebt: { type: Number, default: 50000 }, // Limite par défaut
+    isBlocked: { type: Boolean, default: false }
+  },
+
   previousRole: {
     type: String,
-    enum: ['rider', 'driver', null],
+    enum: ['rider', 'driver', 'seller', null],
     default: null
   },
   isBanned: { type: Boolean, default: false, index: true },

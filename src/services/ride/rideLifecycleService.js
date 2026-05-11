@@ -112,7 +112,8 @@ const dispatchToNearbyDrivers = async (ride, radius) => {
     originCoords,
     radius,
     ride.forfait,
-    excludedDrivers
+    excludedDrivers,
+    ride.type // Passer le type (RIDE ou DELIVERY)
   );
 
   if (drivers.length > 0) {
