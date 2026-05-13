@@ -9,6 +9,7 @@ const Ledger = require('../models/Ledger');
 const { sendNotification } = require('../services/notificationService');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
+const { calculateDistance, calculateDeliveryPrice } = require('../utils/geoUtils');
 
 /**
  * @desc    Créer une nouvelle commande
@@ -17,10 +18,20 @@ const logger = require('../config/logger');
  */
 exports.createOrder = async (req, res, next) => {
   try {
-    const { items, shippingAddress, sellerId, deliveryPrice } = req.body;
+    const { items, shippingAddress, sellerId } = req.body;
 
     if (!items || items.length === 0) {
       return next(new AppError('Le panier est vide', 400));
+    }
+
+    if (!shippingAddress || !shippingAddress.coordinates) {
+      return next(new AppError('Adresse de livraison ou coordonnées manquantes', 400));
+    }
+
+    // Récupérer le vendeur pour avoir ses coordonnées
+    const seller = await User.findById(sellerId);
+    if (!seller || seller.role !== 'seller') {
+      return next(new AppError('Vendeur introuvable ou invalide', 404));
     }
 
     let itemsPrice = 0;
@@ -44,14 +55,20 @@ exports.createOrder = async (req, res, next) => {
       });
     }
 
-    const totalPrice = itemsPrice + (Number(deliveryPrice) || 0);
+    // Calcul de la distance et du prix de livraison
+    const sellerCoords = seller.currentLocation?.coordinates || [0, 0];
+    const buyerCoords = shippingAddress.coordinates;
+    const distanceKm = calculateDistance(sellerCoords, buyerCoords);
+    const calculatedDeliveryPrice = calculateDeliveryPrice(distanceKm);
+
+    const totalPrice = itemsPrice + calculatedDeliveryPrice;
 
     const order = await Order.create({
       customer: req.user._id,
       seller: sellerId,
       items: validatedItems,
       itemsPrice,
-      deliveryPrice,
+      deliveryPrice: calculatedDeliveryPrice,
       totalPrice,
       shippingAddress,
       status: 'pending',
