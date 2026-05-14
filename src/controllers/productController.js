@@ -105,7 +105,7 @@ exports.createProduct = async (req, res, next) => {
     const populatedProduct = await Product.findById(product._id).populate('seller', 'name profilePicture rating');
     
     // TEMPS RÉEL
-    const io = req.app.get('io');
+    const io = req.app.get('socketio');
     if (io) {
       io.emit('product_created', populatedProduct);
     }
@@ -165,7 +165,7 @@ exports.updateProduct = async (req, res, next) => {
     }).populate('seller', 'name profilePicture rating');
 
     // TEMPS RÉEL
-    const io = req.app.get('io');
+    const io = req.app.get('socketio');
     if (io) io.emit('product_updated', product);
 
     res.status(200).json({ success: true, data: product });
@@ -231,7 +231,7 @@ exports.deleteProduct = async (req, res, next) => {
     await product.deleteOne();
 
     // TEMPS RÉEL
-    const io = req.app.get('io');
+    const io = req.app.get('socketio');
     if (io) io.emit('product_deleted', productId);
 
     res.status(200).json({
