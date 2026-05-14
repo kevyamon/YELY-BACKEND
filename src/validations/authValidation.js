@@ -63,7 +63,7 @@ const registerSchema = z.object({
       return !pwned;
     }, "Ce mot de passe est apparu dans une fuite de donnees publique. Veuillez en choisir un autre pour votre securite."),
 
-  role: z.enum(['rider', 'driver']).default('rider')
+  role: z.enum(['rider', 'driver', 'seller']).default('rider')
 }); 
 
 const loginSchema = z.object({
