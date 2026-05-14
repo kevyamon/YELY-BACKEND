@@ -1,4 +1,4 @@
-//src/app.js
+// src/app.js
 // CONFIGURATION EXPRESS FORTERESSE - Versioning API & Sécurité Flux
 // CSCSM Level: Bank Grade
 
@@ -16,7 +16,9 @@ const errorHandler = require('./middleware/errorHandler');
 const requestIdMiddleware = require('./middleware/requestIdMiddleware'); 
 const logger = require('./config/logger');
 
-// Routes
+// ==========================================
+// IMPORTATION STRICTE DES ROUTES
+// ==========================================
 const authRoutes = require('./routes/authRoutes');
 const rideRoutes = require('./routes/rideRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
@@ -24,7 +26,12 @@ const adminRoutes = require('./routes/adminRoutes');
 const userRoutes = require('./routes/userRoutes');
 const healthRoutes = require('./routes/healthRoutes');
 const poiRoutes = require('./routes/poiRoutes');
-const agentRoutes = require('./routes/agentRoutes'); // AJOUT : Module Ambassadeurs
+const agentRoutes = require('./routes/agentRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
+const reportRoutes = require('./routes/reportRoutes');
+const productRoutes = require('./routes/productRoutes');
+const orderRoutes = require('./routes/orderRoutes');
+const ledgerRoutes = require('./routes/ledgerRoutes');
 
 // Extraction des origines autorisées en tableau
 const allowedOriginsList = env.ALLOWED_ORIGINS.split(',').map(url => url.trim());
@@ -36,14 +43,15 @@ if (env.SENTRY_DSN) {
     environment: env.NODE_ENV,
     tracesSampleRate: env.NODE_ENV === 'production' ? 0.2 : 1.0,
   });
-  logger.info('[SENTRY] Monitoring des erreurs activé.');
+  logger.info('[SENTRY] Monitoring des erreurs active.');
 }
 
 const app = express();
 
+// helmet() le fait déjà plus bas, mais une sécurité redondante n'est pas un problème ici
 app.disable('x-powered-by');
 
-// CORRECTION SENIOR : Trust Proxy activé globalement pour garantir l'identification IP correcte 
+// Trust Proxy activé globalement pour garantir l'identification IP correcte 
 // derrière Cloudflare/Nginx en dev/staging/prod pour le Rate Limiting.
 app.set('trust proxy', 1);
 
@@ -55,7 +63,7 @@ app.use((req, res, next) => {
 });
 
 // ==========================================
-// CONFIGURATION CORS CORRIGÉE
+// CONFIGURATION CORS
 // ==========================================
 const corsOptions = {
   origin: (origin, callback) => {
@@ -65,12 +73,11 @@ const corsOptions = {
       callback(null, true);
     } else {
       logger.warn(`[CORS] Origine rejetée: ${origin}`);
-      callback(new Error('Origine non autorisée par la politique CORS'));
+      callback(new Error('Origine non autorisee par la politique CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  // CORRECTION CRITIQUE: Suppression de 'x-admin-password' pour bloquer la backdoor statique
   allowedHeaders: [
     'Content-Type', 
     'Authorization', 
@@ -82,7 +89,6 @@ const corsOptions = {
   ],
 };
 
-// Activation du CORS et gestion automatique des requêtes OPTIONS (Preflight)
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
@@ -93,33 +99,39 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'"],
-      // Ajout de blob: pour les previews React et *.cloudinary.com pour tous les sous-domaines
       imgSrc: ["'self'", "data:", "blob:", "https://res.cloudinary.com", "https://*.cloudinary.com"],
-      connectSrc: ["'self'", ...allowedOriginsList], // Injection du tableau dynamique
+      connectSrc: ["'self'", ...allowedOriginsList],
     },
   },
   crossOriginEmbedderPolicy: false,
 }));
 
+// Application du limiteur de requêtes sur les routes API
 app.use('/api/', apiLimiter);
 
+// Parseurs avec limitation stricte de taille
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 app.use(cookieParser());
 
+// Protections anti-injections et pollution
 app.use(hpp());
 app.use(mongoSanitize({
   replaceWith: '_',
   onSanitize: ({ req, key }) => {
-    logger.warn(`[SANITIZE] Champ suspect nettoyé: ${key} - IP: ${req.ip} - RequestID: ${req.id}`);
+    logger.warn(`[SANITIZE] Champ suspect nettoye: ${key} - IP: ${req.ip} - RequestID: ${req.id}`);
   }
 }));
 app.use(sanitizationMiddleware);
 
+// Route de base
 app.get('/', (req, res) => {
-  res.status(200).send('Yély API (Iron Dome) is running');
+  res.status(200).send('Yely API (Iron Dome) is running');
 });
 
+// ==========================================
+// ENREGISTREMENT DES ROUTES (VERSIONING)
+// ==========================================
 const API_V1_PREFIX = '/api/v1';
 
 app.use(`${API_V1_PREFIX}/health`, healthRoutes);
@@ -132,27 +144,24 @@ app.use(`${API_V1_PREFIX}/subscriptions`, subscriptionRoutes);
 app.use(`${API_V1_PREFIX}/subscription`, subscriptionRoutes); 
 
 app.use(`${API_V1_PREFIX}/admin`, adminRoutes);
-app.use(`${API_V1_PREFIX}/notifications`, require('./routes/notificationRoutes'));
-app.use(`${API_V1_PREFIX}/reports`, require('./routes/reportRoutes'));
+app.use(`${API_V1_PREFIX}/notifications`, notificationRoutes);
+app.use(`${API_V1_PREFIX}/reports`, reportRoutes);
 app.use(`${API_V1_PREFIX}/pois`, poiRoutes);
-
-// INTÉGRATION DU MODULE AGENT (Yély Agent PWA)
 app.use(`${API_V1_PREFIX}/agents`, agentRoutes);
 
-// ==========================================
 // MODULE E-COMMERCE (MARKETPLACE)
-// ==========================================
-app.use(`${API_V1_PREFIX}/products`, require('./routes/productRoutes'));
-app.use(`${API_V1_PREFIX}/orders`, require('./routes/orderRoutes'));
-app.use(`${API_V1_PREFIX}/ledger`, require('./routes/ledgerRoutes'));
+app.use(`${API_V1_PREFIX}/products`, productRoutes);
+app.use(`${API_V1_PREFIX}/orders`, orderRoutes);
+app.use(`${API_V1_PREFIX}/ledger`, ledgerRoutes);
 
-
-
+// 404 Fallback
 app.use((req, res) => {
-  logger.warn(`[404] Endpoint non trouvé: ${req.method} ${req.url} - RequestID: ${req.id}`);
-  res.status(404).json({ success: false, message: "La ressource demandée est introuvable." });
+  logger.warn(`[404] Endpoint non trouve: ${req.method} ${req.url} - RequestID: ${req.id}`);
+  res.status(404).json({ success: false, message: "La ressource demandee est introuvable." });
 });
 
+// Gestionnaire d'erreurs global en bout de chaîne
 app.use(errorHandler);
 
 module.exports = app;
+  
