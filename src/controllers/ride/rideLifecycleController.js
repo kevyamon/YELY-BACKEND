@@ -279,7 +279,7 @@ const getCurrentRide = async (req, res, next) => {
       status: { $in: ['searching', 'negotiating', 'accepted', 'arrived', 'in_progress'] }
     };
 
-    if (req.user.role === 'rider') {
+    if (req.user.role === 'rider' || req.user.role === 'seller') {
       query.rider = req.user._id;
     } else if (req.user.role === 'driver') {
       query.driver = req.user._id;
