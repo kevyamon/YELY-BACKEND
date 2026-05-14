@@ -38,7 +38,8 @@ exports.createOrder = async (req, res, next) => {
     }
 
     // CALCUL DE LIVRAISON (Forfait Ville: 100F base + 50F par vendeur extra, max 300F)
-    const uniqueSellers = new Set(items.map(item => item.sellerId.toString()));
+    // CALCUL DE LIVRAISON (Forfait Ville: 100F base + 50F par vendeur extra, max 300F)
+    const uniqueSellers = new Set(items.map(item => (item.sellerId || sellerId).toString()));
     const nbSellers = uniqueSellers.size;
     
     let deliveryPrice = 100 + (nbSellers - 1) * 50;

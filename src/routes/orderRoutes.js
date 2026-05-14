@@ -9,10 +9,10 @@ const router = express.Router();
 
 router.use(protect);
 
-// Routes Client (Passager)
-router.post('/', authorize('client', 'seller', 'admin'), orderController.createOrder);
-router.get('/my-orders', authorize('rider'), orderController.getMyOrders);
-router.get('/:id', protect, orderController.getOrder);
+// Routes Client (Passager/Shopper)
+router.post('/', authorize('client', 'seller', 'rider', 'driver', 'admin'), orderController.createOrder);
+router.get('/my-orders', authorize('client', 'seller', 'rider', 'driver', 'admin'), orderController.getMyOrders);
+router.get('/:id', orderController.getOrder);
 
 // Routes Vendeur
 router.get('/seller-orders', authorize('seller', 'admin'), orderController.getSellerOrders);
