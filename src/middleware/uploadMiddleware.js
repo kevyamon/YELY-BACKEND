@@ -29,6 +29,7 @@ const upload = multer({
 const uploadSingle = upload.single('proofImage');
 const uploadProfilePic = upload.single('profilePicture');
 const uploadReportCaptures = upload.array('captures', 3);
+const uploadProductImages = upload.array('images', 10);
 
 const validateFileSignature = (req, res, next) => {
   const files = req.file ? [req.file] : (req.files || []);
@@ -80,6 +81,7 @@ const validateFileSignature = (req, res, next) => {
 module.exports = { 
   uploadSingle, 
   uploadProfilePic, 
-  uploadReportCaptures, 
+  uploadReportCaptures,
+  uploadProductImages,
   validateFileSignature 
 };

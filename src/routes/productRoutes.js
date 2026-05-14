@@ -4,6 +4,7 @@
 const express = require('express');
 const productController = require('../controllers/productController');
 const { protect, authorize } = require('../middleware/authMiddleware');
+const { uploadProductImages, validateFileSignature } = require('../middleware/uploadMiddleware');
 
 const router = express.Router();
 
@@ -17,12 +18,16 @@ router.use(protect);
 router.post(
   '/', 
   authorize('seller', 'admin'), 
+  uploadProductImages,
+  validateFileSignature,
   productController.createProduct
 );
 
 router.patch(
   '/:id', 
   authorize('seller', 'admin'), 
+  uploadProductImages,
+  validateFileSignature,
   productController.updateProduct
 );
 

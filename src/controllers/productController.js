@@ -5,11 +5,11 @@
 const Product = require('../models/Product');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
+const cloudinary = require('../config/cloudinary');
+const fs = require('fs');
 
 /**
  * @desc    Récupérer tous les produits (avec filtres optionnels)
- * @route   GET /api/v1/products
- * @access  Public
  */
 exports.getAllProducts = async (req, res, next) => {
   try {
@@ -38,8 +38,6 @@ exports.getAllProducts = async (req, res, next) => {
 
 /**
  * @desc    Récupérer un produit par ID
- * @route   GET /api/v1/products/:id
- * @access  Public
  */
 exports.getProduct = async (req, res, next) => {
   try {
@@ -60,16 +58,32 @@ exports.getProduct = async (req, res, next) => {
 
 /**
  * @desc    Créer un produit
- * @route   POST /api/v1/products
- * @access  Private (Seller/Admin)
  */
 exports.createProduct = async (req, res, next) => {
   try {
-    // Force le vendeur à être l'utilisateur connecté
     req.body.seller = req.user._id;
+    
+    // Gestion des images
+    const imageUrls = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const result = await cloudinary.uploader.upload(file.path, {
+          folder: 'yely/products',
+          resource_type: 'auto'
+        });
+        imageUrls.push(result.secure_url);
+        // Supprimer le fichier temporaire
+        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+      }
+    }
+
+    // Le backend supporte 'image' (unique) et 'images' (tableau) pour la compatibilité
+    if (imageUrls.length > 0) {
+      req.body.images = imageUrls;
+      req.body.image = imageUrls[0]; // Image principale
+    }
 
     const product = await Product.create(req.body);
-
     logger.info(`[MARKETPLACE] Nouveau produit créé par ${req.user.email}: ${product.name}`);
 
     res.status(201).json({
@@ -77,26 +91,46 @@ exports.createProduct = async (req, res, next) => {
       data: product
     });
   } catch (error) {
+    // Nettoyage en cas d'erreur
+    if (req.files) {
+      req.files.forEach(f => { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+    }
     next(error);
   }
 };
 
 /**
  * @desc    Mettre à jour un produit
- * @route   PATCH /api/v1/products/:id
- * @access  Private (Owner Seller/Admin)
  */
 exports.updateProduct = async (req, res, next) => {
   try {
     let product = await Product.findById(req.params.id);
+    if (!product) return next(new AppError('Produit introuvable', 404));
 
-    if (!product) {
-      return next(new AppError('Produit introuvable', 404));
+    if (product.seller.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return next(new AppError('Non autorisé', 403));
     }
 
-    // Vérifier la propriété (sauf si admin)
-    if (product.seller.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
-      return next(new AppError('Vous n\'êtes pas autorisé à modifier ce produit', 403));
+    // Gestion des nouvelles images
+    const newImageUrls = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const result = await cloudinary.uploader.upload(file.path, {
+          folder: 'yely/products',
+        });
+        newImageUrls.push(result.secure_url);
+        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+      }
+    }
+
+    // Fusionner avec les images existantes conservées
+    let existingImages = req.body.existingImages || [];
+    if (typeof existingImages === 'string') existingImages = [existingImages];
+    
+    const finalImages = [...existingImages, ...newImageUrls];
+    if (finalImages.length > 0) {
+      req.body.images = finalImages;
+      req.body.image = finalImages[0];
     }
 
     product = await Product.findByIdAndUpdate(req.params.id, req.body, {
@@ -104,11 +138,9 @@ exports.updateProduct = async (req, res, next) => {
       runValidators: true
     });
 
-    res.status(200).json({
-      success: true,
-      data: product
-    });
+    res.status(200).json({ success: true, data: product });
   } catch (error) {
+    if (req.files) req.files.forEach(f => { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); });
     next(error);
   }
 };
