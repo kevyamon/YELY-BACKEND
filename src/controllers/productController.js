@@ -102,11 +102,19 @@ exports.createProduct = async (req, res, next) => {
     }
 
     const product = await Product.create(req.body);
+    const populatedProduct = await Product.findById(product._id).populate('seller', 'name profilePicture rating');
+    
+    // TEMPS RÉEL
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('product_created', populatedProduct);
+    }
+
     logger.info(`[MARKETPLACE] Nouveau produit créé par ${req.user.email}: ${product.name}`);
 
     res.status(201).json({
       success: true,
-      data: product
+      data: populatedProduct
     });
   } catch (error) {
     // Nettoyage en cas d'erreur
@@ -154,7 +162,11 @@ exports.updateProduct = async (req, res, next) => {
     product = await Product.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
       runValidators: true
-    });
+    }).populate('seller', 'name profilePicture rating');
+
+    // TEMPS RÉEL
+    const io = req.app.get('io');
+    if (io) io.emit('product_updated', product);
 
     res.status(200).json({ success: true, data: product });
   } catch (error) {
@@ -182,10 +194,16 @@ exports.toggleSoldOut = async (req, res, next) => {
 
     product.isSoldOut = !product.isSoldOut;
     await product.save();
+    
+    const populatedProduct = await Product.findById(product._id).populate('seller', 'name profilePicture rating');
+
+    // TEMPS RÉEL
+    const io = req.app.get('io');
+    if (io) io.emit('product_updated', populatedProduct);
 
     res.status(200).json({
       success: true,
-      data: product
+      data: populatedProduct
     });
   } catch (error) {
     next(error);
@@ -209,7 +227,12 @@ exports.deleteProduct = async (req, res, next) => {
       return next(new AppError('Non autorisé', 403));
     }
 
+    const productId = product._id;
     await product.deleteOne();
+
+    // TEMPS RÉEL
+    const io = req.app.get('io');
+    if (io) io.emit('product_deleted', productId);
 
     res.status(200).json({
       success: true,
