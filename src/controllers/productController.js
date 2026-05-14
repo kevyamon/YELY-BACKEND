@@ -37,6 +37,24 @@ exports.getAllProducts = async (req, res, next) => {
 };
 
 /**
+ * @desc    Récupérer les produits du vendeur connecté
+ */
+exports.getMyProducts = async (req, res, next) => {
+  try {
+    const products = await Product.find({ seller: req.user._id })
+      .sort('-createdAt');
+
+    res.status(200).json({
+      success: true,
+      count: products.length,
+      data: products
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * @desc    Récupérer un produit par ID
  */
 exports.getProduct = async (req, res, next) => {
