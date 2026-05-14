@@ -193,6 +193,32 @@ exports.getSellerOrders = async (req, res, next) => {
   } catch (error) { next(error); }
 };
 
+exports.cancelOrder = async (req, res, next) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return next(new AppError('Commande introuvable', 404));
+
+    if (order.status !== 'pending') {
+      return next(new AppError('Impossible d\'annuler une commande déjà confirmée par le vendeur.', 400));
+    }
+
+    order.status = 'cancelled';
+    order.cancelledAt = Date.now();
+    order.history.push({ status: 'cancelled', comment: 'Annulée par le client', timestamp: Date.now() });
+    await order.save();
+
+    const io = req.app.get('socketio');
+    if (io) {
+      io.to(order.seller.toString()).emit('order_updated', order);
+      io.to(order.customer.toString()).emit('order_updated', order);
+    }
+    
+    await sendNotification(order.seller, 'Commande annulée ⚠️', `Le client a annulé sa commande #${order._id.toString().slice(-6)}`, 'ORDER_CANCELLED');
+
+    res.status(200).json({ success: true, data: order });
+  } catch (error) { next(error); }
+};
+
 exports.getOrder = async (req, res, next) => {
   try {
     const order = await Order.findById(req.params.id).populate('customer seller driver');
