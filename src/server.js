@@ -18,7 +18,6 @@ const startRideWorker = require('./workers/rideWorker');
 const startCloudinaryCleanupWorker = require('./workers/cloudinaryCleanupWorker');
 const { env } = require('./config/env');
 const logger = require('./config/logger');
-const notificationService = require('./services/notificationService');
 
 const server = http.createServer(app);
 
@@ -27,7 +26,7 @@ const checkSocketRateLimit = async (userId) => {
   const now = Date.now();
   const lastUpdate = await redis.get(key);
   
-  if (lastUpdate && now - parseInt(lastUpdate) < 1000) return false; 
+  if (lastUpdate && now - Number(lastUpdate) < 1000) return false; 
   
   await redis.set(key, now, 'EX', 60);
   return true;
@@ -57,17 +56,16 @@ io.adapter(createAdapter(redis.pubClient, redis.subClient));
 
 app.set('socketio', io);
 app.set('redis', redis);
-notificationService.setIo(io);
 
 startRideWorker(io);
 startCloudinaryCleanupWorker();
 
 const getDistKm = (lat1, lon1, lat2, lon2) => {
   const R = 6371; 
-  const dLat = (lat2-lat1) * Math.PI/180;
-  const dLon = (lon2-lon1) * Math.PI/180; 
-  const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2) * Math.sin(dLon/2); 
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180; 
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2); 
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
 io.use(async (socket, next) => {
@@ -78,17 +76,12 @@ io.use(async (socket, next) => {
     const decoded = jwt.verify(token, env.JWT_SECRET);
     
     const cacheKey = `auth:user:${decoded.userId}`;
-    let user;
     const cachedUser = await redis.get(cacheKey);
+    
+    const user = cachedUser ? JSON.parse(cachedUser) : await User.findById(decoded.userId).select('_id role isBanned currentLocation isDeleted').lean();
 
-    if (cachedUser) {
-      user = JSON.parse(cachedUser);
-    } else {
-      user = await User.findById(decoded.userId)
-        .select('_id role isBanned currentLocation isDeleted') 
-        .lean();
-      
-      if (user) await redis.setex(cacheKey, 900, JSON.stringify(user)).catch(() => {});
+    if (!cachedUser && user) {
+      await redis.setex(cacheKey, 900, JSON.stringify(user)).catch(() => {});
     }
     
     if (!user || user.isBanned || user.isDeleted) return next(new Error('AUTH_REJECTED'));
@@ -111,14 +104,13 @@ io.on('connection', (socket) => {
   
   socket.join(user._id.toString());
   if (user.role === 'driver') socket.join('drivers');
-  
-  // CORRECTION SENIOR : Ajout de la salle admins pour le ciblage chirurgical
   if (user.role === 'admin' || user.role === 'superadmin') socket.join('admins');
 
   socket.on('update_location', async (rawData) => {
     const now = Date.now();
-    const isDev = process.env.NODE_ENV !== 'production';
+    const isDev = env.NODE_ENV !== 'production';
 
+    // Anti-Zombie / Rolling session check
     if (now - socket.lastDbCheck > 300000) { 
       socket.lastDbCheck = now;
       try {
@@ -135,10 +127,7 @@ io.on('connection', (socket) => {
     }
 
     const parseResult = coordsSchema.safeParse(rawData);
-    if (!parseResult.success) {
-      if (isDev) console.error('[SOCKET] Erreur validation position:', parseResult.error);
-      return; 
-    }
+    if (!parseResult.success) return; 
     const coords = parseResult.data;
 
     const isAllowed = await checkSocketRateLimit(user._id.toString());
@@ -146,28 +135,26 @@ io.on('connection', (socket) => {
 
     const timeDiffSeconds = (now - socket.lastLocTime) / 1000;
     
+    // Anti-Spoofing
     if (socket.isFirstLocation) {
       socket.isFirstLocation = false;
     } else if (timeDiffSeconds > 0) { 
       const [prevLng, prevLat] = socket.lastCoords;
       const distanceKm = getDistKm(prevLat, prevLng, coords.latitude, coords.longitude);
-      
       const effectiveTimeDiff = Math.max(timeDiffSeconds, 1);
       const speedKmH = distanceKm / (effectiveTimeDiff / 3600);
 
-      if (speedKmH > 300) {
-        if (!isDev) {
-          socket.spoofStrikes += 1;
-          if (socket.spoofStrikes >= 5) {
-            if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
-            socket.emit('force_disconnect', { reason: 'SPOOFING_DETECTED' });
-            socket.disconnect(true);
-            return;
-          }
-          socket.lastLocTime = now; 
-          socket.lastCoords = [coords.longitude, coords.latitude]; 
-          return; 
+      if (speedKmH > 300 && !isDev) {
+        socket.spoofStrikes += 1;
+        if (socket.spoofStrikes >= 5) {
+          if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
+          socket.emit('force_disconnect', { reason: 'SPOOFING_DETECTED' });
+          socket.disconnect(true);
+          return;
         }
+        socket.lastLocTime = now; 
+        socket.lastCoords = [coords.longitude, coords.latitude]; 
+        return; 
       } else {
         socket.spoofStrikes = 0;
       }
@@ -177,21 +164,32 @@ io.on('connection', (socket) => {
     socket.lastCoords = [coords.longitude, coords.latitude];
 
     try {
-      // PILLIER SCALABILITE : On ne met plus à jour la DB à chaque seconde.
-      // La position est déjà dans Redis (geoadd plus bas) pour le dispatch.
-      // On pourrait ajouter un sync périodique ici si nécessaire (ex: toutes les 5 min).
-
       if (user.role === 'driver') {
+        // Mise a jour de la position sans ecraser la TTL globale
         await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());
-        await redis.expire('active_drivers', 120);
 
-        const activeRide = await Ride.findOne({
-          driver: user._id,
-          status: { $in: ['accepted', 'in_progress'] }
-        }).select('rider').lean();
+        // OPTIMISATION CRITIQUE : Cache du passager (rider) pour epargner MongoDB
+        const rideCacheKey = `driver:${user._id}:active_rider`;
+        let riderId = await redis.get(rideCacheKey);
 
-        if (activeRide) {
-          io.to(activeRide.rider.toString()).emit('driver_location_update', {
+        if (!riderId) {
+          const activeRide = await Ride.findOne({
+            driver: user._id,
+            status: { $in: ['accepted', 'in_progress'] }
+          }).select('rider').lean();
+
+          if (activeRide) {
+            riderId = activeRide.rider.toString();
+            // On cache la relation Chauffeur-Client pendant 30 secondes
+            await redis.setex(rideCacheKey, 30, riderId);
+          } else {
+            // Pour eviter de spammer la DB meme si pas de course, on met un cache vide court (5s)
+            await redis.setex(rideCacheKey, 5, 'NONE');
+          }
+        }
+
+        if (riderId && riderId !== 'NONE') {
+          io.to(riderId).emit('driver_location_update', {
             latitude: coords.latitude,
             longitude: coords.longitude,
             heading: coords.heading || 0,
@@ -226,3 +224,4 @@ const startServer = async () => {
 };
 
 startServer();
+                              
