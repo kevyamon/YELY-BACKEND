@@ -108,6 +108,35 @@ exports.updateOrderStatus = async (req, res, next) => {
     if (status === 'confirmed') {
       order.confirmedAt = Date.now();
       await sendNotification(order.customer._id, 'Commande confirmée ✅', `${order.seller.name} prépare votre commande.`, 'ORDER_UPDATE', { orderId: order._id });
+
+      // --- LOGIQUE DE DISPATCH LIVREUR (TRICHE SUR LES RIDES) ---
+      try {
+        const rideLifecycleService = require('../services/ride/rideLifecycleService');
+        const redisClient = req.app.get('redis');
+
+        const deliveryData = {
+          origin: {
+            address: order.seller.address || 'Point de retrait vendeur',
+            coordinates: order.seller.currentLocation.coordinates
+          },
+          destination: {
+            address: order.shippingAddress.address,
+            coordinates: order.shippingAddress.coordinates
+          },
+          forfait: 'STANDARD',
+          passengersCount: 1,
+          type: 'DELIVERY', // Type spécial pour distinguer des taxis
+          orderId: order._id // Référence croisée
+        };
+
+        const { ride } = await rideLifecycleService.createRideRequest(order.customer._id, deliveryData, redisClient);
+        
+        // On lie la livraison à la commande
+        order.deliveryRideId = ride._id;
+        logger.info(`[MARKETPLACE DISPATCH] Livraison créée pour commande ${order._id} : Ride ${ride._id}`);
+      } catch (dispatchError) {
+        logger.error(`[MARKETPLACE DISPATCH] Erreur lors de la création de la livraison : ${dispatchError.message}`);
+      }
     } 
     else if (status === 'rejected') {
       await sendNotification(order.customer._id, 'Commande refusée ❌', `${order.seller.name} ne peut pas honorer votre commande : ${comment || 'Indisponible'}`, 'ORDER_UPDATE', { orderId: order._id });
