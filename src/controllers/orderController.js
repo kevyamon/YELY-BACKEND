@@ -1,4 +1,5 @@
 // src/controllers/orderController.js
+const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
 const User = require('../models/User');
@@ -184,7 +185,10 @@ exports.getMyOrders = async (req, res, next) => {
 
 exports.getSellerOrders = async (req, res, next) => {
   try {
-    const orders = await Order.find({ seller: req.user._id }).sort('-createdAt').populate('customer driver');
+    const sellerId = new mongoose.Types.ObjectId(req.user._id);
+    logger.info(`[MARKETPLACE] Fetching orders for seller: ${sellerId}`);
+    const orders = await Order.find({ seller: sellerId }).sort('-createdAt').populate('customer driver');
+    logger.info(`[MARKETPLACE] Orders found for seller ${sellerId}: ${orders.length}`);
     res.status(200).json({ success: true, data: orders });
   } catch (error) { next(error); }
 };
