@@ -1,13 +1,11 @@
 // src/services/notificationService.js
-const { Expo } = require('expo-server-sdk');
+const admin = require('../config/firebase');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const logger = require('../config/logger');
 
-const expo = new Expo();
-
 /**
- * @desc Envoie une notification (Push + Persistance DB)
+ * @desc Envoie une notification (Push Firebase + Persistance DB)
  */
 exports.sendNotification = async (userId, title, body, type = 'GENERAL', data = {}) => {
   try {
@@ -20,23 +18,28 @@ exports.sendNotification = async (userId, title, body, type = 'GENERAL', data = 
       metadata: data
     });
 
-    // 2. Récupération du token et envoi Push
+    // 2. Récupération du token et envoi Push via Firebase
     const user = await User.findById(userId).select('+fcmToken');
-    if (user && user.fcmToken && Expo.isExpoPushToken(user.fcmToken)) {
-      const messages = [{
-        to: user.fcmToken,
-        sound: 'default',
-        title,
-        body,
-        data: { ...data, type, notificationId: newNotification._id },
-        priority: 'high',
-      }];
+    
+    if (user && user.fcmToken) {
+      const message = {
+        notification: {
+          title: title,
+          body: body,
+        },
+        data: {
+          ...data,
+          type,
+          notificationId: newNotification._id.toString(),
+          click_action: 'FLUTTER_NOTIFICATION_CLICK', // Standard pour le mobile
+        },
+        token: user.fcmToken,
+      };
 
-      const chunks = expo.chunkPushNotifications(messages);
-      for (const chunk of chunks) {
-        await expo.sendPushNotificationsAsync(chunk);
-      }
-      logger.info(`[PUSH] Notification envoyee a ${userId}`);
+      await admin.messaging().send(message);
+      logger.info(`[PUSH FIREBASE] Notification envoyee a ${userId}`);
+    } else {
+      logger.warn(`[PUSH] Aucun token Firebase valide pour ${userId}, persistance DB seule.`);
     }
 
     return newNotification;
