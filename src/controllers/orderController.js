@@ -38,10 +38,21 @@ exports.createOrder = async (req, res, next) => {
     }
 
     const sellerCoords = seller.currentLocation?.coordinates || [0, 0];
-    const buyerCoords = shippingAddress.coordinates;
-    const distanceKm = calculateDistance(sellerCoords, buyerCoords);
-    const deliveryPrice = calculateDeliveryPrice(distanceKm);
+    const buyerCoords = (shippingAddress && shippingAddress.coordinates) || [0, 0];
+    
+    let distanceKm = 0;
+    let deliveryPrice = 100; // Prix de base minimal
+
+    if (sellerCoords[0] !== 0 && buyerCoords[0] !== 0) {
+      distanceKm = calculateDistance(sellerCoords, buyerCoords);
+      deliveryPrice = calculateDeliveryPrice(distanceKm);
+    }
+
     const totalPrice = itemsPrice + deliveryPrice;
+    
+    if (process.env.NODE_ENV === 'development') {
+      logger.info(`[ORDER] Calc: Dist=${distanceKm.toFixed(2)}km, Delivery=${deliveryPrice}F, Total=${totalPrice}F`);
+    }
 
     const order = await Order.create({
       customer: req.user._id,
