@@ -37,24 +37,18 @@ exports.createOrder = async (req, res, next) => {
       });
     }
 
-    // CALCUL DE LIVRAISON (Bank Grade Precision)
-    // On réutilise la variable 'seller' déjà déclarée plus haut
-    if (!seller || !seller.currentLocation?.coordinates) {
-      return next(new AppError('Position du vendeur introuvable. Livraison impossible.', 400));
-    }
-
-    const sellerCoords = seller.currentLocation.coordinates;
-    const buyerCoords = (shippingAddress && shippingAddress.coordinates) || [0, 0];
+    // CALCUL DE LIVRAISON (Forfait Ville: 100F base + 50F par vendeur extra, max 300F)
+    const uniqueSellers = new Set(items.map(item => item.sellerId.toString()));
+    const nbSellers = uniqueSellers.size;
     
-    if (buyerCoords[0] === 0 || buyerCoords[1] === 0) {
-      return next(new AppError('Votre position GPS est requise pour calculer la livraison.', 400));
-    }
+    let deliveryPrice = 100 + (nbSellers - 1) * 50;
+    
+    // Plafond de sécurité (Max 300F)
+    if (deliveryPrice > 300) deliveryPrice = 300;
 
-    const distanceKm = calculateDistance(sellerCoords, buyerCoords);
-    const deliveryPrice = calculateDeliveryPrice(distanceKm);
     const totalPrice = itemsPrice + deliveryPrice;
     
-    logger.info(`[ORDER] Final Calc: Dist=${distanceKm.toFixed(2)}km, Delivery=${deliveryPrice}F`);
+    logger.info(`[ORDER] Calc: Vendeurs=${nbSellers}, Livraison=${deliveryPrice}F, Total=${totalPrice}F`);
 
     const order = await Order.create({
       customer: req.user._id,
