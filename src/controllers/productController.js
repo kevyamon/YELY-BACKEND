@@ -141,25 +141,42 @@ exports.updateProduct = async (req, res, next) => {
     const newImageUrls = [];
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
-        const result = await cloudinary.uploader.upload(file.path, {
-          folder: 'yely/products',
-        });
-        newImageUrls.push(result.secure_url);
-        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        try {
+          const result = await cloudinary.uploader.upload(file.path, {
+            folder: 'yely/products',
+          });
+          newImageUrls.push(result.secure_url);
+        } catch (uploadErr) {
+          logger.error(`[CLOUDINARY] Upload error: ${uploadErr.message}`);
+        } finally {
+          if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        }
       }
     }
 
     // Fusionner avec les images existantes conservées
     let existingImages = req.body.existingImages || [];
-    if (typeof existingImages === 'string') existingImages = [existingImages];
+    if (typeof existingImages === 'string') {
+      existingImages = [existingImages];
+    } else if (!Array.isArray(existingImages)) {
+      existingImages = []; 
+    }
     
     const finalImages = [...existingImages, ...newImageUrls];
+
+    // Nettoyage de req.body pour ne garder que les champs du schéma
+    const updateData = { ...req.body };
+    delete updateData.existingImages;
+    delete updateData.images; // On a déjà finalImages
+    
     if (finalImages.length > 0) {
-      req.body.images = finalImages;
-      req.body.image = finalImages[0];
+      updateData.images = finalImages;
+      updateData.image = finalImages[0];
     }
 
-    product = await Product.findByIdAndUpdate(req.params.id, req.body, {
+    if (process.env.NODE_ENV === 'development') logger.info(`[MARKETPLACE] Updating product ${req.params.id} with:`, updateData);
+
+    product = await Product.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
       runValidators: true
     }).populate('seller', 'name profilePicture rating');
