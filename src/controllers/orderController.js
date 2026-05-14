@@ -37,22 +37,24 @@ exports.createOrder = async (req, res, next) => {
       });
     }
 
-    const sellerCoords = seller.currentLocation?.coordinates || [0, 0];
+    // CALCUL DE LIVRAISON (Bank Grade Precision)
+    // On réutilise la variable 'seller' déjà déclarée plus haut
+    if (!seller || !seller.currentLocation?.coordinates) {
+      return next(new AppError('Position du vendeur introuvable. Livraison impossible.', 400));
+    }
+
+    const sellerCoords = seller.currentLocation.coordinates;
     const buyerCoords = (shippingAddress && shippingAddress.coordinates) || [0, 0];
     
-    let distanceKm = 0;
-    let deliveryPrice = 100; // Prix de base minimal
-
-    if (sellerCoords[0] !== 0 && buyerCoords[0] !== 0) {
-      distanceKm = calculateDistance(sellerCoords, buyerCoords);
-      deliveryPrice = calculateDeliveryPrice(distanceKm);
+    if (buyerCoords[0] === 0 || buyerCoords[1] === 0) {
+      return next(new AppError('Votre position GPS est requise pour calculer la livraison.', 400));
     }
 
+    const distanceKm = calculateDistance(sellerCoords, buyerCoords);
+    const deliveryPrice = calculateDeliveryPrice(distanceKm);
     const totalPrice = itemsPrice + deliveryPrice;
     
-    if (process.env.NODE_ENV === 'development') {
-      logger.info(`[ORDER] Calc: Dist=${distanceKm.toFixed(2)}km, Delivery=${deliveryPrice}F, Total=${totalPrice}F`);
-    }
+    logger.info(`[ORDER] Final Calc: Dist=${distanceKm.toFixed(2)}km, Delivery=${deliveryPrice}F`);
 
     const order = await Order.create({
       customer: req.user._id,
