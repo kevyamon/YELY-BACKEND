@@ -12,6 +12,7 @@ router.use(protect);
 // Routes Client (Passager)
 router.post('/', authorize('rider'), orderController.createOrder);
 router.get('/my-orders', authorize('rider'), orderController.getMyOrders);
+router.get('/:id', orderController.getOrder);
 
 // Routes Vendeur
 router.get('/seller-orders', authorize('seller', 'admin'), orderController.getSellerOrders);
