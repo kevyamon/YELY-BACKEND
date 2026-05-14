@@ -4,6 +4,15 @@ const User = require('../models/User');
 const Notification = require('../models/Notification');
 const logger = require('../config/logger');
 
+let io;
+
+/**
+ * @desc Injecte l'instance Socket.io pour le temps reel
+ */
+exports.setIo = (socketio) => {
+  io = socketio;
+};
+
 /**
  * @desc Envoie une notification (Push Firebase + Persistance DB)
  */
@@ -42,6 +51,11 @@ exports.sendNotification = async (userId, title, body, type = 'GENERAL', data = 
       logger.warn(`[PUSH] Aucun token Firebase valide pour ${userId}, persistance DB seule.`);
     }
 
+    // 3. TEMPS RÉEL (In-App)
+    if (io) {
+      io.to(userId.toString()).emit('notification_received', newNotification);
+    }
+
     return newNotification;
   } catch (error) {
     logger.error(`[NOTIFICATION SERVICE] Erreur envoi: ${error.message}`);
@@ -78,6 +92,13 @@ exports.getNotificationsForUser = async (userId, page = 1) => {
  * @desc Marquer une notification comme lue
  */
 exports.markAsRead = async (userId, notificationId) => {
+  if (notificationId === 'all') {
+    return await Notification.updateMany(
+      { recipient: userId, isRead: false },
+      { isRead: true }
+    );
+  }
+
   return await Notification.findOneAndUpdate(
     { _id: notificationId, recipient: userId },
     { isRead: true },

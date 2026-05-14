@@ -72,21 +72,24 @@ exports.createOrder = async (req, res, next) => {
       io.to(sellerId.toString()).emit('new_order', populatedOrder);
     }
 
-    // NOTIFICATIONS
-    await sendNotification(
-      sellerId,
-      'Nouvelle commande ! 🛍️',
-      `Vous avez reçu une commande de ${(itemsPrice).toLocaleString()} F.`,
-      'NEW_ORDER',
-      { orderId: order._id.toString() }
-    );
+    // NOTIFICATIONS & EMAILS (Enveloppés pour éviter de bloquer la réponse client)
+    try {
+      await sendNotification(
+        sellerId,
+        'Nouvelle commande ! 🛍️',
+        `Vous avez reçu une commande de ${(itemsPrice).toLocaleString()} F.`,
+        'NEW_ORDER',
+        { orderId: order._id.toString() }
+      );
 
-    // EMAIL AU VENDEUR
-    await sendEmail({
-      email: seller.email,
-      subject: `[YELY] Nouvelle commande #${order._id.toString().slice(-6)}`,
-      message: `Vous avez reçu une nouvelle commande de ${req.user.name}. Connectez-vous sur votre dashboard vendeur pour la valider.`
-    });
+      await sendEmail({
+        email: seller.email,
+        subject: `[YELY] Nouvelle commande #${order._id.toString().slice(-6)}`,
+        message: `Vous avez reçu une nouvelle commande de ${req.user.name}. Connectez-vous sur votre dashboard vendeur pour la valider.`
+      });
+    } catch (sideEffectError) {
+      logger.error(`[ORDER SIDE-EFFECTS] Erreur non bloquante: ${sideEffectError.message}`);
+    }
 
     res.status(201).json({ success: true, data: populatedOrder });
   } catch (error) {

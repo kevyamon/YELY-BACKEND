@@ -18,6 +18,7 @@ const startRideWorker = require('./workers/rideWorker');
 const startCloudinaryCleanupWorker = require('./workers/cloudinaryCleanupWorker');
 const { env } = require('./config/env');
 const logger = require('./config/logger');
+const notificationService = require('./services/notificationService');
 
 const server = http.createServer(app);
 
@@ -56,6 +57,7 @@ io.adapter(createAdapter(redis.pubClient, redis.subClient));
 
 app.set('socketio', io);
 app.set('redis', redis);
+notificationService.setIo(io);
 
 startRideWorker(io);
 startCloudinaryCleanupWorker();
