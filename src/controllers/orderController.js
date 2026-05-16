@@ -110,8 +110,20 @@ exports.updateOrderStatus = async (req, res, next) => {
 
     // Transitions et Notifications
     if (status === 'confirmed') {
+      const isManualRetry = ['searching_delivery_retry', 'cancelled_no_driver'].includes(order.status);
+      
       order.confirmedAt = Date.now();
-      await sendNotification(order.customer._id, 'Commande confirmée ✅', `${order.seller.name} prépare votre commande.`, 'ORDER_UPDATE', { orderId: order._id });
+      order.deliveryRetryCount = 0; // Réinitialise les tentatives de relance automatique
+      
+      await sendNotification(
+        order.customer._id, 
+        'Recherche de livreur relancée 🔄', 
+        isManualRetry
+          ? `${order.seller.name} relance la recherche d'un livreur pour votre commande.`
+          : `${order.seller.name} prépare votre commande et recherche un livreur.`, 
+        'ORDER_UPDATE', 
+        { orderId: order._id }
+      );
 
       // --- LOGIQUE DE DISPATCH LIVREUR (TRICHE SUR LES RIDES) ---
       try {

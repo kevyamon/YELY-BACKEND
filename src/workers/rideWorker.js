@@ -28,6 +28,11 @@ const startRideWorker = (io) => {
           logger.info(`[WORKER] Fin definitive du temps de recherche pour la course : ${rideId}`);
           await rideLifecycleService.cancelSearchTimeout(io, rideId);
         }
+        else if (job.name === 'retry-delivery-search') {
+          const { orderId } = job.data;
+          logger.info(`[WORKER] Relance automatique de la recherche de livreur pour la commande : ${orderId}`);
+          await rideLifecycleService.retryDeliverySearch(io, orderId);
+        }
       } catch (error) {
         logger.error(`[WORKER ERROR] Job ${job.name} a echoue : ${error.message}`);
         throw error; 

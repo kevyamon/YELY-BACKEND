@@ -64,10 +64,12 @@ const orderSchema = new mongoose.Schema({
       'pending',      // Client a commandé
       'confirmed',    // Vendeur a validé
       'searching',    // En recherche de livreur (dispatch)
+      'searching_delivery_retry', // Recherche temporairement suspendue, en attente de relance
       'picked_up',    // Livreur a récupéré le colis
       'arrived',      // Livreur est proche du client (Geofencing)
       'delivered',    // Colis livré, cash encaissé
       'cancelled',    // Annulée par l'un des acteurs
+      'cancelled_no_driver', // Annulée automatiquement : aucun livreur disponible
       'rejected'      // Vendeur a refusé (rupture etc)
     ],
     default: 'pending'
@@ -84,6 +86,18 @@ const orderSchema = new mongoose.Schema({
   pickedUpAt: Date,
   deliveredAt: Date,
   cancelledAt: Date,
+
+  // Relance Dispatch
+  deliveryRetryCount: {
+    type: Number,
+    default: 0
+  },
+
+  deliveryRideId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Ride',
+    default: null
+  },
 
   // Lien avec la course VTC (pour réutiliser le dispatch/tracking)
   rideId: {

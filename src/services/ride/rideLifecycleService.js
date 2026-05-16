@@ -202,7 +202,7 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       throw new AppError('Traitement en cours, veuillez patienter.', 429);
     }
     lockAcquired = true;
-
+ 
     const existingRide = await Ride.findOne({
       rider: riderId,
       status: { $in: ['searching', 'negotiating', 'accepted', 'arrived', 'in_progress'] }
@@ -216,10 +216,10 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
         return { ride: existingRide, drivers: [] }; 
       }
     }
-
-    const { origin, destination, forfait, passengersCount } = rideData; 
+ 
+    const { origin, destination, forfait, passengersCount, type, orderId } = rideData; 
     const count = passengersCount || 1;
-
+ 
     const originCoords = [parseFloat(origin.coordinates[0]), parseFloat(origin.coordinates[1])];
     const destCoords = [parseFloat(destination.coordinates[0]), parseFloat(destination.coordinates[1])];
     
@@ -228,15 +228,15 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
     const enrichedDestAddress = await enrichAddressWithPOI(destination.address, destCoords, redisClient);
     
     logger.info(`[DISPATCH] Nouvelle demande. Depart: ${enrichedOriginAddress}`);
-
+ 
     const distance = await getRouteDistance(originCoords, destCoords);
-
+ 
     if (distance < 0.1) throw new AppError('Distance invalide.', 400);
-
+ 
     const pricingResult = await pricingService.generatePriceOptions(originCoords, destCoords, distance, count);
     
     const initialRadius = 1000;
-
+ 
     const ride = await Ride.create({
       rider: riderId,
       origin: { ...origin, address: enrichedOriginAddress, coordinates: originCoords },
@@ -248,7 +248,9 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       status: 'searching',
       rejectedDrivers: [],
       notifiedDrivers: [],
-      currentSearchRadius: initialRadius
+      currentSearchRadius: initialRadius,
+      type: type || 'RIDE',
+      orderId: orderId || null
     });
 
     const drivers = await dispatchToNearbyDrivers(ride, initialRadius);
@@ -423,12 +425,22 @@ const cancelSearchTimeout = async (io, rideId) => {
     ride.cancellationReason = 'Temps de recherche expire, aucun chauffeur trouve.';
     await ride.save();
     
+    const isDelivery = ride.type === 'DELIVERY';
+    
     io.to(ride.rider.toString()).emit('search_timeout', {
-      message: "Aucun chauffeur n'est disponible pour le moment."
+      message: isDelivery 
+        ? "Aucun livreur n'est disponible pour le moment."
+        : "Aucun chauffeur n'est disponible pour le moment."
     });
 
     notificationService.sendNotification(
-      ride.rider, "Recherche expiree", "Aucun chauffeur n'est disponible dans votre zone pour le moment.", "SEARCH_TIMEOUT", { rideId: ride._id.toString() }
+      ride.rider, 
+      "Recherche expiree", 
+      isDelivery 
+        ? "Aucun livreur n'est disponible dans votre zone pour le moment."
+        : "Aucun chauffeur n'est disponible dans votre zone pour le moment.", 
+      "SEARCH_TIMEOUT", 
+      { rideId: ride._id.toString() }
     ).catch(() => {});
     
     io.emit('ride_taken_by_other', { rideId }); 
@@ -440,6 +452,164 @@ const cancelSearchTimeout = async (io, rideId) => {
     } catch (error) {
       logger.warn(`[POI RELEASE ERROR] Echec lors de la destruction de la course : ${error.message}`);
     }
+
+    // --- LOGIQUE METIER OPTION B : RELANCE AUTOMATIQUE POUR LES LIVRAISONS DE COMMANDE ---
+    if (isDelivery && ride.orderId) {
+      try {
+        const Order = require('../../models/Order');
+        const order = await Order.findById(ride.orderId).populate('seller customer');
+        if (order && (order.status === 'confirmed' || order.status === 'searching')) {
+          const currentRetries = order.deliveryRetryCount || 0;
+          if (currentRetries < 2) {
+            // Relance de niveau 2 ou 3 (jusqu'à 3 tentatives au total)
+            order.deliveryRetryCount = currentRetries + 1;
+            order.status = 'searching_delivery_retry';
+            order.history.push({
+              status: 'searching_delivery_retry',
+              comment: `Recherche de livreur infructueuse (Tentative ${currentRetries + 1}/3). Nouvelle tentative automatique dans 2 minutes.`,
+              timestamp: Date.now()
+            });
+            await order.save();
+
+            logger.info(`[DELIVERY RETRY] Commande ${order._id} bascule en searching_delivery_retry. Tentative ${order.deliveryRetryCount}/3 dans 2 minutes.`);
+
+            // Notifier le vendeur
+            notificationService.sendNotification(
+              order.seller._id,
+              'Recherche de livreur infructueuse 🚴',
+              `Aucun livreur trouvé pour la commande #${order._id.toString().slice(-6)}. Yély relance automatiquement une nouvelle recherche dans 2 minutes.`,
+              'ORDER_UPDATE',
+              { orderId: order._id.toString() }
+            ).catch(() => {});
+
+            // Notifier le client
+            notificationService.sendNotification(
+              order.customer._id,
+              'Recherche de livreur en cours ⏳',
+              `Nous élargissons nos recherches pour trouver un livreur disponible pour votre commande chez ${order.seller.name}.`,
+              'ORDER_UPDATE',
+              { orderId: order._id.toString() }
+            ).catch(() => {});
+
+            // Émettre les événements socket en temps réel
+            if (io) {
+              io.to(order.seller._id.toString()).emit('order_updated', order);
+              io.to(order.customer._id.toString()).emit('order_updated', order);
+            }
+
+            // Planifier le job de retry dans 2 minutes
+            await cleanupQueue.add(
+              'retry-delivery-search',
+              { orderId: order._id },
+              { delay: 120000, removeOnComplete: true } // 2 minutes
+            );
+          } else {
+            // Échec final après 3 tentatives (initiale + 2 retries)
+            order.status = 'cancelled_no_driver';
+            order.cancelledAt = Date.now();
+            order.history.push({
+              status: 'cancelled_no_driver',
+              comment: 'Annulation automatique : Aucun livreur disponible après 3 tentatives de dispatch.',
+              timestamp: Date.now()
+            });
+            await order.save();
+
+            logger.warn(`[DELIVERY FAIL] Echec définitif après 3 tentatives pour la commande ${order._id}. Commande annulée.`);
+
+            // Notifier le vendeur
+            notificationService.sendNotification(
+              order.seller._id,
+              'Commande annulée ⚠️',
+              `La commande #${order._id.toString().slice(-6)} a été annulée car aucun livreur n'a pu être trouvé à proximité après 3 tentatives.`,
+              'ORDER_CANCELLED',
+              { orderId: order._id.toString() }
+            ).catch(() => {});
+
+            // Notifier le client
+            notificationService.sendNotification(
+              order.customer._id,
+              'Commande annulée 😔',
+              `Votre commande chez ${order.seller.name} a été annulée car aucun livreur n'est actuellement disponible dans votre zone.`,
+              'ORDER_CANCELLED',
+              { orderId: order._id.toString() }
+            ).catch(() => {});
+
+            if (io) {
+              io.to(order.seller._id.toString()).emit('order_updated', order);
+              io.to(order.customer._id.toString()).emit('order_updated', order);
+            }
+          }
+        }
+      } catch (orderRetryError) {
+        logger.error(`[DELIVERY RETRY ERROR] Erreur lors de la gestion du retry pour le ride ${rideId} : ${orderRetryError.message}`);
+      }
+    }
+  }
+};
+
+const retryDeliverySearch = async (io, orderId) => {
+  try {
+    const Order = require('../../models/Order');
+    const order = await Order.findById(orderId).populate('customer seller');
+    if (!order) {
+      logger.error(`[DELIVERY RETRY] Commande ${orderId} introuvable.`);
+      return;
+    }
+
+    // Ne relancer que si la commande est toujours en attente de retry
+    if (order.status !== 'searching_delivery_retry') {
+      logger.info(`[DELIVERY RETRY] Commande ${orderId} n'est plus en attente de retry (statut actuel: ${order.status}). Relance annulée.`);
+      return;
+    }
+
+    // Repasser en status 'confirmed'
+    order.status = 'confirmed';
+    order.history.push({
+      status: 'confirmed',
+      comment: `Relance automatique de la recherche de livreur (Tentative ${order.deliveryRetryCount + 1}/3)`,
+      timestamp: Date.now()
+    });
+    await order.save();
+
+    logger.info(`[DELIVERY RETRY] Relance de la recherche de livreur pour la commande ${order._id}`);
+
+    // Créer la nouvelle demande de livraison (Ride)
+    const deliveryData = {
+      origin: {
+        address: order.seller.address || 'Point de retrait vendeur',
+        coordinates: order.seller.currentLocation.coordinates
+      },
+      destination: {
+        address: order.shippingAddress.address,
+        coordinates: order.shippingAddress.coordinates
+      },
+      forfait: 'STANDARD',
+      passengersCount: 1,
+      type: 'DELIVERY',
+      orderId: order._id
+    };
+
+    const redis = require('../../config/redis');
+    const { ride } = await createRideRequest(order.customer._id, deliveryData, redis);
+    
+    order.deliveryRideId = ride._id;
+    await order.save();
+
+    // Notifier le vendeur et le client du démarrage de la nouvelle tentative
+    notificationService.sendNotification(
+      order.seller._id,
+      'Recherche de livreur relancée 🔄',
+      `Nous recherchons à nouveau un livreur pour votre commande #${order._id.toString().slice(-6)}.`,
+      'ORDER_UPDATE',
+      { orderId: order._id.toString() }
+    ).catch(() => {});
+
+    if (io) {
+      io.to(order.seller._id.toString()).emit('order_updated', order);
+      io.to(order.customer._id.toString()).emit('order_updated', order);
+    }
+  } catch (error) {
+    logger.error(`[DELIVERY RETRY PROCESS ERROR] Echec lors du traitement du retry pour la commande ${orderId} : ${error.message}`);
   }
 };
 
@@ -480,5 +650,6 @@ module.exports = {
   cancelSearchTimeout,
   releaseStuckNegotiations,
   dispatchToNearbyDrivers,
-  expandSearchRadius
+  expandSearchRadius,
+  retryDeliverySearch
 };
