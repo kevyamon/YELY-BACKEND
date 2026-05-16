@@ -738,7 +738,7 @@ const forceClearLedger = async (req, res) => {
       actor: req.user._id,
       action: 'FORCE_CLEAR_LEDGER',
       target: resultLedger._id,
-      details: `Réconciliation forcée de l'ardoise #${resultLedger._id.toString().slice(-6)} (Montant: ${resultLedger.amount} FG) pour le livreur ID: ${resultLedger.driver}. Raison: ${reason || 'non spécifiée'}`
+      details: `Réconciliation forcée de l'ardoise #${resultLedger._id.toString().slice(-6)} (Montant: ${resultLedger.amount} FCFA) pour le livreur ID: ${resultLedger.driver}. Raison: ${reason || 'non spécifiée'}`
     });
 
     return successResponse(res, resultLedger, "L'ardoise a été réconciliée de force avec succès.");

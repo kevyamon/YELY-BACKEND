@@ -229,7 +229,7 @@ const completeRideSession = async (driverId, rideId, io) => {
           notificationService.sendNotification(
             order.seller._id, 
             'Livraison effectuée ! 💰', 
-            `Le livreur ${order.driver?.name || 'Yély'} vous doit ${order.itemsPrice} FG pour la commande #${order._id.toString().slice(-6)}.`, 
+            `Le livreur ${order.driver?.name || 'Yély'} vous doit ${order.itemsPrice} FCFA pour la commande #${order._id.toString().slice(-6)}.`, 
             'ORDER_UPDATE', 
             { orderId: order._id.toString() }
           ).catch(() => {});

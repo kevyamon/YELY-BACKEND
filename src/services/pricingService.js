@@ -82,7 +82,7 @@ const generatePriceOptions = async (originCoords, destCoords, distanceKm, passen
         {
           label: 'PREMIUM',
           amount: premPrice,
-          description: 'Livraison express ou colis volumineux (max 300F)'
+          description: 'Livraison express ou colis volumineux (max 300 FCFA)'
         }
       ]
     };
