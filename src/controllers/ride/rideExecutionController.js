@@ -45,7 +45,7 @@ const startRide = async (req, res, next) => {
       throw new AppError('L\'identifiant de la course est manquant.', 400);
     }
 
-    const ride = await rideService.startRideSession(req.user._id, rideId);
+    const ride = await rideService.startRideSession(req.user._id, rideId, req.app.get('socketio'));
     
     req.app.get('socketio').to(ride.rider.toString()).emit('ride_started', { 
       rideId: ride._id, 

@@ -47,30 +47,66 @@ const detectZone = (coordinates) => {
 /**
  * Genere les 3 options de prix pour la negociation basees sur la matrice des Zones et le nombre de passagers
  */
-const generatePriceOptions = async (originCoords, destCoords, distanceKm, passengersCount = 1) => {
+const generatePriceOptions = async (originCoords, destCoords, distanceKm, passengersCount = 1, isDelivery = false) => {
   
-  // Securite validation entree
+  // Sécurisation validation entrée
   const count = Math.max(1, Math.min(4, Number(passengersCount) || 1));
 
-  // 1. Detecter les zones
+  if (isDelivery) {
+    // LOGIQUE DE LIVRAISON DE PROXIMITÉ (PETITE VILLE)
+    const dist = Number(distanceKm) || 1;
+    
+    // ECO (Tarif standard de base: 100F min + 30F par km), plafonné à 250F pour l'option de base
+    const ecoPrice = Math.min(250, Math.max(100, Math.round(100 + dist * 30)));
+    
+    // STANDARD (ECO + 25F), plafonné à 275F
+    const stdPrice = Math.min(275, ecoPrice + 25);
+    
+    // PREMIUM (ECO + 50F), plafonné à 300F (Garantie absolue du max de 300F)
+    const premPrice = Math.min(300, ecoPrice + 50);
+
+    return {
+      startZone: 'C',
+      endZone: 'C',
+      options: [
+        {
+          label: 'ECO',
+          amount: ecoPrice,
+          description: 'Livraison standard (économique)'
+        },
+        {
+          label: 'STANDARD',
+          amount: stdPrice,
+          description: 'Livraison prioritaire'
+        },
+        {
+          label: 'PREMIUM',
+          amount: premPrice,
+          description: 'Livraison express ou colis volumineux (max 300F)'
+        }
+      ]
+    };
+  }
+
+  // 1. Détecter les zones
   const startZone = detectZone(originCoords);
   const endZone = detectZone(destCoords);
 
-  // 2. Calculer le prix de base depuis la matrice (Prix par tete)
-  const basePricePerSeat = PRICE_MATRIX[startZone]?.[endZone] || 300; // 300 par defaut (Fallback)
+  // 2. Calculer le prix de base depuis la matrice (Prix par tête)
+  const basePricePerSeat = PRICE_MATRIX[startZone]?.[endZone] || 300; // 300 par défaut (Fallback)
 
-  // 3. Application de la regle du village : Le prix se multiplie strictement par le nombre de personnes
+  // 3. Application de la règle du village : Le prix se multiplie strictement par le nombre de personnes
   const totalBasePrice = basePricePerSeat * count;
 
-  // 4. Generation des 3 Tiers (Psychologie locale)
+  // 4. Génération des 3 Tiers (Psychologie locale)
   
-  // Option 1 : ECO (Le tarif normal par tete multiplie, juste le transport)
+  // Option 1 : ECO (Le tarif normal par tête multiplié, juste le transport)
   const ecoPrice = totalBasePrice;
 
-  // Option 2 : STANDARD (Depart immediat sans attendre de remplir, petit bonus)
+  // Option 2 : STANDARD (Départ immédiat sans attendre de remplir, petit bonus)
   const stdPrice = totalBasePrice + 100;
 
-  // Option 3 : PREMIUM (Urgence, deplacement avec bagages de marche, confort)
+  // Option 3 : PREMIUM (Urgence, déplacement avec bagages de marché, confort)
   const premPrice = totalBasePrice + 200;
 
   return {
@@ -85,7 +121,7 @@ const generatePriceOptions = async (originCoords, destCoords, distanceKm, passen
       {
         label: 'STANDARD',
         amount: stdPrice,
-        description: 'Depart rapide & prioritaire'
+        description: 'Départ rapide & prioritaire'
       },
       {
         label: 'PREMIUM',

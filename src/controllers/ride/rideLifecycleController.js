@@ -95,6 +95,46 @@ const cancelRide = async (req, res, next) => {
        ).catch(() => {});
     }
 
+    // --- ENVOI DES NOTIFICATIONS PUSH ET SOCKETS COUPLES DE L'ORDRE ---
+    if (ride.type === 'DELIVERY' && ride.orderId) {
+      const Order = require('../../models/Order');
+      Order.findById(ride.orderId).populate('customer seller driver')
+        .then(order => {
+          if (order) {
+            io.to(order.customer._id.toString()).emit('order_updated', order);
+            io.to(order.seller._id.toString()).emit('order_updated', order);
+            
+            if (req.user.role === 'rider' || req.user.role === 'seller') {
+              // Annulation par le client
+              notificationService.sendNotification(
+                order.seller._id,
+                "Commande annulée ⚠️",
+                `Le client a annulé sa commande #${order._id.toString().slice(-6)} et sa livraison.`,
+                "ORDER_CANCELLED",
+                { orderId: order._id.toString() }
+              ).catch(() => {});
+            } else if (req.user.role === 'driver') {
+              // Annulation par le chauffeur (Relance automatique du dispatch en cours)
+              notificationService.sendNotification(
+                order.customer._id,
+                "Recherche de livreur relancée 🔄",
+                `Votre livreur s'est désisté. Nous recherchons activement un autre livreur pour votre commande.`,
+                "ORDER_UPDATE",
+                { orderId: order._id.toString() }
+              ).catch(() => {});
+              
+              notificationService.sendNotification(
+                order.seller._id,
+                "Recherche de livreur relancée 🔄",
+                `Le livreur s'est désisté de la commande #${order._id.toString().slice(-6)}. La recherche d'un nouveau livreur a été relancée automatiquement.`,
+                "ORDER_UPDATE",
+                { orderId: order._id.toString() }
+              ).catch(() => {});
+            }
+          }
+        }).catch(err => logger.error(`[SOCKET ERROR] CancelRide Order find failed: ${err.message}`));
+    }
+
     if (ride.origin?.address) {
       await poiController.releasePendingPOI(ride.origin.address, io);
     }
@@ -226,6 +266,26 @@ const finalizeRide = async (req, res, next) => {
       notificationService.sendNotification(
         driver._id, "Course acceptee", "Le passager a valide votre prix. En route !", "PROPOSAL_ACCEPTED", { rideId: result.ride._id.toString() }
       ).catch(() => {});
+
+      // --- EMETTRE LES EVENTS TEMPS REEL DE L'ORDRE ---
+      if (result.ride.type === 'DELIVERY' && result.ride.orderId) {
+        const Order = require('../../models/Order');
+        Order.findById(result.ride.orderId).populate('customer seller driver')
+          .then(order => {
+            if (order) {
+              io.to(order.customer._id.toString()).emit('order_updated', order);
+              io.to(order.seller._id.toString()).emit('order_updated', order);
+              
+              notificationService.sendNotification(
+                order.seller._id, 
+                "Livreur attribué 🚴", 
+                `Le livreur ${driver.name} a accepté la livraison de la commande #${order._id.toString().slice(-6)}. Il arrive pour récupérer le colis.`, 
+                "ORDER_UPDATE", 
+                { orderId: order._id.toString() }
+              ).catch(() => {});
+            }
+          }).catch(err => logger.error(`[SOCKET ERROR] FinalizeRide Order find failed: ${err.message}`));
+      }
 
       return successResponse(res, { 
         status: 'accepted', 

@@ -233,7 +233,7 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
  
     if (distance < 0.1) throw new AppError('Distance invalide.', 400);
  
-    const pricingResult = await pricingService.generatePriceOptions(originCoords, destCoords, distance, count);
+    const pricingResult = await pricingService.generatePriceOptions(originCoords, destCoords, distance, count, type === 'DELIVERY');
     
     const initialRadius = 1000;
  
@@ -287,6 +287,59 @@ const cancelRideAction = async (rideId, userId, userRole, reason) => {
 
   if (ride.driver) {
     await userRepository.updateDriverAvailability(ride.driver, true);
+  }
+
+  // --- COUPLAGE D'ANNULATION LIVRAISONS ---
+  if (ride.type === 'DELIVERY' && ride.orderId) {
+    const Order = require('../../models/Order');
+    const order = await Order.findById(ride.orderId);
+    
+    if (order) {
+      if (userRole === 'rider' || userRole === 'seller') {
+        // Le client annule sa course, ce qui annule toute la commande
+        order.status = 'cancelled';
+        order.cancelledAt = Date.now();
+        order.history.push({ status: 'cancelled', comment: 'Annulée par le client (livraison annulée)', timestamp: Date.now() });
+        await order.save();
+        logger.info(`[MARKETPLACE CANCEL] Commande ${order._id} annulée suite à annulation de course par le client.`);
+      } else if (userRole === 'driver') {
+        // Le chauffeur (livreur) se désiste de la course après acceptation.
+        // On ne doit pas annuler la commande ! On relance une recherche propre.
+        order.status = 'confirmed'; // Rebascule en préparation/recherche
+        order.driver = null;
+        order.deliveryRideId = null;
+        order.deliveryRetryCount = 0; // Réinitialise les tentatives automatiques
+        await order.save();
+        
+        // Relance asynchrone d'une nouvelle requête de course
+        try {
+          const redisClient = require('../../config/redis');
+          const deliveryData = {
+            origin: {
+              address: order.seller.address || 'Point de retrait vendeur',
+              coordinates: order.seller.currentLocation.coordinates
+            },
+            destination: {
+              address: order.shippingAddress.address,
+              coordinates: order.shippingAddress.coordinates
+            },
+            forfait: 'STANDARD',
+            passengersCount: 1,
+            type: 'DELIVERY',
+            orderId: order._id
+          };
+          
+          // La fonction createRideRequest va créer un nouveau Ride et relancer le dispatch
+          const { ride: newRide } = await createRideRequest(order.customer, deliveryData, redisClient);
+          order.deliveryRideId = newRide._id;
+          await order.save();
+          
+          logger.info(`[MARKETPLACE RE-DISPATCH] Recherche livreur relancée après désistement chauffeur. Nouveau Ride: ${newRide._id}`);
+        } catch (reDispatchError) {
+          logger.error(`[MARKETPLACE RE-DISPATCH ERROR] Échec de la relance après désistement : ${reDispatchError.message}`);
+        }
+      }
+    }
   }
 
   return ride;
@@ -389,6 +442,18 @@ const finalizeProposal = async (rideId, riderId, decision) => {
         await ride.save({ session });
         
         await userRepository.updateDriverAvailability(ride.driver, false, session);
+        
+        // --- COUPLAGE COMMANDES MARKETPLACE ---
+        if (ride.type === 'DELIVERY' && ride.orderId) {
+          const Order = require('../../models/Order');
+          const order = await Order.findById(ride.orderId).session(session);
+          if (order) {
+            order.driver = ride.driver;
+            order.status = 'searching'; // Marque le début de la recherche du livreur sur site
+            order.history.push({ status: 'searching', comment: 'Livreur attribué', timestamp: Date.now() });
+            await order.save({ session });
+          }
+        }
         
         result = { status: 'ACCEPTED', ride };
       } else {

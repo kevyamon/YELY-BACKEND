@@ -210,8 +210,23 @@ exports.cancelOrder = async (req, res, next) => {
     const order = await Order.findById(req.params.id);
     if (!order) return next(new AppError('Commande introuvable', 404));
 
-    if (order.status !== 'pending') {
-      return next(new AppError('Impossible d\'annuler une commande déjà confirmée par le vendeur.', 400));
+    const cancelableStatuses = ['pending', 'searching', 'searching_delivery_retry', 'cancelled_no_driver'];
+    if (!cancelableStatuses.includes(order.status)) {
+      return next(new AppError('Impossible d\'annuler une commande déjà prise en charge ou livrée.', 400));
+    }
+
+    if (order.deliveryRideId) {
+      try {
+        const rideService = require('../services/ride/rideLifecycleService');
+        // cancelRideAction s'occupera d'annuler la course ET la commande associée de manière unifiée
+        await rideService.cancelRideAction(order.deliveryRideId, order.customer, 'rider', 'Commande annulée par le client');
+        
+        // On récupère la commande mise à jour par cancelRideAction
+        const updatedOrder = await Order.findById(req.params.id).populate('customer seller driver');
+        return res.status(200).json({ success: true, data: updatedOrder });
+      } catch (rideCancelError) {
+        logger.error(`[CANCEL ORDER RIDE ERROR] Échec de l'annulation de la course associée : ${rideCancelError.message}`);
+      }
     }
 
     order.status = 'cancelled';

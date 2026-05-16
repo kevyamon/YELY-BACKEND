@@ -48,7 +48,7 @@ const markRideAsArrived = async (driverId, rideId) => {
   return ride;
 };
 
-const startRideSession = async (driverId, rideId) => {
+const startRideSession = async (driverId, rideId, io) => {
   const ride = await Ride.findOne({ _id: rideId, driver: driverId });
   
   if (!ride) {
@@ -80,6 +80,31 @@ const startRideSession = async (driverId, rideId) => {
   ride.status = 'in_progress';
   ride.startedAt = new Date();
   await ride.save();
+
+  // --- COUPLAGE D'ÉTAT MARKETPLACE (PICKED UP) ---
+  if (ride.type === 'DELIVERY' && ride.orderId) {
+    const Order = require('../../models/Order');
+    const order = await Order.findById(ride.orderId).populate('customer seller driver');
+    if (order) {
+      order.status = 'picked_up';
+      order.pickedUpAt = Date.now();
+      order.history.push({ status: 'picked_up', comment: 'Colis récupéré par le livreur', timestamp: Date.now() });
+      await order.save();
+      
+      if (io) {
+        io.to(order.customer._id.toString()).emit('order_updated', order);
+        io.to(order.seller._id.toString()).emit('order_updated', order);
+      }
+      
+      notificationService.sendNotification(
+        order.customer._id,
+        "Colis récupéré ! 🚴",
+        `Votre livreur ${driver.name || 'Yély'} a récupéré votre commande. Il est en route !`,
+        "ORDER_UPDATE",
+        { orderId: order._id.toString() }
+      ).catch(() => {});
+    }
+  }
   
   return ride;
 };
@@ -131,6 +156,44 @@ const completeRideSession = async (driverId, rideId, io) => {
           totalEarnings: ride.price || 0
         }
       }, { session });
+
+      // --- COUPLAGE D'ÉTAT MARKETPLACE (DELIVERED) & RECONCILIATION ---
+      if (ride.type === 'DELIVERY' && ride.orderId) {
+        const Order = require('../../models/Order');
+        const Ledger = require('../../models/Ledger');
+        
+        const order = await Order.findById(ride.orderId).session(session);
+        if (order) {
+          order.status = 'delivered';
+          order.deliveredAt = Date.now();
+          order.driver = ride.driver;
+          order.history.push({ status: 'delivered', comment: 'Commande livrée avec succès', timestamp: Date.now() });
+          await order.save({ session });
+
+          // Créer l'ardoise financière (Ledger) pour la réconciliation du cash des produits collecté par le livreur
+          await Ledger.create([{
+            driver: ride.driver,
+            seller: order.seller,
+            order: order._id,
+            amount: order.itemsPrice,
+            status: 'pending',
+            note: `Création automatique suite à la livraison réussie du Ride ${ride._id}`
+          }], { session });
+
+          // Incrémenter la dette cash du livreur et appliquer la sécurité anti-dépassement
+          const driverDoc = await User.findById(ride.driver).session(session);
+          if (driverDoc) {
+            driverDoc.ledger = driverDoc.ledger || {};
+            driverDoc.ledger.currentCashDebt = (driverDoc.ledger.currentCashDebt || 0) + order.itemsPrice;
+            
+            if (driverDoc.ledger.currentCashDebt >= (driverDoc.ledger.maxCashDebt || 100000)) {
+              driverDoc.ledger.isBlocked = true;
+              logger.warn(`[SECURITY] Livreur ${driverDoc.email} bloqué automatiquement suite à dépassement de la dette maximale.`);
+            }
+            await driverDoc.save({ session });
+          }
+        }
+      }
       
       result = ride;
     });
@@ -144,6 +207,36 @@ const completeRideSession = async (driverId, rideId, io) => {
     }
     if (result.destination?.address) {
       await poiController.releasePendingPOI(result.destination.address, io);
+    }
+
+    // --- SOCKETS ET PUSH NOTIFICATIONS MARKETPLACE APRES LIVRAISON ---
+    if (result.type === 'DELIVERY' && result.orderId) {
+      try {
+        const Order = require('../../models/Order');
+        const order = await Order.findById(result.orderId).populate('customer seller driver');
+        if (order) {
+          io.to(order.customer._id.toString()).emit('order_updated', order);
+          io.to(order.seller._id.toString()).emit('order_updated', order);
+          
+          notificationService.sendNotification(
+            order.customer._id, 
+            'Livrée ! 🎉', 
+            'Votre commande a été livrée. Merci de votre confiance !', 
+            'ORDER_COMPLETE', 
+            { orderId: order._id.toString() }
+          ).catch(() => {});
+
+          notificationService.sendNotification(
+            order.seller._id, 
+            'Livraison effectuée ! 💰', 
+            `Le livreur ${order.driver?.name || 'Yély'} vous doit ${order.itemsPrice} FG pour la commande #${order._id.toString().slice(-6)}.`, 
+            'ORDER_UPDATE', 
+            { orderId: order._id.toString() }
+          ).catch(() => {});
+        }
+      } catch (completeNotifyError) {
+        logger.error(`[NOTIFY ERROR] Échec de l'envoi de notification de livraison : ${completeNotifyError.message}`);
+      }
     }
   }
 
