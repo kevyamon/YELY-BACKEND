@@ -52,4 +52,11 @@ router.post('/update-role', protect, authorize('superadmin'), validate(updateRol
 router.post('/toggle-ban', protect, authorize('superadmin'), validate(toggleBanSchema), adminController.toggleUserBan);
 router.post('/map-lock', protect, authorize('superadmin'), validate(mapSettingsSchema), adminController.updateMapSettings);
 
+// --- ROUTES DE MODÉRATION ET D'OVERRIDE MARKETPLACE ---
+router.get('/marketplace/stats', protect, authorize('admin', 'superadmin'), adminController.getMarketplaceStats);
+router.get('/marketplace/orders', protect, authorize('admin', 'superadmin'), adminController.getMarketplaceOrders);
+router.put('/marketplace/orders/:id/override', protect, authorize('admin', 'superadmin'), adminController.overrideMarketplaceOrder);
+router.get('/marketplace/ledgers', protect, authorize('admin', 'superadmin'), adminController.getMarketplaceLedgers);
+router.put('/marketplace/ledgers/:id/force-clear', protect, authorize('superadmin'), adminController.forceClearLedger);
+
 module.exports = router;

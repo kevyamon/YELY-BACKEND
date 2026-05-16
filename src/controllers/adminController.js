@@ -465,6 +465,293 @@ const toggleRideArchive = async (req, res) => {
   }
 };
 
+const getMarketplaceStats = async (req, res) => {
+  try {
+    const Order = require('../models/Order');
+    const Ledger = require('../models/Ledger');
+
+    const [salesResult, pendingOrdersCount, activeDeliveriesCount, ledgerResult] = await Promise.all([
+      Order.aggregate([
+        { $match: { status: { $nin: ['cancelled', 'cancelled_no_driver', 'rejected'] } } },
+        { $group: { _id: null, total: { $sum: '$itemsPrice' } } }
+      ]),
+      Order.countDocuments({ status: 'pending' }),
+      Order.countDocuments({ status: { $in: ['searching', 'picked_up', 'searching_delivery_retry'] } }),
+      Ledger.aggregate([
+        { $match: { status: 'pending' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ])
+    ]);
+
+    const stats = {
+      totalSales: salesResult.length > 0 ? salesResult[0].total : 0,
+      pendingOrdersCount,
+      activeDeliveriesCount,
+      totalLedgerDebt: ledgerResult.length > 0 ? ledgerResult[0].total : 0
+    };
+
+    return successResponse(res, stats, "Statistiques Marketplace récupérées.");
+  } catch (error) {
+    logger.error(`[ADMIN MARKET STATS ERROR] : ${error.message}`);
+    return errorResponse(res, "Erreur statistiques marketplace.", 500);
+  }
+};
+
+const getMarketplaceOrders = async (req, res) => {
+  try {
+    const Order = require('../models/Order');
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, parseInt(req.query.limit) || 20);
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+    if (req.query.status) {
+      filter.status = req.query.status;
+    }
+
+    if (req.query.search) {
+      const safeSearch = req.query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(safeSearch, 'i');
+      
+      if (mongoose.Types.ObjectId.isValid(req.query.search)) {
+        filter._id = req.query.search;
+      } else {
+        const matchingUsers = await User.find({
+          $or: [
+            { name: searchRegex },
+            { phone: searchRegex },
+            { email: searchRegex }
+          ]
+        }).select('_id');
+        const userIds = matchingUsers.map(u => u._id);
+        
+        filter.$or = [
+          { customer: { $in: userIds } },
+          { seller: { $in: userIds } },
+          { driver: { $in: userIds } }
+        ];
+      }
+    }
+
+    const [orders, total] = await Promise.all([
+      Order.find(filter)
+        .populate('customer', 'name phone email')
+        .populate('seller', 'name phone email')
+        .populate('driver', 'name phone email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Order.countDocuments(filter)
+    ]);
+
+    return successResponse(res, {
+      orders,
+      pagination: { page, total, pages: Math.ceil(total / limit) }
+    }, "Commandes récupérées.");
+  } catch (error) {
+    logger.error(`[ADMIN MARKET ORDERS ERROR] : ${error.message}`);
+    return errorResponse(res, "Erreur récupération commandes.", 500);
+  }
+};
+
+const overrideMarketplaceOrder = async (req, res) => {
+  try {
+    const Order = require('../models/Order');
+    const rideLifecycleService = require('../services/ride/rideLifecycleService');
+    const { id } = req.params;
+    const { status, driverId, cancelRide, reason } = req.body;
+
+    const order = await Order.findById(id).populate('customer seller driver');
+    if (!order) {
+      return errorResponse(res, "Commande introuvable.", 404);
+    }
+
+    const oldStatus = order.status;
+    const oldDriverName = order.driver?.name || 'aucun';
+
+    if (cancelRide && order.deliveryRideId) {
+      try {
+        await rideLifecycleService.cancelRideAction(
+          order.deliveryRideId,
+          req.user,
+          'admin',
+          reason || 'Annulation administrative forcée'
+        );
+        order.deliveryRideId = undefined;
+      } catch (rideErr) {
+        logger.error(`[ADMIN OVERRIDE RIDE CANCEL] Non bloquant : ${rideErr.message}`);
+      }
+    }
+
+    if (driverId !== undefined) {
+      if (driverId === null || driverId === '') {
+        order.driver = undefined;
+      } else {
+        const targetDriver = await User.findById(driverId);
+        if (!targetDriver || targetDriver.role !== 'driver') {
+          return errorResponse(res, "Le livreur spécifié est invalide.", 400);
+        }
+        order.driver = targetDriver._id;
+      }
+    }
+
+    if (status) {
+      order.status = status;
+      if (status === 'delivered') {
+        order.deliveredAt = Date.now();
+      } else if (status === 'picked_up') {
+        order.pickedUpAt = Date.now();
+      } else if (status === 'cancelled') {
+        order.cancelledAt = Date.now();
+      }
+      order.history.push({
+        status,
+        comment: reason || `Statut forcé administrativement par ${req.user.name || 'Admin'}`,
+        timestamp: Date.now()
+      });
+    }
+
+    await order.save();
+
+    const io = req.app.get('socketio');
+    const updatedOrder = await Order.findById(id).populate('customer seller driver');
+    if (io && updatedOrder) {
+      io.to(updatedOrder.customer._id.toString()).emit('order_updated', updatedOrder);
+      io.to(updatedOrder.seller._id.toString()).emit('order_updated', updatedOrder);
+    }
+
+    await AuditLog.create({
+      actor: req.user._id,
+      action: 'OVERRIDE_MARKETPLACE_ORDER',
+      target: order._id,
+      details: `Override commande #${order._id.toString().slice(-6)}: Statut ${oldStatus} -> ${status || oldStatus}, Livreur ${oldDriverName} -> ${updatedOrder.driver?.name || 'aucun'}. Motif: ${reason || 'aucun'}`
+    });
+
+    return successResponse(res, updatedOrder, "Commande écrasée et mise à jour avec succès.");
+  } catch (error) {
+    logger.error(`[ADMIN ORDER OVERRIDE ERROR] : ${error.message}`);
+    return errorResponse(res, "Erreur override commande.", 500);
+  }
+};
+
+const getMarketplaceLedgers = async (req, res) => {
+  try {
+    const Ledger = require('../models/Ledger');
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, parseInt(req.query.limit) || 20);
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+    if (req.query.status) {
+      filter.status = req.query.status;
+    }
+
+    if (req.query.search) {
+      const safeSearch = req.query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(safeSearch, 'i');
+      
+      const matchingUsers = await User.find({
+        $or: [
+          { name: searchRegex },
+          { phone: searchRegex }
+        ]
+      }).select('_id');
+      const userIds = matchingUsers.map(u => u._id);
+
+      filter.$or = [
+        { driver: { $in: userIds } },
+        { seller: { $in: userIds } }
+      ];
+    }
+
+    const [ledgers, total] = await Promise.all([
+      Ledger.find(filter)
+        .populate('driver', 'name phone email ledger')
+        .populate('seller', 'name phone email')
+        .populate('order', 'status itemsPrice createdAt')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Ledger.countDocuments(filter)
+    ]);
+
+    return successResponse(res, {
+      ledgers,
+      pagination: { page, total, pages: Math.ceil(total / limit) }
+    }, "Ardoises financières récupérées.");
+  } catch (error) {
+    logger.error(`[ADMIN MARKET LEDGERS ERROR] : ${error.message}`);
+    return errorResponse(res, "Erreur récupération ardoises.", 500);
+  }
+};
+
+const forceClearLedger = async (req, res) => {
+  const session = await mongoose.startSession();
+  try {
+    const Ledger = require('../models/Ledger');
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    let resultLedger;
+
+    await session.withTransaction(async () => {
+      const ledger = await Ledger.findById(id).session(session);
+      if (!ledger) {
+        throw new Error("Ardoise introuvable.");
+      }
+
+      if (ledger.status === 'cleared') {
+        throw new Error("Cette ardoise est déjà réconciliée.");
+      }
+
+      ledger.status = 'cleared';
+      ledger.clearedAt = Date.now();
+      ledger.note = reason || `Réconciliation forcée par le SuperAdmin ${req.user.name || 'SuperAdmin'}`;
+      await ledger.save({ session });
+
+      const driver = await User.findById(ledger.driver).session(session);
+      if (driver) {
+        driver.ledger = driver.ledger || {};
+        driver.ledger.currentCashDebt = Math.max(0, (driver.ledger.currentCashDebt || 0) - ledger.amount);
+        
+        const maxDebt = driver.ledger.maxCashDebt || 100000;
+        if (driver.ledger.currentCashDebt < maxDebt) {
+          driver.ledger.isBlocked = false;
+        }
+        await driver.save({ session });
+      }
+
+      resultLedger = ledger;
+    });
+
+    await session.endSession();
+
+    const io = req.app.get('socketio');
+    if (io && resultLedger) {
+      io.to(resultLedger.driver.toString()).emit('ledger_cleared', resultLedger);
+      io.to(resultLedger.seller.toString()).emit('ledger_cleared', resultLedger);
+    }
+
+    await AuditLog.create({
+      actor: req.user._id,
+      action: 'FORCE_CLEAR_LEDGER',
+      target: resultLedger._id,
+      details: `Réconciliation forcée de l'ardoise #${resultLedger._id.toString().slice(-6)} (Montant: ${resultLedger.amount} FG) pour le livreur ID: ${resultLedger.driver}. Raison: ${reason || 'non spécifiée'}`
+    });
+
+    return successResponse(res, resultLedger, "L'ardoise a été réconciliée de force avec succès.");
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    await session.endSession();
+    logger.error(`[ADMIN LEDGER FORCE CLEAR ERROR] : ${error.message}`);
+    return errorResponse(res, error.message || "Erreur réconciliation ardoise.", 500);
+  }
+};
+
 module.exports = {
   updateAdminStatus,
   toggleUserBan,
@@ -483,5 +770,10 @@ module.exports = {
   updateAppVersion,
   getSystemConfig,
   getAllRides,
-  toggleRideArchive
+  toggleRideArchive,
+  getMarketplaceStats,
+  getMarketplaceOrders,
+  overrideMarketplaceOrder,
+  getMarketplaceLedgers,
+  forceClearLedger
 };
