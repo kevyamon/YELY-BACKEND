@@ -20,10 +20,55 @@ exports.getAllProducts = async (req, res, next) => {
     if (seller) query.seller = seller;
     if (search) {
       const cleanSearch = search.trim();
+      const lowerSearch = cleanSearch.toLowerCase();
+      
+      // Mappage intelligent pour faire correspondre les recherches de catégories en Français
+      const CATEGORY_MAP = {
+        'nourriture': 'Food',
+        'food': 'Food',
+        'resto': 'Food',
+        'restaurant': 'Food',
+        'plat': 'Food',
+        'repas': 'Food',
+        'manger': 'Food',
+        'supermarche': 'Supermarket',
+        'supermarché': 'Supermarket',
+        'epicerie': 'Supermarket',
+        'épicerie': 'Supermarket',
+        'courses': 'Supermarket',
+        'panier': 'Supermarket',
+        'cosmetique': 'Cosmetics',
+        'cosmétique': 'Cosmetics',
+        'beaute': 'Cosmetics',
+        'beauté': 'Cosmetics',
+        'soins': 'Cosmetics',
+        'maquillage': 'Cosmetics',
+        'electronique': 'Electronics',
+        'électronique': 'Electronics',
+        'hightech': 'Electronics',
+        'high-tech': 'Electronics',
+        'telephone': 'Electronics',
+        'téléphone': 'Electronics',
+        'pc': 'Electronics',
+        'maison': 'Home',
+        'deco': 'Home',
+        'déco': 'Home',
+        'decoration': 'Home',
+        'décoration': 'Home',
+        'entretien': 'Home'
+      };
+
+      const matchedCategory = CATEGORY_MAP[lowerSearch];
+
       query.$or = [
         { name: { $regex: cleanSearch, $options: 'i' } },
         { description: { $regex: cleanSearch, $options: 'i' } }
       ];
+
+      // Si le mot clé correspond à une catégorie, on l'ajoute dans le match $or
+      if (matchedCategory) {
+        query.$or.push({ category: matchedCategory });
+      }
     }
 
     const products = await Product.find(query)
