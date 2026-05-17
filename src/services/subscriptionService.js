@@ -69,24 +69,30 @@ const getNextValidator = async (planType) => {
   return targetValidator || fallbackValidator;
 };
 
-// 🛡️ NOUVELLE FONCTION : Vérifie si le chauffeur fait partie des 20 premiers
-const checkIsPioneer = async (userId) => {
-  if (!userId) return false;
+// NOUVELLE FONCTION : Vérifie si l'utilisateur fait partie des 20 premiers de son rôle
+const checkIsPioneer = async (userIdOrUser) => {
+  if (!userIdOrUser) return false;
   
-  const user = await User.findById(userId);
-  if (!user || user.role !== 'driver') return false;
+  let user;
+  if (userIdOrUser.role) {
+    user = userIdOrUser;
+  } else {
+    user = await User.findById(userIdOrUser);
+  }
+  
+  if (!user || (user.role !== 'driver' && user.role !== 'seller')) return false;
 
-  // On compte combien de chauffeurs ont été créés AVANT ce chauffeur
-  const olderDriversCount = await User.countDocuments({
-    role: 'driver',
+  // On compte combien d'utilisateurs du même rôle ont été créés avant lui
+  const olderUsersCount = await User.countDocuments({
+    role: user.role,
     createdAt: { $lt: user.createdAt }
   });
 
-  // S'il y a moins de 20 chauffeurs avant lui, il est Pionnier à vie !
-  return olderDriversCount < 20;
+  // S'il y a moins de 20 utilisateurs de son rôle avant lui, il est Pionnier à vie !
+  return olderUsersCount < 20;
 };
 
-// 🛡️ MODIFICATION : On accepte userId pour personnaliser le prix
+// MODIFICATION : On accepte userId pour personnaliser le prix
 const getSubscriptionPricing = async (userId = null) => {
   let settings = await Settings.findOne();
   if (!settings) settings = {};
@@ -100,7 +106,7 @@ const getSubscriptionPricing = async (userId = null) => {
   let monthlyPrice, monthlyLink;
 
   if (isPioneer) {
-    // 👑 TARIFS PIONNIERS (Les 20 Premiers à vie)
+    // TARIFS PIONNIERS (Les 20 Premiers à vie)
     monthlyPrice = isPromo ? 700 : 1000;
     
     monthlyLink = isPromo 
@@ -108,7 +114,7 @@ const getSubscriptionPricing = async (userId = null) => {
       : process.env.WAVE_LINK_MONTHLY_PIONEER;
       
   } else {
-    // 🚕 TARIFS NORMAUX
+    // TARIFS NORMAUX
     monthlyPrice = isPromo ? 1500 : baseMonthlyPrice;
     
     monthlyLink = isPromo 
@@ -130,11 +136,16 @@ const getSubscriptionPricing = async (userId = null) => {
 const submitProof = async (userId, data, file) => {
   const existingPending = await Transaction.findOne({ user: userId, status: 'PENDING' });
   if (existingPending) {
-    throw new AppError("Une validation est deja en cours pour votre compte.", 400);
+    throw new AppError("Une validation est déjà en cours pour votre compte.", 400);
   }
 
   if (data.planId !== PLAN_TYPES.MONTHLY) {
-    throw new AppError("Le forfait hebdomadaire est obsolete. Veuillez selectionner le forfait mensuel unique.", 400);
+    throw new AppError("Le forfait hebdomadaire est obsolète. Veuillez sélectionner le forfait mensuel unique.", 400);
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new AppError("Utilisateur introuvable.", 404);
   }
 
   // On passe le userId pour avoir le bon tarif lors de la création de la transaction
@@ -167,10 +178,11 @@ const submitProof = async (userId, data, file) => {
 
   if (validator && validator.fcmToken) {
     try {
+      const subject = user.role === 'seller' ? "vendeur" : "chauffeur";
       await notificationService.sendPushNotification(
         validator.fcmToken,
-        "Nouvelle capture a verifier",
-        "Un chauffeur vient de soumettre un paiement.",
+        "Nouvelle capture à vérifier",
+        `Un ${subject} vient de soumettre un paiement.`,
         { transactionId: transaction._id.toString(), type: 'VALIDATION_REQUEST' }
       );
     } catch (error) {}

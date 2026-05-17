@@ -135,7 +135,7 @@ const userSchema = new mongoose.Schema({
 userSchema.index({ currentLocation: '2dsphere' });
 
 userSchema.methods.syncSubscription = function() {
-  if (!this.subscription || this.role !== 'driver') return false;
+  if (!this.subscription || (this.role !== 'driver' && this.role !== 'seller')) return false;
   let changed = false;
   if (this.subscription.expiresAt) {
     const now = new Date();

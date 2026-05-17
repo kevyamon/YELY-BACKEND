@@ -38,7 +38,7 @@ router.get(
 router.post(
   '/submit-proof', 
   protect, 
-  authorize('driver', 'superadmin'), 
+  authorize('driver', 'seller', 'superadmin'), 
   uploadSingle, 
   validateFileSignature, 
   validate(submitProofSchema), 

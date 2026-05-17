@@ -75,11 +75,18 @@ const approveTransaction = async (req, res) => {
         });
       }
       
+      const isSeller = result.driver.role === 'seller';
+      const pushTitle = isSeller ? "Boutique Activée" : "Abonnement Activé";
+      const pushBody = isSeller 
+        ? "Votre preuve de paiement a été validée. Votre boutique est active."
+        : "Votre preuve de paiement a été validée. Vous pouvez reprendre les courses.";
+      const pushType = isSeller ? 'SELLER_SUBSCRIPTION_APPROVED' : 'SUBSCRIPTION_APPROVED';
+
       notificationService.sendNotification(
         result.driver._id.toString(),
-        "Abonnement Active",
-        "Votre preuve de paiement a ete validee. Vous pouvez reprendre les courses.",
-        'SUBSCRIPTION_APPROVED',
+        pushTitle,
+        pushBody,
+        pushType,
         { transactionId: result.transaction._id.toString() }
       ).catch(notifError => logger.error(`[NON-CRITIQUE] Echec notification apres approbation: ${notifError.message}`));
       
@@ -88,7 +95,7 @@ const approveTransaction = async (req, res) => {
     }
 
     logger.info(`[AUDIT FINANCE] Transaction ${result.transaction._id} approved by ${req.user.email}`);
-    return successResponse(res, { status: 'APPROVED' }, 'Transaction approuvee avec succes.');
+    return successResponse(res, { status: 'APPROVED' }, 'Transaction approuvée avec succès.');
 
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
@@ -107,11 +114,16 @@ const rejectTransaction = async (req, res) => {
         io.to(result.driver._id.toString()).emit('subscription_rejected', { reason: finalReason });
       }
       
+      const isSeller = result.driver?.role === 'seller';
+      const pushTitle = "Paiement Rejeté";
+      const pushBody = `Votre preuve a été refusée: ${finalReason}. Veuillez soumettre une image valide.`;
+      const pushType = isSeller ? 'SELLER_SUBSCRIPTION_REJECTED' : 'SUBSCRIPTION_REJECTED';
+
       notificationService.sendNotification(
         result.driver._id.toString(),
-        "Paiement Rejete",
-        `Votre preuve a ete refusee: ${finalReason}. Veuillez soumettre une image valide.`,
-        'SUBSCRIPTION_REJECTED',
+        pushTitle,
+        pushBody,
+        pushType,
         { transactionId: result.transaction._id.toString() }
       ).catch(notifError => logger.error(`[NON-CRITIQUE] Echec notification apres rejet: ${notifError.message}`));
       
@@ -120,7 +132,7 @@ const rejectTransaction = async (req, res) => {
     }
 
     logger.info(`[AUDIT FINANCE] Transaction ${result.transaction._id} rejected by ${req.user.email}`);
-    return successResponse(res, { status: 'REJECTED' }, 'Transaction rejetee avec succes.');
+    return successResponse(res, { status: 'REJECTED' }, 'Transaction rejetée avec succès.');
 
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
@@ -327,13 +339,13 @@ const toggleGlobalFreeAccess = async (req, res) => {
       });
     }
 
-    const pushTitle = settings.isGlobalFreeAccess ? "Mode VIP Active !" : "Fin de la periode VIP";
+    const pushTitle = settings.isGlobalFreeAccess ? "Mode VIP Activé !" : "Fin de la période VIP";
     const pushBody = settings.isGlobalFreeAccess 
-      ? "L'acces a Yely est desormais gratuit ! Votre abonnement payant est mis en pause." 
-      : "Le mode gratuit est termine. Votre abonnement a ete prolonge pour compenser cette periode.";
+      ? "L'accès à Yely est désormais gratuit ! Votre abonnement payant est mis en pause." 
+      : "Le mode gratuit est terminé. Votre abonnement a été prolongé pour compenser cette période.";
 
     try {
-      const drivers = await User.find({ role: 'driver', fcmToken: { $ne: null } }).select('_id fcmToken');
+      const drivers = await User.find({ role: { $in: ['driver', 'seller'] }, fcmToken: { $ne: null } }).select('_id fcmToken');
       const sentTokens = new Set();
 
       for (const driver of drivers) {
@@ -358,7 +370,7 @@ const toggleGlobalFreeAccess = async (req, res) => {
     return successResponse(res, {
       isGlobalFreeAccess: settings.isGlobalFreeAccess,
       promoMessage: settings.promoMessage
-    }, `Mode VIP ${settings.isGlobalFreeAccess ? 'active' : 'desactive'} avec succes.`);
+    }, `Mode VIP ${settings.isGlobalFreeAccess ? 'activé' : 'désactivé'} avec succès.`);
 
   } catch (error) {
     logger.error(`[FREE ACCESS ERROR]: ${error.message}`);

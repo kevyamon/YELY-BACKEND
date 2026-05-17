@@ -96,15 +96,15 @@ const approveTransaction = async (transactionId, validatorId) => {
   const transaction = await Transaction.findById(cleanId);
   
   if (!transaction) {
-    throw new AppError('Transaction introuvable dans la base de donnees.', 404);
+    throw new AppError('Transaction introuvable dans la base de données.', 404);
   }
 
   if (transaction.status !== 'PENDING') {
-    throw new AppError(`Action impossible : Cette transaction est deja ${transaction.status}. Veuillez rafraichir.`, 400);
+    throw new AppError(`Action impossible : Cette transaction est déjà ${transaction.status}. Veuillez rafraîchir.`, 400);
   }
 
   const driver = await User.findById(transaction.user);
-  if (!driver) throw new AppError('Chauffeur introuvable.', 404);
+  if (!driver) throw new AppError('Utilisateur introuvable.', 404);
 
   const daysToAdd = transaction.planId === 'WEEKLY' ? 7 : 30;
   
@@ -132,11 +132,11 @@ const approveTransaction = async (transactionId, validatorId) => {
   transaction.validatedBy = validatorId;
   transaction.auditLog.push({
     action: 'APPROVAL',
-    note: `Preuve validee par l'admin ${validatorId}. Acces prolonge de ${daysToAdd} jours.`
+    note: `Preuve validée par l'admin ${validatorId}. Accès prolongé de ${daysToAdd} jours.`
   });
   await transaction.save();
 
-  const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA validee. +${daysToAdd} jours ajoutes pour ${driver.email}`;
+  const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA validée. +${daysToAdd} jours ajoutés pour ${driver.email}`;
   await logSystemAction(validatorId, 'APPROVE_SUBSCRIPTION', driver._id, details);
   try { await redisClient.del(`auth:user:${driver._id}`); } catch(e) {}
 
@@ -148,18 +148,18 @@ const rejectTransaction = async (transactionId, reason, validatorId) => {
   const transaction = await Transaction.findById(cleanId);
   
   if (!transaction) {
-    throw new AppError('Transaction introuvable dans la base de donnees.', 404);
+    throw new AppError('Transaction introuvable dans la base de données.', 404);
   }
 
   if (transaction.status !== 'PENDING') {
-    throw new AppError(`Action impossible : Cette transaction est deja ${transaction.status}. Veuillez rafraichir.`, 400);
+    throw new AppError(`Action impossible : Cette transaction est déjà ${transaction.status}. Veuillez rafraîchir.`, 400);
   }
 
   transaction.status = 'REJECTED';
   transaction.validatedBy = validatorId;
   transaction.auditLog.push({
     action: 'REJECTION',
-    note: `Preuve rejetee par l'admin ${validatorId}. Motif: ${reason}`
+    note: `Preuve rejetée par l'admin ${validatorId}. Motif: ${reason}`
   });
   await transaction.save();
 
@@ -173,7 +173,7 @@ const rejectTransaction = async (transactionId, reason, validatorId) => {
     
     await driver.save();
 
-    const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA rejetee. Motif: ${reason}`;
+    const details = `Transaction [${transaction._id}] de ${transaction.amount} FCFA rejetée. Motif: ${reason}`;
     await logSystemAction(validatorId, 'REJECT_SUBSCRIPTION', driver._id, details);
     
     try { await redisClient.del(`auth:user:${driver._id}`); } catch(e) {}
