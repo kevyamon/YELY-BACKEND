@@ -17,7 +17,12 @@ exports.getAllProducts = async (req, res, next) => {
     const query = { isActive: true };
 
     if (category) query.category = category;
-    if (seller) query.seller = seller;
+    if (seller) {
+      query.seller = seller;
+    } else if (req.user) {
+      // Exclure les propres produits du vendeur connecté
+      query.seller = { $ne: req.user._id };
+    }
     if (search) {
       const cleanSearch = search.trim();
       const lowerSearch = cleanSearch.toLowerCase();

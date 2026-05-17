@@ -3,13 +3,13 @@
 
 const express = require('express');
 const productController = require('../controllers/productController');
-const { protect, authorize } = require('../middleware/authMiddleware');
+const { protect, authorize, optionalAuth } = require('../middleware/authMiddleware');
 const { uploadProductImages, validateFileSignature } = require('../middleware/uploadMiddleware');
 
 const router = express.Router();
 
 // Routes publiques
-router.get('/', productController.getAllProducts);
+router.get('/', optionalAuth, productController.getAllProducts);
 router.get('/my-products', protect, productController.getMyProducts);
 router.get('/:id', productController.getProduct);
 
