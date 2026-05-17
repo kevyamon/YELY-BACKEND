@@ -19,8 +19,8 @@ const getConfig = async (req, res, next) => {
     
     const settings = await Settings.findOne();
     
-    if (!config.weekly.link || !config.monthly.link) {
-      logger.warn("[CONFIG WARNING]: Liens de paiement manquants dans les variables d'environnement ou la base de donnees.");
+    if (!config.monthly || !config.monthly.link) {
+      logger.warn("[CONFIG WARNING]: Lien de paiement mensuel manquant dans les variables d'environnement ou la base de donnees.");
     }
 
     const enrichedConfig = {
