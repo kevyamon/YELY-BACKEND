@@ -95,33 +95,22 @@ const getSubscriptionPricing = async (userId = null) => {
   const isPioneer = await checkIsPioneer(userId);
   
   // Prix d'affichage barrés (Toujours les mêmes pour montrer l'économie)
-  const baseWeeklyPrice = 1000;
-  const baseMonthlyPrice = 3500; 
+  const baseMonthlyPrice = 2000; 
 
-  let weeklyPrice, monthlyPrice, weeklyLink, monthlyLink;
+  let monthlyPrice, monthlyLink;
 
   if (isPioneer) {
     // 👑 TARIFS PIONNIERS (Les 20 Premiers à vie)
-    weeklyPrice = isPromo ? 500 : 700;
-    monthlyPrice = isPromo ? 1500 : 2500;
+    monthlyPrice = isPromo ? 700 : 1000;
     
-    weeklyLink = isPromo 
-      ? process.env.WAVE_LINK_WEEKLY_PIONEER_PROMO 
-      : process.env.WAVE_LINK_WEEKLY_PIONEER;
-      
     monthlyLink = isPromo 
       ? process.env.WAVE_LINK_MONTHLY_PIONEER_PROMO 
       : process.env.WAVE_LINK_MONTHLY_PIONEER;
       
   } else {
     // 🚕 TARIFS NORMAUX
-    weeklyPrice = isPromo ? 700 : baseWeeklyPrice;
-    monthlyPrice = isPromo ? 2500 : baseMonthlyPrice;
+    monthlyPrice = isPromo ? 1500 : baseMonthlyPrice;
     
-    weeklyLink = isPromo 
-      ? process.env.WAVE_LINK_WEEKLY_PROMO 
-      : (settings.waveLinkWeekly || process.env.WAVE_LINK_WEEKLY || '');
-      
     monthlyLink = isPromo 
       ? process.env.WAVE_LINK_MONTHLY_PROMO 
       : (settings.waveLinkMonthly || process.env.WAVE_LINK_MONTHLY || '');
@@ -130,11 +119,6 @@ const getSubscriptionPricing = async (userId = null) => {
   return {
     isPromoActive: isPromo,
     isPioneer: isPioneer, // Le front saura si c'est un boss !
-    weekly: {
-      price: weeklyPrice,
-      originalPrice: baseWeeklyPrice, 
-      link: weeklyLink 
-    },
     monthly: {
       price: monthlyPrice,
       originalPrice: baseMonthlyPrice,
@@ -149,20 +133,14 @@ const submitProof = async (userId, data, file) => {
     throw new AppError("Une validation est deja en cours pour votre compte.", 400);
   }
 
+  if (data.planId !== PLAN_TYPES.MONTHLY) {
+    throw new AppError("Le forfait hebdomadaire est obsolete. Veuillez selectionner le forfait mensuel unique.", 400);
+  }
+
   // On passe le userId pour avoir le bon tarif lors de la création de la transaction
   const pricingConfig = await getSubscriptionPricing(userId);
-  let amount = 0;
-  let collectorType = '';
-
-  if (data.planId === PLAN_TYPES.WEEKLY) {
-    amount = pricingConfig.weekly.price;
-    collectorType = COLLECTOR_TYPES.SUPERADMIN;
-  } else if (data.planId === PLAN_TYPES.MONTHLY) {
-    amount = pricingConfig.monthly.price;
-    collectorType = COLLECTOR_TYPES.PARTNER;
-  } else {
-    throw new AppError("Type de forfait invalide.", 400);
-  }
+  const amount = pricingConfig.monthly.price;
+  const collectorType = COLLECTOR_TYPES.PARTNER;
 
   const result = await cloudinary.uploader.upload(file.path, {
     folder: 'yely/pending_proofs',

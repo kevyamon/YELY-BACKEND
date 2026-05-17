@@ -8,8 +8,8 @@ const submitProofSchema = z.object({
   // ATTENTION: Nous avons retiré 'amount' exprès.
   // Le client ne doit JAMAIS dicter le prix. Le backend le détermine via le planId.
   
-  planId: z.enum(['WEEKLY', 'MONTHLY'], {
-    errorMap: () => ({ message: "Type d'abonnement invalide. Attendu: WEEKLY ou MONTHLY." })
+  planId: z.enum(['MONTHLY'], {
+    errorMap: () => ({ message: "Type d'abonnement invalide. Attendu: MONTHLY uniquement." })
   }),
   
   senderPhone: z.string()
