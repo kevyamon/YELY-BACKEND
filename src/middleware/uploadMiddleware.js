@@ -30,6 +30,7 @@ const uploadSingle = upload.single('proofImage');
 const uploadProfilePic = upload.single('profilePicture');
 const uploadReportCaptures = upload.array('captures', 3);
 const uploadProductImages = upload.array('images', 10);
+const uploadBannerImage = upload.single('image');
 
 const validateFileSignature = (req, res, next) => {
   const files = req.file ? [req.file] : (req.files || []);
@@ -83,5 +84,6 @@ module.exports = {
   uploadProfilePic, 
   uploadReportCaptures,
   uploadProductImages,
+  uploadBannerImage,
   validateFileSignature 
 };
