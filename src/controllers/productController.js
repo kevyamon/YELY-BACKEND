@@ -149,11 +149,13 @@ exports.createProduct = async (req, res, next) => {
       }
     }
 
-    // Le backend supporte 'image' (unique) et 'images' (tableau) pour la compatibilité
-    if (imageUrls.length > 0) {
-      req.body.images = imageUrls;
-      req.body.image = imageUrls[0]; // Image principale
+    if (imageUrls.length === 0) {
+      return next(new AppError('Au moins une image de produit est obligatoire.', 400));
     }
+
+    // Le backend supporte 'image' (unique) et 'images' (tableau) pour la compatibilité
+    req.body.images = imageUrls;
+    req.body.image = imageUrls[0]; // Image principale
 
     const product = await Product.create(req.body);
     const populatedProduct = await Product.findById(product._id).populate('seller', 'name profilePicture rating');
@@ -218,15 +220,17 @@ exports.updateProduct = async (req, res, next) => {
     
     const finalImages = [...existingImages, ...newImageUrls];
 
+    if (finalImages.length === 0) {
+      return next(new AppError('Au moins une image de produit est obligatoire.', 400));
+    }
+
     // Nettoyage de req.body pour ne garder que les champs du schéma
     const updateData = { ...req.body };
     delete updateData.existingImages;
     delete updateData.images; // On a déjà finalImages
     
-    if (finalImages.length > 0) {
-      updateData.images = finalImages;
-      updateData.image = finalImages[0];
-    }
+    updateData.images = finalImages;
+    updateData.image = finalImages[0];
 
     if (process.env.NODE_ENV === 'development') logger.info(`[MARKETPLACE] Updating product ${req.params.id} with:`, updateData);
 
