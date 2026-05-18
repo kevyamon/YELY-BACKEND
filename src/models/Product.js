@@ -62,6 +62,11 @@ const productSchema = new mongoose.Schema({
     default: true,
     index: true
   },
+  salesCount: {
+    type: Number,
+    default: 0,
+    index: true
+  },
   rating: {
     type: Number,
     default: 5.0

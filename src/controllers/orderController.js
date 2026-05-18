@@ -65,6 +65,15 @@ exports.createOrder = async (req, res, next) => {
       history: [{ status: 'pending', comment: 'Commande effectuée' }]
     });
 
+    // Incrémentation atomique du nombre de ventes pour la popularité
+    for (const item of validatedItems) {
+      try {
+        await Product.findByIdAndUpdate(item.product, { $inc: { salesCount: item.quantity } });
+      } catch (err) {
+        logger.error(`[ORDER POPULARITY] Échec incrémentation salesCount pour ${item.product}: ${err.message}`);
+      }
+    }
+
     const populatedOrder = await Order.findById(order._id).populate('customer seller');
 
     // TEMPS RÉEL

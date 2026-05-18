@@ -13,7 +13,7 @@ const fs = require('fs');
  */
 exports.getAllProducts = async (req, res, next) => {
   try {
-    const { category, seller, search } = req.query;
+    const { category, seller, search, popular, limit } = req.query;
     const query = { isActive: true };
 
     if (category) query.category = category;
@@ -76,9 +76,19 @@ exports.getAllProducts = async (req, res, next) => {
       }
     }
 
-    const products = await Product.find(query)
-      .populate('seller', 'name profilePicture rating')
-      .sort('-createdAt');
+    let queryBuilder = Product.find(query).populate('seller', 'name profilePicture rating');
+
+    if (popular === 'true') {
+      queryBuilder = queryBuilder.sort('-salesCount -rating');
+    } else {
+      queryBuilder = queryBuilder.sort('-createdAt');
+    }
+
+    if (limit) {
+      queryBuilder = queryBuilder.limit(parseInt(limit, 10));
+    }
+
+    const products = await queryBuilder;
 
     res.status(200).json({
       success: true,
