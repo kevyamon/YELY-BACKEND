@@ -113,7 +113,9 @@ exports.createOrder = async (req, res, next) => {
 exports.updateOrderStatus = async (req, res, next) => {
   try {
     const { status, comment } = req.body;
-    const order = await Order.findById(req.params.id).populate('customer seller driver');
+    const order = await Order.findById(req.params.id)
+      .populate('customer seller driver')
+      .populate('items.product');
 
     if (!order) return next(new AppError('Commande introuvable', 404));
 
@@ -199,7 +201,10 @@ exports.updateOrderStatus = async (req, res, next) => {
 
 exports.getMyOrders = async (req, res, next) => {
   try {
-    const orders = await Order.find({ customer: req.user._id }).sort('-createdAt').populate('seller driver');
+    const orders = await Order.find({ customer: req.user._id })
+      .sort('-createdAt')
+      .populate('seller driver')
+      .populate('items.product');
     res.status(200).json({ success: true, data: orders });
   } catch (error) { next(error); }
 };
@@ -208,7 +213,10 @@ exports.getSellerOrders = async (req, res, next) => {
   try {
     const sellerId = new mongoose.Types.ObjectId(req.user._id);
     logger.info(`[MARKETPLACE] Fetching orders for seller: ${sellerId}`);
-    const orders = await Order.find({ seller: sellerId }).sort('-createdAt').populate('customer driver');
+    const orders = await Order.find({ seller: sellerId })
+      .sort('-createdAt')
+      .populate('customer driver')
+      .populate('items.product');
     logger.info(`[MARKETPLACE] Orders found for seller ${sellerId}: ${orders.length}`);
     res.status(200).json({ success: true, data: orders });
   } catch (error) { next(error); }
@@ -232,6 +240,17 @@ exports.cancelOrder = async (req, res, next) => {
         
         // On récupère la commande mise à jour par cancelRideAction
         const updatedOrder = await Order.findById(req.params.id).populate('customer seller driver');
+        
+        // Émettre la mise à jour via socket.io en temps réel pour notifier immédiatement le vendeur et le client
+        const io = req.app.get('socketio');
+        if (io) {
+          io.to(updatedOrder.seller._id.toString()).emit('order_updated', updatedOrder);
+          io.to(updatedOrder.customer._id.toString()).emit('order_updated', updatedOrder);
+        }
+
+        // Envoyer la notification push au vendeur
+        await sendNotification(updatedOrder.seller._id, 'Commande annulée ⚠️', `Le client a annulé sa commande #${updatedOrder._id.toString().slice(-6)}`, 'ORDER_CANCELLED');
+
         return res.status(200).json({ success: true, data: updatedOrder });
       } catch (rideCancelError) {
         logger.error(`[CANCEL ORDER RIDE ERROR] Échec de l'annulation de la course associée : ${rideCancelError.message}`);
@@ -257,7 +276,9 @@ exports.cancelOrder = async (req, res, next) => {
 
 exports.getOrder = async (req, res, next) => {
   try {
-    const order = await Order.findById(req.params.id).populate('customer seller driver');
+    const order = await Order.findById(req.params.id)
+      .populate('customer seller driver')
+      .populate('items.product');
     if (!order) return next(new AppError('Commande introuvable', 404));
     res.status(200).json({ success: true, data: order });
   } catch (error) { next(error); }
