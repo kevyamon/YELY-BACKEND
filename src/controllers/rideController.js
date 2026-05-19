@@ -15,6 +15,7 @@ module.exports = {
   submitPrice: rideLifecycleController.submitPrice,
   finalizeRide: rideLifecycleController.finalizeRide,
   getCurrentRide: rideLifecycleController.getCurrentRide, // AJOUT
+  getRideById: rideLifecycleController.getRideById,
 
   // --- Logique d'Execution ---
   markAsArrived: rideExecutionController.markAsArrived,

@@ -14,6 +14,7 @@ const {
 
 // LECTURE COURSE EN COURS (La route qui manquait)
 router.get('/current', protect, authorize('rider', 'driver', 'seller'), rideController.getCurrentRide);
+router.get('/:id', protect, authorize('rider', 'driver', 'seller', 'superadmin'), rideController.getRideById);
 
 // ROUTES DE LECTURE & ANNULATION ET RATING
 router.get('/estimate', protect, authorize('rider', 'seller', 'superadmin'), rideController.estimateRide);

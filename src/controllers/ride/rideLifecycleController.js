@@ -438,6 +438,38 @@ const getCurrentRide = async (req, res, next) => {
   }
 };
 
+const getRideById = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const ride = await Ride.findById(id)
+      .populate('rider', 'name phone profilePicture')
+      .populate('driver', 'name phone vehicle currentLocation profilePicture')
+      .lean();
+
+    if (!ride) {
+      return successResponse(res, null, 'Course introuvable');
+    }
+
+    const formattedRide = {
+      ...ride,
+      id: ride._id,
+      rideId: ride._id,
+      searchRadius: ride.currentSearchRadius, 
+      riderName: ride.rider?.name,
+      riderPhone: ride.rider?.phone,
+      riderProfilePicture: ride.rider?.profilePicture,
+      driverName: ride.driver?.name,
+      driverPhone: ride.driver?.phone,
+      driverProfilePicture: ride.driver?.profilePicture,
+      driverLocation: ride.driver?.currentLocation,
+    };
+
+    return successResponse(res, formattedRide, 'Course récupérée avec succès');
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   estimateRide,
   requestRide,
@@ -446,5 +478,6 @@ module.exports = {
   lockRide,
   submitPrice,
   finalizeRide,
-  getCurrentRide
+  getCurrentRide,
+  getRideById
 };
