@@ -169,6 +169,14 @@ io.on('connection', (socket) => {
         // Mise a jour de la position sans ecraser la TTL globale
         await redis.geoadd('active_drivers', coords.longitude, coords.latitude, user._id.toString());
 
+        // Mise à jour de la position en base de données pour le profil et le fallback de dispatch
+        await User.findByIdAndUpdate(user._id, {
+          currentLocation: {
+            type: 'Point',
+            coordinates: [coords.longitude, coords.latitude]
+          }
+        });
+
         // OPTIMISATION CRITIQUE : Cache du passager (rider) pour epargner MongoDB
         const rideCacheKey = `driver:${user._id}:active_rider`;
         let riderId = await redis.get(rideCacheKey);

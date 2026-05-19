@@ -16,58 +16,102 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
   }
 
   const safeMaxDistance = Number(maxDistanceMeters) || 5000;
+  let driverIds = [];
+  let useRedis = true;
 
   try {
-    // 1. RECHERCHE DANS REDIS (Haute Performance)
-    const driverIds = await redisClient.geosearch(
-      'active_drivers',
-      'FROMLONLAT', safeLng, safeLat,
-      'BYRADIUS', safeMaxDistance, 'm',
-      'ASC'
-    );
-
-    if (!driverIds || driverIds.length === 0) {
-      logger.info(`[DAO-USER] 0 chauffeur trouve dans Redis (Rayon: ${safeMaxDistance}m)`);
-      return [];
+    // 1. RECHERCHE DANS REDIS (Haute Performance - geosearch avec repli sur georadius)
+    try {
+      driverIds = await redisClient.geosearch(
+        'active_drivers',
+        'FROMLONLAT', safeLng, safeLat,
+        'BYRADIUS', safeMaxDistance, 'm',
+        'ASC'
+      );
+    } catch (geoSearchError) {
+      logger.warn(`[DAO-USER] geosearch non supporté ou échoué, repli sur georadius: ${geoSearchError.message}`);
+      try {
+        driverIds = await redisClient.georadius(
+          'active_drivers',
+          safeLng, safeLat,
+          safeMaxDistance, 'm',
+          'ASC'
+        );
+      } catch (geoRadiusError) {
+        logger.error(`[DAO-USER] georadius a également échoué: ${geoRadiusError.message}`);
+        useRedis = false;
+      }
     }
-
-    // 2. FILTRAGE DB
-    const query = {
-      _id: { $in: driverIds },
-      role: 'driver',
-      isAvailable: true,
-      isBanned: false,
-      'ledger.isBlocked': false // Sécurité Financière : Bloquer si trop de dettes
-    };
-
-    // Filtrage par type de mission
-    if (missionType === 'DELIVERY') {
-      query['deliveryPreferences.isDeliveryActive'] = true;
-    } else {
-      query['deliveryPreferences.isVtcActive'] = true;
-    }
-
-    if (rejectedDriverIds && rejectedDriverIds.length > 0) {
-      query._id = { $in: driverIds, $nin: rejectedDriverIds };
-    }
-
-    const drivers = await User.find(query)
-      .select('name phone vehicle currentLocation rating isAvailable')
-      .limit(10)
-      .lean()
-      .exec();
-
-    // Ré-ordonner selon la distance Redis (puisque $in ne garantit pas l'ordre)
-    const sortedDrivers = driverIds
-      .map(id => drivers.find(d => d._id.toString() === id))
-      .filter(d => d !== undefined)
-      .slice(0, 10);
-
-    logger.info(`[DAO-USER] Redis a trouve ${driverIds.length} IDs, MongoDB a valide ${sortedDrivers.length} chauffeurs actifs.`);
-    
-    return sortedDrivers;
   } catch (error) {
-    logger.error(`[DAO-USER] Erreur Pivot Redis/DB : ${error.message}`);
+    logger.error(`[DAO-USER] Erreur Redis inattendue : ${error.message}`);
+    useRedis = false;
+  }
+
+  // 2. CONSTITUTION DE LA REQUÊTE MONGODB
+  const query = {
+    role: 'driver',
+    isAvailable: true,
+    isBanned: false,
+    'ledger.isBlocked': { $ne: true } // Utilisation de $ne pour être robuste aux champs manquants/non-initialisés
+  };
+
+  // Filtrage par type de mission résilient aux champs manquants
+  if (missionType === 'DELIVERY') {
+    query['deliveryPreferences.isDeliveryActive'] = { $ne: false };
+  } else {
+    query['deliveryPreferences.isVtcActive'] = { $ne: false };
+  }
+
+  if (rejectedDriverIds && rejectedDriverIds.length > 0) {
+    query._id = { $nin: rejectedDriverIds };
+  }
+
+  try {
+    let drivers = [];
+
+    if (useRedis && driverIds && driverIds.length > 0) {
+      // Filtrer les drivers trouvés par Redis
+      query._id = { ...query._id, $in: driverIds };
+      
+      drivers = await User.find(query)
+        .select('name phone vehicle currentLocation rating isAvailable')
+        .limit(10)
+        .lean()
+        .exec();
+
+      // Ré-ordonner selon la distance Redis (puisque $in ne garantit pas l'ordre)
+      const sortedDrivers = driverIds
+        .map(id => drivers.find(d => d._id.toString() === id))
+        .filter(d => d !== undefined)
+        .slice(0, 10);
+
+      logger.info(`[DAO-USER] Redis a trouve ${driverIds.length} IDs, MongoDB a valide ${sortedDrivers.length} chauffeurs actifs.`);
+      return sortedDrivers;
+    } else {
+      // 3. FALLBACK MONGODB GEOSPATIAL (Si Redis a échoué ou ne renvoie rien)
+      logger.info(`[DAO-USER] Repli sur la recherche géospatiale MongoDB ($nearSphere)...`);
+      
+      query.currentLocation = {
+        $nearSphere: {
+          $geometry: {
+            type: 'Point',
+            coordinates: [safeLng, safeLat]
+          },
+          $maxDistance: safeMaxDistance
+        }
+      };
+
+      drivers = await User.find(query)
+        .select('name phone vehicle currentLocation rating isAvailable')
+        .limit(10)
+        .lean()
+        .exec();
+
+      logger.info(`[DAO-USER] Recherche géospatiale MongoDB a trouvé ${drivers.length} chauffeurs.`);
+      return drivers;
+    }
+  } catch (error) {
+    logger.error(`[DAO-USER] Erreur Pivot Redis/DB ou Fallback MongoDB : ${error.message}`);
     return [];
   }
 };
