@@ -30,7 +30,7 @@ const productSchema = new mongoose.Schema({
     type: String,
     required: [true, 'La catégorie est obligatoire'],
     enum: {
-      values: ['Food', 'Cosmetics', 'Electronics', 'Home', 'Supermarket', 'Other'],
+      values: ['Food', 'Cosmetics', 'Electronics', 'Home', 'Supermarket', 'Fashion', 'Sports', 'Tools', 'Toys', 'Automotive', 'Office', 'Other'],
       message: 'Catégorie {VALUE} non supportée'
     },
     default: 'Other'
