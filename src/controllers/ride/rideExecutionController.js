@@ -26,7 +26,7 @@ const markAsArrived = async (req, res, next) => {
     });
 
     notificationService.sendNotification(
-      ride.rider, "Chauffeur sur place", "Votre chauffeur est arrive au point de rendez-vous.", "DRIVER_ARRIVED", { rideId: ride._id.toString() }
+      ride.rider, "Chauffeur sur place", "Votre chauffeur est arrivé au point de rendez-vous.", "DRIVER_ARRIVED", { rideId: ride._id.toString() }
     ).catch(() => {});
     
     logger.info(`[RIDE EXECUTION] Course ${rideId} - Chauffeur sur place (Statut: arrived). Driver ID: ${req.user._id}`);
@@ -53,7 +53,7 @@ const startRide = async (req, res, next) => {
     });
 
     notificationService.sendNotification(
-      ride.rider, "Course demarree", "Votre course a commence. Bonne route !", "RIDE_STARTED", { rideId: ride._id.toString() }
+      ride.rider, "Course démarrée", "Votre course a commencé. Bonne route !", "RIDE_STARTED", { rideId: ride._id.toString() }
     ).catch(() => {});
     
     logger.info(`[RIDE EXECUTION] Course ${rideId} demarree (Statut: in_progress). Driver ID: ${req.user._id}`);
@@ -88,7 +88,7 @@ const completeRide = async (req, res, next) => {
     });
 
     notificationService.sendNotification(
-      ride.rider, "Course terminee", "Nous sommes arrives a destination. Merci d'avoir voyage avec Yely !", "RIDE_COMPLETED", { rideId: ride._id.toString() }
+      ride.rider, "Course terminée", "Nous sommes arrivés à destination. Merci d'avoir voyagé avec Yely !", "RIDE_COMPLETED", { rideId: ride._id.toString() }
     ).catch(() => {});
     
     logger.info(`[RIDE EXECUTION] Course ${rideId} terminee. Driver ID: ${req.user._id}. Prix final: ${ride.price}`);
@@ -102,7 +102,7 @@ const completeRide = async (req, res, next) => {
         if (!driver.subscription || !driver.subscription.isActive) {
           if (io) {
             io.to(driver._id.toString()).emit('FORCE_SUBSCRIPTION_LOCK', {
-              message: "Votre periode de grace est terminee. Veuillez activer un Pass Yely pour continuer a recevoir des courses."
+              message: "Votre période de grâce est terminée. Veuillez activer un Pass Yely pour continuer à recevoir des courses."
             });
             logger.info(`[SUBSCRIPTION LOCK] Chauffeur ${req.user._id} verrouille a la fin de la course.`);
           }
@@ -120,7 +120,7 @@ const completeRide = async (req, res, next) => {
         totalEarnings: updatedDriver.totalEarnings,
         rating: updatedDriver.rating
       }
-    }, 'Course achevee');
+    }, 'Course achevée');
   } catch (error) {
     return next(error);
   }
@@ -132,11 +132,11 @@ const rateRide = async (req, res, next) => {
     const { rating, comment } = req.body;
     
     if (!rideId) throw new AppError('L\'identifiant de la course est manquant.', 400);
-    if (!rating || rating < 1 || rating > 5) throw new AppError('La note doit etre comprise entre 1 et 5.', 400);
+    if (!rating || rating < 1 || rating > 5) throw new AppError('La note doit être comprise entre 1 et 5.', 400);
 
     await rideService.submitRideRating(rideId, rating, comment);
 
-    return successResponse(res, { status: 'rated' }, 'Note enregistree avec succes');
+    return successResponse(res, { status: 'rated' }, 'Note enregistrée avec succès');
   } catch (error) {
     return next(error);
   }
@@ -149,7 +149,7 @@ const getRideHistory = async (req, res, next) => {
     
     const result = await rideService.getRideHistory(req.user, page, limit);
     
-    return successResponse(res, result, 'Historique recupere');
+    return successResponse(res, result, 'Historique récupéré');
   } catch (error) {
     return next(error);
   }
@@ -161,11 +161,11 @@ const hideFromHistory = async (req, res, next) => {
     
     if (id === 'all') {
       await rideService.hideAllRidesFromHistory(req.user);
-      return successResponse(res, null, 'Tout votre historique a ete efface.');
+      return successResponse(res, null, 'Tout votre historique a été effacé.');
     }
     
     await rideService.hideRideFromHistory(req.user, id);
-    return successResponse(res, null, 'Course supprimee de votre historique.');
+    return successResponse(res, null, 'Course supprimée de votre historique.');
   } catch (error) {
     return next(error);
   }

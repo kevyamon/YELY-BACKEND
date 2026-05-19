@@ -86,12 +86,12 @@ const cancelRide = async (req, res, next) => {
     if (req.user.role === 'rider' && ride.driver) {
        io.to(ride.driver.toString()).emit('ride_cancelled', { rideId });
        notificationService.sendNotification(
-         ride.driver, "Course annulee", "Le passager a annule la demande.", "RIDE_CANCELLED", { rideId: rideId.toString() }
+         ride.driver, "Course annulée", "Le passager a annulé la demande.", "RIDE_CANCELLED", { rideId: rideId.toString() }
        ).catch(() => {});
     } else if (req.user.role === 'driver') {
        io.to(ride.rider.toString()).emit('ride_cancelled', { rideId });
        notificationService.sendNotification(
-         ride.rider, "Course annulee", "Le chauffeur a du annuler la course.", "RIDE_CANCELLED", { rideId: rideId.toString() }
+         ride.rider, "Course annulée", "Le chauffeur a dû annuler la course.", "RIDE_CANCELLED", { rideId: rideId.toString() }
        ).catch(() => {});
     }
 
@@ -142,7 +142,7 @@ const cancelRide = async (req, res, next) => {
       await poiController.releasePendingPOI(ride.destination.address, io);
     }
 
-    return successResponse(res, { status: 'cancelled' }, 'Course annulee avec succes');
+    return successResponse(res, { status: 'cancelled' }, 'Course annulée avec succès');
   } catch (error) {
     return next(error);
   }
@@ -156,10 +156,10 @@ const emergencyCancel = async (req, res, next) => {
     if (result.driversFreed && result.driversFreed.length > 0) {
       result.driversFreed.forEach(driverId => {
         io.to(driverId.toString()).emit('ride_cancelled', {
-          message: 'La course a ete annulee suite a une reinitialisation du client.'
+          message: 'La course a été annulée suite à une réinitialisation du client.'
         });
         notificationService.sendNotification(
-          driverId, "Course annulee", "La course a ete annulee (Nettoyage systeme).", "RIDE_CANCELLED", {}
+          driverId, "Course annulée", "La course a été annulée (Nettoyage système).", "RIDE_CANCELLED", {}
         ).catch(() => {});
       });
     }
@@ -175,7 +175,7 @@ const emergencyCancel = async (req, res, next) => {
       }
     }
 
-    return successResponse(res, result, 'Base de donnees nettoyee avec succes');
+    return successResponse(res, result, 'Base de données nettoyée avec succès');
   } catch (error) {
     return next(error);
   }
@@ -188,25 +188,25 @@ const lockRide = async (req, res, next) => {
     if (!rideId) {
       throw new AppError('L\'identifiant de la course est manquant.', 400);
     }
-
+ 
     const ride = await rideService.lockRideForNegotiation(rideId, req.user._id);
     const io = req.app.get('socketio');
-
+ 
     io.to(ride.rider.toString()).emit('driver_found', {
       driverName: req.user.name,
       vehicle: req.user.vehicle,
       driverProfilePicture: req.user.profilePicture 
     });
-
+ 
     notificationService.sendNotification(
-      ride.rider, "Chauffeur trouve", `${req.user.name} est interesse par votre course et prepare son tarif.`, "DRIVER_FOUND", { rideId: ride._id.toString() }
+      ride.rider, "Chauffeur trouvé", `${req.user.name} est intéressé par votre course et prépare son tarif.`, "DRIVER_FOUND", { rideId: ride._id.toString() }
     ).catch(() => {});
-
+ 
     return successResponse(res, { 
       rideId: ride._id, 
       status: ride.status, 
       priceOptions: ride.priceOptions 
-    }, 'Course verrouillee');
+    }, 'Course verrouillée');
   } catch (error) {
     return next(error);
   }
@@ -264,7 +264,7 @@ const finalizeRide = async (req, res, next) => {
       });
 
       notificationService.sendNotification(
-        driver._id, "Course acceptee", "Le passager a valide votre prix. En route !", "PROPOSAL_ACCEPTED", { rideId: result.ride._id.toString() }
+        driver._id, "Course acceptée", "Le passager a validé votre prix. En route !", "PROPOSAL_ACCEPTED", { rideId: result.ride._id.toString() }
       ).catch(() => {});
 
       // --- EMETTRE LES EVENTS TEMPS REEL DE L'ORDRE ---
@@ -296,21 +296,21 @@ const finalizeRide = async (req, res, next) => {
           location: driver.currentLocation,
           profilePicture: driver.profilePicture 
         } 
-      }, 'Course confirmee');
+      }, 'Course confirmée');
 
     } else {
       io.to(result.rejectedDriverId.toString()).emit('proposal_rejected', {
-        message: 'Prix refuse'
+        message: 'Prix refusé'
       });
 
       notificationService.sendNotification(
-        result.rejectedDriverId, "Proposition refusee", "Le passager a decline votre tarif.", "PROPOSAL_REJECTED", { rideId: result.ride._id.toString() }
+        result.rejectedDriverId, "Proposition refusée", "Le passager a décliné votre tarif.", "PROPOSAL_REJECTED", { rideId: result.ride._id.toString() }
       ).catch(() => {});
 
       const newDrivers = await rideService.dispatchToNearbyDrivers(result.ride);
       const rider = await User.findById(req.user._id).select('name profilePicture');
 
-      logger.info(`[DISPATCH-RETRY] Recherche relancee pour ${result.ride._id}. ${newDrivers.length} nouveaux chauffeurs trouves.`);
+      logger.info(`[DISPATCH-RETRY] Recherche relancée pour ${result.ride._id}. ${newDrivers.length} nouveaux chauffeurs trouvés.`);
 
       newDrivers.forEach(driver => {
         io.to(driver._id.toString()).emit('new_ride_request', {
@@ -326,7 +326,7 @@ const finalizeRide = async (req, res, next) => {
         });
       });
 
-      return successResponse(res, { status: 'searching' }, 'Recherche relancee');
+      return successResponse(res, { status: 'searching' }, 'Recherche relancée');
     }
   } catch (error) {
     return next(error);
