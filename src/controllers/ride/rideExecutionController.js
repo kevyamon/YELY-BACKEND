@@ -171,11 +171,25 @@ const hideFromHistory = async (req, res, next) => {
   }
 };
 
+const collectPoint = async (req, res, next) => {
+  try {
+    const { rideId, sellerId } = req.body;
+    const io = req.app.get('socketio');
+
+    const result = await rideService.collectPointAction(rideId, req.user._id, sellerId, io);
+
+    return successResponse(res, result, 'Collecte validée avec succès');
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   markAsArrived,
   startRide,
   completeRide,
   rateRide,
   getRideHistory,
-  hideFromHistory
+  hideFromHistory,
+  collectPoint
 };

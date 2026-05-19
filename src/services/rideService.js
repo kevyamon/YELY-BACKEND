@@ -22,6 +22,7 @@ module.exports = {
   markRideAsArrived: rideExecutionService.markRideAsArrived,
   startRideSession: rideExecutionService.startRideSession,
   completeRideSession: rideExecutionService.completeRideSession,
+  collectPointAction: rideExecutionService.collectPointAction,
   submitRideRating: rideExecutionService.submitRideRating,
   checkRideProgressOnLocationUpdate: rideExecutionService.checkRideProgressOnLocationUpdate,
   getRideHistory: rideExecutionService.getRideHistory,

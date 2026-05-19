@@ -125,25 +125,69 @@ exports.updateOrderStatus = async (req, res, next) => {
 
     // Transitions et Notifications
     if (status === 'confirmed') {
+      order.confirmedAt = Date.now();
+      
+      await sendNotification(
+        order.customer._id, 
+        'Commande confirmée', 
+        `${order.seller.name} prépare votre commande.`, 
+        'ORDER_UPDATE', 
+        { orderId: order._id }
+      );
+    } 
+    else if (status === 'searching') {
       const isManualRetry = ['searching_delivery_retry', 'cancelled_no_driver'].includes(order.status);
       
-      order.confirmedAt = Date.now();
       order.deliveryRetryCount = 0; // Réinitialise les tentatives de relance automatique
       
       await sendNotification(
         order.customer._id, 
-        'Recherche de livreur relancée 🔄', 
+        'Recherche de livreur lancée', 
         isManualRetry
           ? `${order.seller.name} relance la recherche d'un livreur pour votre commande.`
-          : `${order.seller.name} prépare votre commande et recherche un livreur.`, 
+          : `Votre commande est prête. Recherche d'un livreur disponible.`, 
         'ORDER_UPDATE', 
         { orderId: order._id }
       );
 
-      // --- LOGIQUE DE DISPATCH LIVREUR (TRICHE SUR LES RIDES) ---
+      // --- LOGIQUE DE DISPATCH LIVREUR AVEC COLLECTE MULTI-VENDEURS ---
       try {
         const rideLifecycleService = require('../services/ride/rideLifecycleService');
         const redisClient = req.app.get('redis');
+        const io = req.app.get('socketio');
+        const User = require('../models/User');
+
+        // Extraire tous les vendeurs uniques des articles de la commande
+        const uniqueSellersMap = new Map();
+        
+        // Ajouter le vendeur principal de la commande en premier
+        uniqueSellersMap.set(order.seller._id.toString(), {
+          seller: order.seller._id,
+          address: order.seller.address || 'Point de retrait vendeur',
+          coordinates: order.seller.currentLocation.coordinates,
+          isCollected: false
+        });
+
+        // Parcourir les articles pour trouver d'autres vendeurs
+        for (const item of order.items) {
+          if (item.product && item.product.seller) {
+            const sId = item.product.seller._id.toString();
+            if (!uniqueSellersMap.has(sId)) {
+              // Récupérer les détails du vendeur secondaire
+              const secondarySeller = await User.findById(item.product.seller._id || item.product.seller);
+              if (secondarySeller) {
+                uniqueSellersMap.set(sId, {
+                  seller: secondarySeller._id,
+                  address: secondarySeller.address || 'Point de retrait vendeur secondaire',
+                  coordinates: secondarySeller.currentLocation.coordinates,
+                  isCollected: false
+                });
+              }
+            }
+          }
+        }
+
+        const collectionPoints = Array.from(uniqueSellersMap.values());
 
         const deliveryData = {
           origin: {
@@ -157,20 +201,47 @@ exports.updateOrderStatus = async (req, res, next) => {
           forfait: 'STANDARD',
           passengersCount: 1,
           type: 'DELIVERY', // Type spécial pour distinguer des taxis
-          orderId: order._id // Référence croisée
+          orderId: order._id, // Référence croisée
+          deliveryPrice: order.deliveryPrice,
+          collectionPoints
         };
 
-        const { ride } = await rideLifecycleService.createRideRequest(order.customer._id, deliveryData, redisClient);
+        const { ride, drivers } = await rideLifecycleService.createRideRequest(order.customer._id, deliveryData, redisClient);
         
         // On lie la livraison à la commande
         order.deliveryRideId = ride._id;
-        logger.info(`[MARKETPLACE DISPATCH] Livraison créée pour commande ${order._id} : Ride ${ride._id}`);
+        logger.info(`[MARKETPLACE DISPATCH] Livraison créée pour commande ${order._id} : Ride ${ride._id}. ${drivers.length} livreurs ciblés.`);
+
+        // Émission Socket instantanée aux chauffeurs/livreurs ciblés
+        if (drivers && drivers.length > 0 && io) {
+          drivers.forEach(driver => {
+            io.to(driver._id.toString()).emit('new_ride_request', {
+              rideId: ride._id,
+              origin: ride.origin,       
+              destination: ride.destination, 
+              distance: ride.distance,
+              forfait: ride.forfait,
+              passengersCount: ride.passengersCount,
+              priceOptions: ride.priceOptions,
+              riderName: order.customer.name,
+              riderProfilePicture: order.customer.profilePicture,
+              collectionPoints: ride.collectionPoints,
+              type: 'DELIVERY'
+            });
+          });
+        }
       } catch (dispatchError) {
         logger.error(`[MARKETPLACE DISPATCH] Erreur lors de la création de la livraison : ${dispatchError.message}`);
       }
-    } 
+    }
     else if (status === 'rejected') {
-      await sendNotification(order.customer._id, 'Commande refusée ❌', `${order.seller.name} ne peut pas honorer votre commande : ${comment || 'Indisponible'}`, 'ORDER_UPDATE', { orderId: order._id });
+      await sendNotification(
+        order.customer._id, 
+        'Commande refusée', 
+        `${order.seller.name} ne peut pas honorer votre commande : ${comment || 'Indisponible'}`, 
+        'ORDER_UPDATE', 
+        { orderId: order._id }
+      );
     }
     else if (status === 'delivered') {
       order.deliveredAt = Date.now();
@@ -185,7 +256,6 @@ exports.updateOrderStatus = async (req, res, next) => {
       }
 
       // --- LOGIQUE DE DÉDUCTION DES STOCKS EN TEMPS RÉEL (SAUF NOURRITURE) ---
-      // Seul le statut livré déduit définitivement le stock du produit.
       if (order.status !== 'delivered') {
         for (const item of order.items) {
           try {
@@ -202,7 +272,6 @@ exports.updateOrderStatus = async (req, res, next) => {
               
               logger.info(`[STOCK DEDUCTION] Produit ${product.name} (${product._id}) déduit de ${item.quantity}. Ancien stock: ${currentStock}, Nouveau stock: ${newStock}`);
               
-              // Notification temps réel aux autres clients / clients connectés
               const io = req.app.get('socketio');
               if (io) {
                 io.emit('product_updated', product);
@@ -214,7 +283,13 @@ exports.updateOrderStatus = async (req, res, next) => {
         }
       }
 
-      await sendNotification(order.customer._id, 'Livrée ! 🎉', 'Votre commande a été livrée. Merci de votre confiance !', 'ORDER_COMPLETE', { orderId: order._id });
+      await sendNotification(
+        order.customer._id, 
+        'Commande livrée', 
+        'Votre commande a été livrée. Merci de votre confiance !', 
+        'ORDER_COMPLETE', 
+        { orderId: order._id }
+      );
     }
 
     order.status = status;
@@ -284,7 +359,7 @@ exports.cancelOrder = async (req, res, next) => {
         }
 
         // Envoyer la notification push au vendeur
-        await sendNotification(updatedOrder.seller._id, 'Commande annulée ⚠️', `Le client a annulé sa commande #${updatedOrder._id.toString().slice(-6)}`, 'ORDER_CANCELLED');
+        await sendNotification(updatedOrder.seller._id, 'Commande annulée', `Le client a annulé sa commande #${updatedOrder._id.toString().slice(-6)}`, 'ORDER_CANCELLED');
 
         return res.status(200).json({ success: true, data: updatedOrder });
       } catch (rideCancelError) {
@@ -303,7 +378,7 @@ exports.cancelOrder = async (req, res, next) => {
       io.to(order.customer.toString()).emit('order_updated', order);
     }
     
-    await sendNotification(order.seller, 'Commande annulée ⚠️', `Le client a annulé sa commande #${order._id.toString().slice(-6)}`, 'ORDER_CANCELLED');
+    await sendNotification(order.seller, 'Commande annulée', `Le client a annulé sa commande #${order._id.toString().slice(-6)}`, 'ORDER_CANCELLED');
 
     res.status(200).json({ success: true, data: order });
   } catch (error) { next(error); }

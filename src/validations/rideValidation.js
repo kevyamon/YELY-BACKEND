@@ -67,9 +67,25 @@ const finalizeRideSchema = z.object({
   })
 }); 
 
+const collectPointSchema = z.object({
+  rideId: z.string({
+    required_error: "L'identifiant de la course est manquant.",
+    invalid_type_error: "L'identifiant de la course est invalide."
+  })
+  .trim()
+  .regex(/^[0-9a-fA-F]{24}$/, 'Identifiant de course non reconnu.'),
+  sellerId: z.string({
+    required_error: "L'identifiant du vendeur est manquant.",
+    invalid_type_error: "L'identifiant du vendeur est invalide."
+  })
+  .trim()
+  .regex(/^[0-9a-fA-F]{24}$/, 'Identifiant du vendeur non reconnu.')
+});
+
 module.exports = {
   requestRideSchema,
   rideActionSchema,
   submitPriceSchema,
-  finalizeRideSchema
+  finalizeRideSchema,
+  collectPointSchema
 };

@@ -22,10 +22,10 @@ const errorHandler = (err, req, res, next) => {
   if (error.code === 11000) {
     const field = Object.keys(error.keyValue)[0];
     const message = field === 'email' 
-      ? 'Un compte existe deja avec cette adresse e-mail. Veuillez vous connecter.' 
+      ? 'Un compte existe déjà avec cette adresse e-mail. Veuillez vous connecter.' 
       : field === 'phone'
-      ? 'Ce numero de telephone est deja associe a un autre compte.'
-      : 'Ces informations sont deja utilisees dans notre systeme.';
+      ? 'Ce numéro de téléphone est déjà associé à un autre compte.'
+      : 'Ces informations sont déjà utilisées dans notre système.';
     error = new AppError(message, 409);
     error.isOperational = true;
   }
@@ -36,7 +36,7 @@ const errorHandler = (err, req, res, next) => {
   }
 
   if (error.name === 'ValidationError') {
-    error = new AppError('Certaines donnees fournies sont invalides. Veuillez verifier votre saisie.', 400);
+    error = new AppError('Certaines données fournies sont invalides. Veuillez vérifier votre saisie.', 400);
     error.isOperational = true;
   }
 
@@ -46,7 +46,7 @@ const errorHandler = (err, req, res, next) => {
   }
   
   if (error.name === 'TokenExpiredError') {
-    error = new AppError('Votre session a expire. Veuillez vous reconnecter.', 401);
+    error = new AppError('Votre session a expiré. Veuillez vous reconnecter.', 401);
     error.isOperational = true;
   }
 

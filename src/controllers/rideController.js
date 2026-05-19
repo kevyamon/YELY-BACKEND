@@ -20,6 +20,7 @@ module.exports = {
   markAsArrived: rideExecutionController.markAsArrived,
   startRide: rideExecutionController.startRide,
   completeRide: rideExecutionController.completeRide,
+  collectPoint: rideExecutionController.collectPoint,
   rateRide: rideExecutionController.rateRide,
   getRideHistory: rideExecutionController.getRideHistory,
   hideFromHistory: rideExecutionController.hideFromHistory 

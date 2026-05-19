@@ -74,14 +74,14 @@ const requestRide = async (req, res, next) => {
 const cancelRide = async (req, res, next) => {
   try {
     const rideId = req.params.id || req.body.rideId; 
-    const reason = req.body.reason || `Annule par le ${req.user.role}`;
+    const reason = req.body.reason || `Annulé par le ${req.user.role}`;
     
     if (!rideId) {
       throw new AppError('L\'identifiant de la course est manquant.', 400);
     }
 
-    const ride = await rideService.cancelRideAction(rideId, req.user._id, req.user.role, reason);
     const io = req.app.get('socketio');
+    const ride = await rideService.cancelRideAction(rideId, req.user._id, req.user.role, reason, io);
 
     if (req.user.role === 'rider' && ride.driver) {
        io.to(ride.driver.toString()).emit('ride_cancelled', { rideId });
@@ -108,7 +108,7 @@ const cancelRide = async (req, res, next) => {
               // Annulation par le client
               notificationService.sendNotification(
                 order.seller._id,
-                "Commande annulée ⚠️",
+                "Commande annulée",
                 `Le client a annulé sa commande #${order._id.toString().slice(-6)} et sa livraison.`,
                 "ORDER_CANCELLED",
                 { orderId: order._id.toString() }
@@ -117,7 +117,7 @@ const cancelRide = async (req, res, next) => {
               // Annulation par le chauffeur (Relance automatique du dispatch en cours)
               notificationService.sendNotification(
                 order.customer._id,
-                "Recherche de livreur relancée 🔄",
+                "Recherche de livreur relancée",
                 `Votre livreur s'est désisté. Nous recherchons activement un autre livreur pour votre commande.`,
                 "ORDER_UPDATE",
                 { orderId: order._id.toString() }
@@ -125,7 +125,7 @@ const cancelRide = async (req, res, next) => {
               
               notificationService.sendNotification(
                 order.seller._id,
-                "Recherche de livreur relancée 🔄",
+                "Recherche de livreur relancée",
                 `Le livreur s'est désisté de la commande #${order._id.toString().slice(-6)}. La recherche d'un nouveau livreur a été relancée automatiquement.`,
                 "ORDER_UPDATE",
                 { orderId: order._id.toString() }
@@ -217,11 +217,75 @@ const submitPrice = async (req, res, next) => {
     const { rideId, amount } = req.body;
     
     if (!rideId || !amount) {
-      throw new AppError('Donnees incompletes pour soumettre un prix.', 400);
+      throw new AppError('Données incomplètes pour soumettre un prix.', 400);
     }
 
     const ride = await rideService.submitPriceProposal(rideId, req.user._id, amount);
     const io = req.app.get('socketio');
+
+    if (ride.type === 'DELIVERY') {
+      const rider = await User.findById(ride.rider).select('name phone profilePicture');
+      
+      io.to(req.user._id.toString()).emit('proposal_accepted', {
+        rideId: ride._id,
+        riderName: rider?.name || 'Client',
+        riderPhone: rider?.phone,
+        riderProfilePicture: rider?.profilePicture, 
+        origin: ride.origin,
+        destination: ride.destination,
+        collectionPoints: ride.collectionPoints,
+        type: 'DELIVERY'
+      });
+
+      io.to(ride.rider.toString()).emit('ride_accepted', {
+        rideId: ride._id,
+        driver: {
+          name: req.user.name,
+          phone: req.user.phone,
+          vehicle: req.user.vehicle,
+          location: req.user.currentLocation,
+          profilePicture: req.user.profilePicture
+        }
+      });
+
+      if (ride.orderId) {
+        const Order = require('../../models/Order');
+        Order.findById(ride.orderId).populate('customer seller driver')
+          .then(order => {
+            if (order) {
+              io.to(order.customer._id.toString()).emit('order_updated', order);
+              io.to(order.seller._id.toString()).emit('order_updated', order);
+              
+              notificationService.sendNotification(
+                order.seller._id, 
+                "Livreur attribué", 
+                `Le livreur ${req.user.name} a accepté la livraison de la commande #${order._id.toString().slice(-6)}. Il arrive pour récupérer le colis.`, 
+                "ORDER_UPDATE", 
+                { orderId: order._id.toString() }
+              ).catch(() => {});
+
+              notificationService.sendNotification(
+                order.customer._id, 
+                "Livreur en route", 
+                `Le livreur ${req.user.name} a été attribué à votre commande et est en route.`, 
+                "ORDER_UPDATE", 
+                { orderId: order._id.toString() }
+              ).catch(() => {});
+            }
+          });
+      }
+
+      return successResponse(res, { 
+        status: 'accepted',
+        driver: {
+          name: req.user.name,
+          phone: req.user.phone,
+          vehicle: req.user.vehicle,
+          location: req.user.currentLocation,
+          profilePicture: req.user.profilePicture
+        }
+      }, 'Livraison acceptée');
+    }
 
     io.to(ride.rider.toString()).emit('price_proposal_received', {
       amount: ride.proposedPrice,
@@ -278,7 +342,7 @@ const finalizeRide = async (req, res, next) => {
               
               notificationService.sendNotification(
                 order.seller._id, 
-                "Livreur attribué 🚴", 
+                "Livreur attribué", 
                 `Le livreur ${driver.name} a accepté la livraison de la commande #${order._id.toString().slice(-6)}. Il arrive pour récupérer le colis.`, 
                 "ORDER_UPDATE", 
                 { orderId: order._id.toString() }

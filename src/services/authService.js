@@ -173,12 +173,12 @@ const resetPasswordWithOtp = async (email, otp, newPassword) => {
     .select('+resetPasswordOtp +resetPasswordExpires');
 
   if (!user || user.isDeleted || !user.resetPasswordExpires || user.resetPasswordExpires < Date.now()) {
-    throw new AppError('Le code est invalide ou a expire.', 400);
+    throw new AppError('Le code est invalide ou a expiré.', 400);
   }
 
   const isValidOtp = await bcrypt.compare(otp.toString(), user.resetPasswordOtp);
   if (!isValidOtp) {
-    throw new AppError('Le code est invalide ou a expire.', 400);
+    throw new AppError('Le code est invalide ou a expiré.', 400);
   }
 
   user.password = newPassword;

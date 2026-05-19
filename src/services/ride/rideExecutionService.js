@@ -361,6 +361,75 @@ const getRideHistory = async (user, page = 1, limit = 20) => {
   };
 };
 
+const collectPointAction = async (rideId, driverId, sellerId, io = null) => {
+  const ride = await Ride.findOne({ _id: rideId, driver: driverId });
+  if (!ride) throw new AppError('Course introuvable.', 404);
+
+  if (ride.status !== 'accepted' && ride.status !== 'arrived') {
+    throw new AppError('La course n\'est pas dans un état permettant la collecte.', 400);
+  }
+
+  const point = ride.collectionPoints.find(p => p.seller.toString() === sellerId.toString());
+  if (!point) throw new AppError('Ce vendeur ne fait pas partie des points de collecte.', 400);
+
+  if (point.isCollected) {
+    throw new AppError('Ce point de collecte a déjà été validé.', 400);
+  }
+
+  point.isCollected = true;
+  await ride.save();
+
+  logger.info(`[DELIVERY COLLECT] Point de collecte ${sellerId} validé pour le Ride ${rideId}.`);
+
+  const allCollected = ride.collectionPoints.every(p => p.isCollected);
+
+  if (allCollected) {
+    ride.status = 'in_progress';
+    await ride.save();
+
+    if (ride.orderId) {
+      const Order = require('../../models/Order');
+      const order = await Order.findById(ride.orderId).populate('customer seller driver');
+      if (order) {
+        order.status = 'picked_up';
+        order.history.push({
+          status: 'picked_up',
+          comment: 'Tous les colis ont été récupérés par le livreur. En cours de livraison vers le client.',
+          timestamp: Date.now()
+        });
+        await order.save();
+
+        if (io) {
+          io.to(order.customer._id.toString()).emit('order_updated', order);
+          io.to(order.seller._id.toString()).emit('order_updated', order);
+        }
+
+        notificationService.sendNotification(
+          order.customer._id,
+          'Commande en cours de livraison',
+          `Le livreur a récupéré tous vos articles et est en route vers votre adresse.`,
+          'ORDER_UPDATE',
+          { orderId: order._id.toString() }
+        ).catch(() => {});
+      }
+    }
+
+    if (io) {
+      io.to(ride.rider.toString()).emit('ride_status_update', { rideId, status: 'in_progress', ride });
+      io.to(driverId.toString()).emit('ride_status_update', { rideId, status: 'in_progress', ride });
+    }
+
+    logger.info(`[DELIVERY IN_PROGRESS] Tous les colis collectés pour Ride ${rideId}. Statut course passée à in_progress.`);
+  } else {
+    if (io) {
+      io.to(ride.rider.toString()).emit('ride_status_update', { rideId, status: ride.status, ride });
+      io.to(driverId.toString()).emit('ride_status_update', { rideId, status: ride.status, ride });
+    }
+  }
+
+  return { success: true, allCollected, ride };
+};
+
 const hideRideFromHistory = async (user, rideId) => {
   const ride = await Ride.findById(rideId);
   if (!ride) throw new AppError("Course introuvable.", 404);
@@ -396,6 +465,7 @@ module.exports = {
   markRideAsArrived,
   startRideSession,
   completeRideSession,
+  collectPointAction,
   submitRideRating,
   checkRideProgressOnLocationUpdate,
   getRideHistory,

@@ -125,8 +125,10 @@ const dispatchToNearbyDrivers = async (ride, radius) => {
     drivers.forEach(driver => {
       notificationService.sendNotification(
         driver._id,
-        'Nouvelle demande de course',
-        `Course de ${ride.distance} km disponible a proximite.`,
+        ride.type === 'DELIVERY' ? 'Nouvelle demande de livraison' : 'Nouvelle demande de course',
+        ride.type === 'DELIVERY'
+          ? `Livraison de ${ride.distance} km disponible à proximité.`
+          : `Course de ${ride.distance} km disponible à proximité.`,
         'NEW_RIDE_REQUEST',
         { rideId: ride._id.toString() }
       ).catch(err => logger.error(`[PUSH ERROR] Echec d'envoi au chauffeur ${driver._id}: ${err.message}`));
@@ -171,8 +173,20 @@ const expandSearchRadius = async (io, rideId) => {
         passengersCount: ride.passengersCount,
         priceOptions: ride.priceOptions,
         riderName: rider?.name,
-        riderProfilePicture: rider?.profilePicture 
+        riderProfilePicture: rider?.profilePicture,
+        collectionPoints: ride.collectionPoints,
+        type: ride.type
       });
+
+      notificationService.sendNotification(
+        driver._id,
+        ride.type === 'DELIVERY' ? 'Nouvelle demande de livraison' : 'Nouvelle demande de course',
+        ride.type === 'DELIVERY'
+          ? `Livraison de ${ride.distance} km disponible à proximité.`
+          : `Course de ${ride.distance} km disponible à proximité.`,
+        'NEW_RIDE_REQUEST',
+        { rideId: ride._id.toString() }
+      ).catch(err => logger.error(`[PUSH ERROR] Echec d'envoi au chauffeur ${driver._id}: ${err.message}`));
     });
   } 
 
@@ -233,7 +247,9 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
  
     if (distance < 0.1) throw new AppError('Distance invalide.', 400);
  
-    const pricingResult = await pricingService.generatePriceOptions(originCoords, destCoords, distance, count, type === 'DELIVERY');
+    const pricingResult = type === 'DELIVERY'
+      ? null
+      : await pricingService.generatePriceOptions(originCoords, destCoords, distance, count, false);
     
     const initialRadius = 1000;
  
@@ -244,13 +260,16 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       distance,
       forfait: forfait || 'STANDARD',
       passengersCount: count,
-      priceOptions: pricingResult.options, 
+      priceOptions: type === 'DELIVERY'
+        ? [{ label: 'STANDARD', amount: rideData.deliveryPrice || 0, description: 'Tarif de livraison fixe' }]
+        : pricingResult.options, 
       status: 'searching',
       rejectedDrivers: [],
       notifiedDrivers: [],
       currentSearchRadius: initialRadius,
       type: type || 'RIDE',
-      orderId: orderId || null
+      orderId: orderId || null,
+      collectionPoints: rideData.collectionPoints || []
     });
 
     const drivers = await dispatchToNearbyDrivers(ride, initialRadius);
@@ -269,24 +288,25 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
   }
 };
 
-const cancelRideAction = async (rideId, userId, userRole, reason) => {
+const cancelRideAction = async (rideId, userId, userRole, reason, io = null) => {
   const query = { _id: rideId };
   if (userRole === 'rider') query.rider = userId;
   else if (userRole === 'driver') query.driver = userId;
 
   const ride = await Ride.findOne(query);
-  if (!ride) throw new AppError('Course introuvable ou acces refuse.', 404);
+  if (!ride) throw new AppError('Course introuvable ou accès refusé.', 404);
   
   if (['completed', 'cancelled'].includes(ride.status)) {
-    throw new AppError('Course deja terminee ou annulee.', 400);
+    throw new AppError('Course déjà terminée ou annulée.', 400);
   }
 
   ride.status = 'cancelled';
-  ride.cancellationReason = reason || 'Annulee manuellement';
+  ride.cancellationReason = reason || 'Annulée manuellement';
   await ride.save();
 
   if (ride.driver) {
-    await userRepository.updateDriverAvailability(ride.driver, true);
+    const User = require('../../models/User');
+    await User.findByIdAndUpdate(ride.driver, { 'availability.isAvailable': true });
   }
 
   // --- COUPLAGE D'ANNULATION LIVRAISONS ---
@@ -296,24 +316,50 @@ const cancelRideAction = async (rideId, userId, userRole, reason) => {
     
     if (order) {
       if (userRole === 'rider' || userRole === 'seller') {
-        // Le client annule sa course, ce qui annule toute la commande
         order.status = 'cancelled';
         order.cancelledAt = Date.now();
         order.history.push({ status: 'cancelled', comment: 'Annulée par le client (livraison annulée)', timestamp: Date.now() });
         await order.save();
         logger.info(`[MARKETPLACE CANCEL] Commande ${order._id} annulée suite à annulation de course par le client.`);
       } else if (userRole === 'driver') {
-        // Le chauffeur (livreur) se désiste de la course après acceptation.
-        // On ne doit pas annuler la commande ! On relance une recherche propre.
-        order.status = 'confirmed'; // Rebascule en préparation/recherche
+        order.status = 'searching'; // Rebascule en recherche livreur directe
         order.driver = null;
         order.deliveryRideId = null;
-        order.deliveryRetryCount = 0; // Réinitialise les tentatives automatiques
+        order.deliveryRetryCount = 0;
         await order.save();
         
-        // Relance asynchrone d'une nouvelle requête de course
+        // Relance de la requête de course avec collectionPoints
         try {
           const redisClient = require('../../config/redis');
+          const User = require('../../models/User');
+          const uniqueSellersMap = new Map();
+          
+          uniqueSellersMap.set(order.seller._id.toString(), {
+            seller: order.seller._id,
+            address: order.seller.address || 'Point de retrait vendeur',
+            coordinates: order.seller.currentLocation.coordinates,
+            isCollected: false
+          });
+
+          for (const item of order.items) {
+            if (item.product && item.product.seller) {
+              const sId = item.product.seller._id.toString();
+              if (!uniqueSellersMap.has(sId)) {
+                const secondarySeller = await User.findById(item.product.seller._id || item.product.seller);
+                if (secondarySeller) {
+                  uniqueSellersMap.set(sId, {
+                    seller: secondarySeller._id,
+                    address: secondarySeller.address || 'Point de retrait vendeur secondaire',
+                    coordinates: secondarySeller.currentLocation.coordinates,
+                    isCollected: false
+                  });
+                }
+              }
+            }
+          }
+
+          const collectionPoints = Array.from(uniqueSellersMap.values());
+
           const deliveryData = {
             origin: {
               address: order.seller.address || 'Point de retrait vendeur',
@@ -326,15 +372,35 @@ const cancelRideAction = async (rideId, userId, userRole, reason) => {
             forfait: 'STANDARD',
             passengersCount: 1,
             type: 'DELIVERY',
-            orderId: order._id
+            orderId: order._id,
+            deliveryPrice: order.deliveryPrice,
+            collectionPoints
           };
           
-          // La fonction createRideRequest va créer un nouveau Ride et relancer le dispatch
-          const { ride: newRide } = await createRideRequest(order.customer, deliveryData, redisClient);
+          const { ride: newRide, drivers } = await createRideRequest(order.customer, deliveryData, redisClient);
           order.deliveryRideId = newRide._id;
           await order.save();
           
           logger.info(`[MARKETPLACE RE-DISPATCH] Recherche livreur relancée après désistement chauffeur. Nouveau Ride: ${newRide._id}`);
+
+          if (drivers && drivers.length > 0 && io) {
+            const customer = await User.findById(order.customer).select('name profilePicture');
+            drivers.forEach(driver => {
+              io.to(driver._id.toString()).emit('new_ride_request', {
+                rideId: newRide._id,
+                origin: newRide.origin,       
+                destination: newRide.destination, 
+                distance: newRide.distance,
+                forfait: newRide.forfait,
+                passengersCount: newRide.passengersCount,
+                priceOptions: newRide.priceOptions,
+                riderName: customer?.name || 'Client',
+                riderProfilePicture: customer?.profilePicture,
+                collectionPoints: newRide.collectionPoints,
+                type: 'DELIVERY'
+              });
+            });
+          }
         } catch (reDispatchError) {
           logger.error(`[MARKETPLACE RE-DISPATCH ERROR] Échec de la relance après désistement : ${reDispatchError.message}`);
         }
@@ -412,11 +478,41 @@ const lockRideForNegotiation = async (rideId, driverId) => {
 };
 
 const submitPriceProposal = async (rideId, driverId, selectedAmount) => {
-  const ride = await Ride.findOne({ _id: rideId, driver: driverId, status: 'negotiating' });
-  if (!ride) throw new AppError('Session invalide.', 404);
+  const ride = await Ride.findById(rideId);
+  if (!ride) throw new AppError('Session introuvable.', 404);
+
+  if (ride.type === 'DELIVERY') {
+    if (ride.status !== 'searching') {
+      throw new AppError('Cette livraison a déjà été acceptée par un autre livreur.', 400);
+    }
+
+    const isValidOption = ride.priceOptions.some(opt => opt.amount === selectedAmount);
+    if (!isValidOption) throw new AppError('Montant non autorisé.', 400);
+
+    ride.driver = driverId;
+    ride.status = 'accepted';
+    ride.proposedPrice = selectedAmount;
+    ride.price = selectedAmount;
+    ride.acceptedAt = new Date();
+    await ride.save();
+
+    const User = require('../../models/User');
+    await User.findByIdAndUpdate(driverId, { 'availability.isAvailable': false });
+
+    if (ride.orderId) {
+      const Order = require('../../models/Order');
+      await Order.findByIdAndUpdate(ride.orderId, { driver: driverId });
+    }
+
+    return ride;
+  }
+
+  if (ride.driver?.toString() !== driverId.toString() || ride.status !== 'negotiating') {
+    throw new AppError('Session invalide.', 404);
+  }
 
   const isValidOption = ride.priceOptions.some(opt => opt.amount === selectedAmount);
-  if (!isValidOption) throw new AppError('Montant non autorise.', 400);
+  if (!isValidOption) throw new AppError('Montant non autorisé.', 400);
 
   ride.proposedPrice = selectedAmount;
   await ride.save();
@@ -487,7 +583,7 @@ const cancelSearchTimeout = async (io, rideId) => {
   const ride = await Ride.findOne({ _id: rideId, status: 'searching' });
   if (ride) {
     ride.status = 'cancelled';
-    ride.cancellationReason = 'Temps de recherche expire, aucun chauffeur trouve.';
+    ride.cancellationReason = 'Temps de recherche expiré, aucun chauffeur trouvé.';
     await ride.save();
     
     const isDelivery = ride.type === 'DELIVERY';
@@ -500,7 +596,7 @@ const cancelSearchTimeout = async (io, rideId) => {
 
     notificationService.sendNotification(
       ride.rider, 
-      "Recherche expiree", 
+      "Recherche expirée", 
       isDelivery 
         ? "Aucun livreur n'est disponible dans votre zone pour le moment."
         : "Aucun chauffeur n'est disponible dans votre zone pour le moment.", 
@@ -584,7 +680,7 @@ const cancelSearchTimeout = async (io, rideId) => {
             // Notifier le vendeur
             notificationService.sendNotification(
               order.seller._id,
-              'Commande annulée ⚠️',
+              'Commande annulée',
               `La commande #${order._id.toString().slice(-6)} a été annulée car aucun livreur n'a pu être trouvé à proximité après 3 tentatives.`,
               'ORDER_CANCELLED',
               { orderId: order._id.toString() }
@@ -593,7 +689,7 @@ const cancelSearchTimeout = async (io, rideId) => {
             // Notifier le client
             notificationService.sendNotification(
               order.customer._id,
-              'Commande annulée 😔',
+              'Commande annulée',
               `Votre commande chez ${order.seller.name} a été annulée car aucun livreur n'est actuellement disponible dans votre zone.`,
               'ORDER_CANCELLED',
               { orderId: order._id.toString() }
@@ -621,16 +717,14 @@ const retryDeliverySearch = async (io, orderId) => {
       return;
     }
 
-    // Ne relancer que si la commande est toujours en attente de retry
     if (order.status !== 'searching_delivery_retry') {
       logger.info(`[DELIVERY RETRY] Commande ${orderId} n'est plus en attente de retry (statut actuel: ${order.status}). Relance annulée.`);
       return;
     }
 
-    // Repasser en status 'confirmed'
-    order.status = 'confirmed';
+    order.status = 'searching';
     order.history.push({
-      status: 'confirmed',
+      status: 'searching',
       comment: `Relance automatique de la recherche de livreur (Tentative ${order.deliveryRetryCount + 1}/3)`,
       timestamp: Date.now()
     });
@@ -638,7 +732,35 @@ const retryDeliverySearch = async (io, orderId) => {
 
     logger.info(`[DELIVERY RETRY] Relance de la recherche de livreur pour la commande ${order._id}`);
 
-    // Créer la nouvelle demande de livraison (Ride)
+    const User = require('../../models/User');
+    const uniqueSellersMap = new Map();
+    
+    uniqueSellersMap.set(order.seller._id.toString(), {
+      seller: order.seller._id,
+      address: order.seller.address || 'Point de retrait vendeur',
+      coordinates: order.seller.currentLocation.coordinates,
+      isCollected: false
+    });
+
+    for (const item of order.items) {
+      if (item.product && item.product.seller) {
+        const sId = item.product.seller._id.toString();
+        if (!uniqueSellersMap.has(sId)) {
+          const secondarySeller = await User.findById(item.product.seller._id || item.product.seller);
+          if (secondarySeller) {
+            uniqueSellersMap.set(sId, {
+              seller: secondarySeller._id,
+              address: secondarySeller.address || 'Point de retrait vendeur secondaire',
+              coordinates: secondarySeller.currentLocation.coordinates,
+              isCollected: false
+            });
+          }
+        }
+      }
+    }
+
+    const collectionPoints = Array.from(uniqueSellersMap.values());
+
     const deliveryData = {
       origin: {
         address: order.seller.address || 'Point de retrait vendeur',
@@ -651,23 +773,43 @@ const retryDeliverySearch = async (io, orderId) => {
       forfait: 'STANDARD',
       passengersCount: 1,
       type: 'DELIVERY',
-      orderId: order._id
+      orderId: order._id,
+      deliveryPrice: order.deliveryPrice,
+      collectionPoints
     };
 
     const redis = require('../../config/redis');
-    const { ride } = await createRideRequest(order.customer._id, deliveryData, redis);
+    const { ride, drivers } = await createRideRequest(order.customer._id, deliveryData, redis);
     
     order.deliveryRideId = ride._id;
     await order.save();
 
-    // Notifier le vendeur et le client du démarrage de la nouvelle tentative
     notificationService.sendNotification(
       order.seller._id,
-      'Recherche de livreur relancée 🔄',
+      'Recherche de livreur relancée',
       `Nous recherchons à nouveau un livreur pour votre commande #${order._id.toString().slice(-6)}.`,
       'ORDER_UPDATE',
       { orderId: order._id.toString() }
     ).catch(() => {});
+
+    if (drivers && drivers.length > 0 && io) {
+      const customer = await User.findById(order.customer).select('name profilePicture');
+      drivers.forEach(driver => {
+        io.to(driver._id.toString()).emit('new_ride_request', {
+          rideId: ride._id,
+          origin: ride.origin,       
+          destination: ride.destination, 
+          distance: ride.distance,
+          forfait: ride.forfait,
+          passengersCount: ride.passengersCount,
+          priceOptions: ride.priceOptions,
+          riderName: customer?.name || 'Client',
+          riderProfilePicture: customer?.profilePicture,
+          collectionPoints: ride.collectionPoints,
+          type: 'DELIVERY'
+        });
+      });
+    }
 
     if (io) {
       io.to(order.seller._id.toString()).emit('order_updated', order);
@@ -692,7 +834,7 @@ const releaseStuckNegotiations = async (io, rideId) => {
     io.to(rejectedDriverId.toString()).emit('ride_taken_by_other', { rideId });
 
     notificationService.sendNotification(
-      rejectedDriverId, "Delai expire", "Le passager n'a pas repondu a temps, la course a ete relancee.", "NEGOTIATION_TIMEOUT", { rideId: ride._id.toString() }
+      rejectedDriverId, "Délai expiré", "Le passager n'a pas répondu à temps, la course a été relancée.", "NEGOTIATION_TIMEOUT", { rideId: ride._id.toString() }
     ).catch(() => {});
 
     await cleanupQueue.add(

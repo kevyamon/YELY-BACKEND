@@ -8,7 +8,8 @@ const {
   requestRideSchema, 
   rideActionSchema, 
   submitPriceSchema, 
-  finalizeRideSchema 
+  finalizeRideSchema,
+  collectPointSchema
 } = require('../validations/rideValidation');
 
 // LECTURE COURSE EN COURS (La route qui manquait)
@@ -32,5 +33,6 @@ router.post('/finalize', protect, authorize('rider', 'seller', 'superadmin'), va
 router.post('/arrived', protect, authorize('driver', 'superadmin'), validate(rideActionSchema), rideController.markAsArrived);
 router.post('/start', protect, authorize('driver', 'superadmin'), validate(rideActionSchema), rideController.startRide);
 router.post('/complete', protect, authorize('driver', 'superadmin'), validate(rideActionSchema), rideController.completeRide);
+router.post('/collect-point', protect, authorize('driver', 'superadmin'), validate(collectPointSchema), rideController.collectPoint);
 
 module.exports = router;

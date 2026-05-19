@@ -18,10 +18,10 @@ const errorHandler = (err, req, res, next) => {
   if (error.code === 11000) {
     const field = Object.keys(error.keyValue)[0];
     const message = field === 'email' 
-      ? 'Cet email est deja utilise par un autre compte.' 
+      ? 'Cet e-mail est déjà utilisé par un autre compte.' 
       : field === 'phone'
-      ? 'Ce numero de telephone est deja enregistre.'
-      : 'Cette information est deja utilisee.';
+      ? 'Ce numéro de téléphone est déjà enregistré.'
+      : 'Cette information est déjà utilisée.';
     error = new AppError(message, 409);
   }
 
@@ -33,7 +33,7 @@ const errorHandler = (err, req, res, next) => {
   }
   
   if (error.name === 'JsonWebTokenError') error = new AppError('Session invalide.', 401);
-  if (error.name === 'TokenExpiredError') error = new AppError('Session expiree.', 401);
+  if (error.name === 'TokenExpiredError') error = new AppError('Session expirée.', 401);
 
   const statusCode = error.statusCode || 500;
 

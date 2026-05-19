@@ -82,6 +82,13 @@ const rideSchema = new mongoose.Schema({
     default: 'searching'
   },
 
+  collectionPoints: [{
+    seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    address: { type: String },
+    coordinates: { type: [Number] },
+    isCollected: { type: Boolean, default: false }
+  }],
+
   rejectedDrivers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   notifiedDrivers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   currentSearchRadius: { type: Number, default: 1000 },
