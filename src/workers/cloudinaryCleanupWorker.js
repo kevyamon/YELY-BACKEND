@@ -6,6 +6,9 @@ const { Worker, Queue } = require('bullmq');
 const cloudinary = require('../config/cloudinary');
 const Transaction = require('../models/Transaction');
 const Report = require('../models/Report'); // AJOUT SENIOR: On importe le modèle des signalements
+const User = require('../models/User');
+const Ride = require('../models/Ride');
+const Order = require('../models/Order');
 const logger = require('../config/logger');
 const { env } = require('../config/env');
 
@@ -25,6 +28,12 @@ const startCloudinaryCleanupWorker = () => {
   // AJOUT SENIOR - Planification 2 : S'exécute tous les jours à 04h00 du matin pour les signalements
   cleanupQueue.add('purge-old-reports', {}, { 
     repeat: { pattern: '0 4 * * *' },
+    removeOnComplete: true
+  });
+
+  // AJOUT SENIOR - Planification 3 : S'exécute tous les jours à 05h00 du matin pour la purge générale de la DB (Courses abandonnées, FCM inactifs, Comptes supprimés)
+  cleanupQueue.add('purge-general-database', {}, { 
+    repeat: { pattern: '0 5 * * *' },
     removeOnComplete: true
   });
 
@@ -113,6 +122,73 @@ const startCloudinaryCleanupWorker = () => {
         }
         
         logger.info(`[WORKER] Hard Delete Signalements terminé. ${deletedReportsCount} plaintes et ${deletedImagesCount} images détruites.`);
+      }
+
+      // ---------------------------------------------------------
+      // JOB 3 : PURGE GÉNÉRALE DE LA DB (Courses abandonnées, FCM inactifs, Comptes supprimés)
+      // ---------------------------------------------------------
+      if (job.name === 'purge-general-database') {
+        logger.info(`[WORKER] Début de la purge générale de la DB...`);
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - 30); // Seuil de 30 jours
+
+        try {
+          // A. Nettoyage FCM Tokens des utilisateurs inactifs (>30 jours)
+          const fcmRes = await User.updateMany(
+            { updatedAt: { $lt: cutoffDate }, fcmToken: { $ne: null } },
+            { $set: { fcmToken: null } }
+          );
+          logger.info(`[WORKER] Purge FCM Tokens : ${fcmRes.modifiedCount} tokens expirés nettoyés.`);
+
+          // B. Hard delete des comptes utilisateurs supprimés (soft delete >30 jours)
+          const deletedUsers = await User.find({ isDeleted: true, updatedAt: { $lt: cutoffDate } });
+          let userDeletedCount = 0;
+          for (const user of deletedUsers) {
+            try {
+              // Nettoyage de l'image de profil sur Cloudinary
+              if (user.profilePicture && user.profilePicture.includes('cloudinary')) {
+                const match = user.profilePicture.match(/\/v\d+\/([^/.]+)\./);
+                if (match && match[1]) {
+                  await cloudinary.uploader.destroy(`yely/profiles/${match[1]}`).catch(() => {});
+                }
+              }
+              // Nettoyage des documents administratifs (carte d'identité, permis, assurance)
+              if (user.documents) {
+                for (const docKey of ['idCard', 'license', 'insurance']) {
+                  const url = user.documents[docKey];
+                  if (url && url.includes('cloudinary')) {
+                    const match = url.match(/\/v\d+\/([^/.]+)\./);
+                    if (match && match[1]) {
+                      await cloudinary.uploader.destroy(`yely/documents/${match[1]}`).catch(() => {});
+                    }
+                  }
+                }
+              }
+              await User.findByIdAndDelete(user._id);
+              userDeletedCount++;
+            } catch (e) {
+              logger.error(`[WORKER ERROR] Échec suppression complète utilisateur ${user._id}: ${e.message}`);
+            }
+          }
+          logger.info(`[WORKER] Purge comptes soft-supprimés : ${userDeletedCount} utilisateurs retirés définitivement.`);
+
+          // C. Double-sécurité : Suppression des courses abandonnées/annulées
+          const ridesRes = await Ride.deleteMany({
+            status: { $in: ['searching', 'negotiating', 'cancelled'] },
+            createdAt: { $lt: cutoffDate }
+          });
+          logger.info(`[WORKER] Purge Courses abandonnées/annulées : ${ridesRes.deletedCount} documents supprimés.`);
+
+          // D. Double-sécurité : Suppression des commandes rejetées/annulées
+          const ordersRes = await Order.deleteMany({
+            status: { $in: ['cancelled', 'cancelled_no_driver', 'rejected'] },
+            createdAt: { $lt: cutoffDate }
+          });
+          logger.info(`[WORKER] Purge Commandes abandonnées : ${ordersRes.deletedCount} documents supprimés.`);
+          
+        } catch (error) {
+          logger.error(`[WORKER CRITICAL ERROR] Échec de la purge générale de la DB : ${error.message}`);
+        }
       }
 
     },

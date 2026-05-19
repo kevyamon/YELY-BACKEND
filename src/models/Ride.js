@@ -114,4 +114,13 @@ rideSchema.index({ driver: 1 });
 // Index de performance composite pour la verification d'unicite des courses actives
 rideSchema.index({ rider: 1, status: 1 });
 
+// INDEX TTL PARTIEL : Suppression automatique des courses abandonnees/annulees apres 30 jours (2592000 secondes)
+rideSchema.index(
+  { createdAt: 1 },
+  { 
+    expireAfterSeconds: 2592000, 
+    partialFilterExpression: { status: { $in: ['searching', 'negotiating', 'cancelled'] } } 
+  }
+);
+
 module.exports = mongoose.model('Ride', rideSchema);

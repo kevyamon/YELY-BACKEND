@@ -113,6 +113,15 @@ orderSchema.index({ status: 1, customer: 1 });
 orderSchema.index({ status: 1, seller: 1 });
 orderSchema.index({ status: 1, driver: 1 });
 
+// INDEX TTL PARTIEL : Suppression automatique des commandes annulees ou rejetees apres 30 jours (2592000 secondes)
+orderSchema.index(
+  { createdAt: 1 },
+  { 
+    expireAfterSeconds: 2592000, 
+    partialFilterExpression: { status: { $in: ['cancelled', 'cancelled_no_driver', 'rejected'] } } 
+  }
+);
+
 const Order = mongoose.models.Order || mongoose.model('Order', orderSchema);
 
 module.exports = Order;
