@@ -144,7 +144,8 @@ io.on('connection', (socket) => {
       const effectiveTimeDiff = Math.max(timeDiffSeconds, 1);
       const speedKmH = distanceKm / (effectiveTimeDiff / 3600);
 
-      if (speedKmH > 300 && !isDev) {
+      // Anti-Spoofing (TEMPORAIREMENT DESACTIVE POUR LES TESTS DE TELEPORTATION EN PRODUCTION)
+      if (false && speedKmH > 300 && !isDev) {
         socket.spoofStrikes += 1;
         if (socket.spoofStrikes >= 5) {
           if (user.role === 'driver') await redis.zrem('active_drivers', user._id.toString());
