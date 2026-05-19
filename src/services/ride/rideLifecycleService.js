@@ -413,7 +413,10 @@ const cancelRideAction = async (rideId, userId, userRole, reason, io = null) => 
 
 const emergencyCancelUserRides = async (userId) => {
   const activeRides = await Ride.find({
-    rider: userId,
+    $or: [
+      { rider: userId },
+      { driver: userId }
+    ],
     status: { $in: ['searching', 'negotiating', 'accepted', 'arrived', 'in_progress'] }
   });
 

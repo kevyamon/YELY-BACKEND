@@ -18,7 +18,7 @@ router.get('/:id', protect, authorize('rider', 'driver', 'seller', 'superadmin')
 
 // ROUTES DE LECTURE & ANNULATION ET RATING
 router.get('/estimate', protect, authorize('rider', 'seller', 'superadmin'), rideController.estimateRide);
-router.post('/emergency-cancel', protect, authorize('rider', 'seller', 'superadmin'), rideController.emergencyCancel);
+router.post('/emergency-cancel', protect, authorize('rider', 'seller', 'driver', 'superadmin'), rideController.emergencyCancel);
 router.put('/:id/cancel', protect, authorize('rider', 'driver', 'seller', 'superadmin'), rideController.cancelRide);
 router.put('/:id/rate', protect, authorize('rider', 'seller', 'superadmin'), rideController.rateRide);
 
