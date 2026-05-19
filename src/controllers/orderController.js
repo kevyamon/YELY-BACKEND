@@ -27,7 +27,11 @@ exports.createOrder = async (req, res, next) => {
 
     for (const item of items) {
       const product = await Product.findById(item.product || item.id);
-      if (!product || product.isSoldOut) return next(new AppError(`Produit ${item.name} indisponible`, 400));
+      if (!product || product.isSoldOut) return next(new AppError(`Produit ${item.name || 'indéfini'} indisponible`, 400));
+      
+      if (product.manageStock && product.stockCount < item.quantity) {
+        return next(new AppError(`Stock insuffisant pour ${product.name} (Disponible : ${product.stockCount})`, 400));
+      }
       
       itemsPrice += product.price * item.quantity;
       validatedItems.push({
@@ -179,6 +183,37 @@ exports.updateOrderStatus = async (req, res, next) => {
           status: 'pending'
         });
       }
+
+      // --- LOGIQUE DE DÉDUCTION DES STOCKS EN TEMPS RÉEL (SAUF NOURRITURE) ---
+      // Seul le statut livré déduit définitivement le stock du produit.
+      if (order.status !== 'delivered') {
+        for (const item of order.items) {
+          try {
+            const product = await Product.findById(item.product);
+            if (product && product.manageStock && product.category !== 'Food') {
+              const currentStock = product.stockCount || 0;
+              const newStock = Math.max(0, currentStock - item.quantity);
+              
+              product.stockCount = newStock;
+              if (newStock === 0) {
+                product.isSoldOut = true;
+              }
+              await product.save();
+              
+              logger.info(`[STOCK DEDUCTION] Produit ${product.name} (${product._id}) déduit de ${item.quantity}. Ancien stock: ${currentStock}, Nouveau stock: ${newStock}`);
+              
+              // Notification temps réel aux autres clients / clients connectés
+              const io = req.app.get('socketio');
+              if (io) {
+                io.emit('product_updated', product);
+              }
+            }
+          } catch (stockErr) {
+            logger.error(`[STOCK DEDUCTION ERROR] Impossible de mettre à jour le stock pour le produit ${item.product}: ${stockErr.message}`);
+          }
+        }
+      }
+
       await sendNotification(order.customer._id, 'Livrée ! 🎉', 'Votre commande a été livrée. Merci de votre confiance !', 'ORDER_COMPLETE', { orderId: order._id });
     }
 

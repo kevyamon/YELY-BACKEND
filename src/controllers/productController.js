@@ -145,6 +145,20 @@ exports.createProduct = async (req, res, next) => {
   try {
     req.body.seller = req.user._id;
     
+    // Gestion automatique du stock selon la catégorie (La nourriture n'a pas de stock)
+    if (req.body.category === 'Food') {
+      req.body.manageStock = false;
+      req.body.stockCount = 0;
+      req.body.isSoldOut = false;
+    } else {
+      if (req.body.stockCount !== undefined) {
+        const count = Math.max(0, parseInt(req.body.stockCount, 10) || 0);
+        req.body.stockCount = count;
+        req.body.manageStock = true;
+        req.body.isSoldOut = count === 0;
+      }
+    }
+    
     // Gestion des images
     const imageUrls = [];
     if (req.files && req.files.length > 0) {
@@ -241,6 +255,20 @@ exports.updateProduct = async (req, res, next) => {
     
     updateData.images = finalImages;
     updateData.image = finalImages[0];
+
+    // Gestion automatique du stock selon la catégorie (La nourriture n'a pas de stock)
+    if (updateData.category === 'Food' || (product && product.category === 'Food')) {
+      updateData.manageStock = false;
+      updateData.stockCount = 0;
+      updateData.isSoldOut = false;
+    } else {
+      if (updateData.stockCount !== undefined) {
+        const count = Math.max(0, parseInt(updateData.stockCount, 10) || 0);
+        updateData.stockCount = count;
+        updateData.manageStock = true;
+        updateData.isSoldOut = count === 0;
+      }
+    }
 
     if (process.env.NODE_ENV === 'development') logger.info(`[MARKETPLACE] Updating product ${req.params.id} with:`, updateData);
 
