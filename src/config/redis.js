@@ -29,14 +29,23 @@ const getRedisClient = () => {
     
     const redisUrl = env.REDIS_URL || 'redis://localhost:6379';
 
-    redisClient = new Redis(redisUrl, {
+    const redisOptions = {
       maxRetriesPerRequest: null, 
       enableReadyCheck: false,
       retryStrategy(times) {
         const delay = Math.min(times * 50, 2000);
         return delay;
       },
-    });
+    };
+
+    // Injection dynamique de la configuration TLS pour les connexions securisees (ex: Render vers Railway)
+    if (redisUrl.startsWith('rediss://')) {
+      redisOptions.tls = {
+        rejectUnauthorized: false
+      };
+    }
+
+    redisClient = new Redis(redisUrl, redisOptions);
 
     redisClient.on('connect', () => {
       logger.info('[REDIS] Connexion principale etablie avec succes');
