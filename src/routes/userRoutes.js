@@ -9,6 +9,11 @@ const { uploadProfilePic, validateFileSignature } = require('../middleware/uploa
 
 const router = express.Router();
 
+// Routes publiques pour les vendeurs (marketplace, recherche et partage)
+router.get('/sellers', userController.getSellers);
+router.get('/sellers/:id', userController.getSellerProfile);
+router.get('/sellers/:id/share', userController.shareSellerShop);
+
 // Toutes les routes ci-dessous sont protégées par l'Iron Dome (JWT)
 router.use(protect);
 

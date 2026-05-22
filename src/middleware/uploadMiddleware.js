@@ -30,10 +30,23 @@ const uploadSingle = upload.single('proofImage');
 const uploadProfilePic = upload.single('profilePicture');
 const uploadReportCaptures = upload.array('captures', 3);
 const uploadProductImages = upload.array('images', 10);
-const uploadBannerImage = upload.single('image');
+const uploadBannerImage = upload.fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'video', maxCount: 1 }
+]);
 
 const validateFileSignature = (req, res, next) => {
-  const files = req.file ? [req.file] : (req.files || []);
+  let files = [];
+  if (req.file) {
+    files = [req.file];
+  } else if (req.files) {
+    if (Array.isArray(req.files)) {
+      files = req.files;
+    } else {
+      // req.files est un objet (upload.fields)
+      files = Object.values(req.files).flat();
+    }
+  }
   if (files.length === 0) return next();
 
   try {
@@ -49,15 +62,16 @@ const validateFileSignature = (req, res, next) => {
       const isJPEG = hex.includes('FFD8');
       const isPNG = hex.includes('89504E47');
       const isWEBP = hex.includes('52494646'); 
-      const isHEIC = hex.includes('66747970'); 
+      const isHEIC = hex.includes('66747970'); // ftyp (HEIC, MP4, MOV)
       const isGIF = hex.includes('47494638');
       const isBMP = hex.includes('424D');
+      const isWEBM = hex.includes('1A45DFA3');
 
-      if (!isJPEG && !isPNG && !isWEBP && !isHEIC && !isGIF && !isBMP) {
+      if (!isJPEG && !isPNG && !isWEBP && !isHEIC && !isGIF && !isBMP && !isWEBM) {
         
         // Filet de securite : Si la signature est masquee par les metadonnees EXIF 
         // d'un telephone (frequent sur React Native FormData), on verifie le mimetype declare.
-        if (file.mimetype && file.mimetype.startsWith('image/')) {
+        if (file.mimetype && (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/'))) {
            logger.warn(`[Upload] Signature HEX inhabituelle contournee grâce au mimetype: ${file.mimetype}. Hex: ${hex.substring(0, 16)}`);
            continue;
         }
@@ -66,7 +80,7 @@ const validateFileSignature = (req, res, next) => {
           if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
         });
         logger.warn(`[Upload] Fichier non autorise rejete. Hex: ${hex.substring(0, 16)}`);
-        return errorResponse(res, "Le format de l'image n'est pas supporte ou le fichier est corrompu.", 400);
+        return errorResponse(res, "Le format du fichier n'est pas supporte ou le fichier est corrompu.", 400);
       }
     }
     next();

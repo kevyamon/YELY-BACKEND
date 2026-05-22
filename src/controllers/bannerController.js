@@ -93,39 +93,94 @@ exports.getAllBannersAdmin = async (req, res, next) => {
  */
 exports.createBanner = async (req, res, next) => {
   try {
-    // Une image est requise à la création
-    if (!req.file) {
-      return next(new AppError("L'image de la bannière est obligatoire.", 400));
-    }
+    const cleanUpFiles = () => {
+      if (req.files) {
+        if (req.files.image && req.files.image[0]) {
+          const path = req.files.image[0].path;
+          if (fs.existsSync(path)) fs.unlinkSync(path);
+        }
+        if (req.files.video && req.files.video[0]) {
+          const path = req.files.video[0].path;
+          if (fs.existsSync(path)) fs.unlinkSync(path);
+        }
+      }
+    };
 
-    // Téléversement sur Cloudinary
-    let result;
+    let imageUrl = null;
+    let videoUrl = null;
+
     try {
-      result = await cloudinary.uploader.upload(req.file.path, {
-        folder: 'yely/banners',
-        resource_type: 'image'
-      });
+      if (req.files && req.files.image && req.files.image[0]) {
+        const file = req.files.image[0];
+        const result = await cloudinary.uploader.upload(file.path, {
+          folder: 'yely/banners',
+          resource_type: 'image'
+        });
+        imageUrl = result.secure_url;
+      }
+
+      if (req.files && req.files.video && req.files.video[0]) {
+        const file = req.files.video[0];
+        const result = await cloudinary.uploader.upload(file.path, {
+          folder: 'yely/banners',
+          resource_type: 'video'
+        });
+        videoUrl = result.secure_url;
+      }
     } catch (uploadErr) {
       logger.error(`[CLOUDINARY] Upload error: ${uploadErr.message}`);
-      return next(new AppError("Erreur lors du téléversement de l'image sur le Cloud.", 500));
+      cleanUpFiles();
+      return next(new AppError("Erreur lors du téléversement des fichiers sur le Cloud.", 500));
     } finally {
-      // Toujours nettoyer le fichier temporaire local
-      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      cleanUpFiles();
     }
 
-    const { title, body, badge, animationType, order, isActive } = req.body;
+    const { 
+      title, 
+      body, 
+      badge, 
+      animationType, 
+      order, 
+      isActive,
+      layoutType,
+      mediaType,
+      displayDuration,
+      ctaType,
+      ctaUrl,
+      ctaRoute,
+      ctaRouteParams,
+      ctaLabel
+    } = req.body;
+
+    // Validation de cohérence média
+    const parsedMediaType = mediaType || 'image';
+    if (parsedMediaType === 'image' && !imageUrl) {
+      return next(new AppError("L'image de la bannière est obligatoire pour le format image.", 400));
+    }
+    if (parsedMediaType === 'video' && !videoUrl) {
+      return next(new AppError("La vidéo de la bannière est obligatoire pour le format vidéo.", 400));
+    }
 
     const banner = await BannerSlide.create({
       title,
       body,
       badge: badge || 'NOUVEAU',
       animationType: animationType || 'none',
-      image: result.secure_url,
+      image: imageUrl,
+      video: videoUrl,
+      layoutType: layoutType || 'standard',
+      mediaType: parsedMediaType,
+      displayDuration: displayDuration ? Number(displayDuration) : null,
+      ctaType: ctaType || 'none',
+      ctaUrl,
+      ctaRoute,
+      ctaRouteParams,
+      ctaLabel: ctaLabel || 'Voir plus',
       order: order ? Number(order) : 0,
       isActive: isActive !== undefined ? isActive === 'true' || isActive === true : true
     });
 
-    logger.info(`[BANNERS] Nouvelle bannière créée par l'administrateur : ${banner.title}`);
+    logger.info(`[BANNERS] Nouvelle bannière créée par l'administrateur : ${banner.title || 'Sans titre'}`);
     broadcastBannersUpdate(req);
 
     res.status(201).json({
@@ -151,30 +206,63 @@ exports.updateBanner = async (req, res, next) => {
 
     const updateData = { ...req.body };
 
-    // Si une nouvelle image est fournie
-    if (req.file) {
-      let result;
-      try {
-        // 1. Upload la nouvelle image
-        result = await cloudinary.uploader.upload(req.file.path, {
+    const cleanUpFiles = () => {
+      if (req.files) {
+        if (req.files.image && req.files.image[0]) {
+          const path = req.files.image[0].path;
+          if (fs.existsSync(path)) fs.unlinkSync(path);
+        }
+        if (req.files.video && req.files.video[0]) {
+          const path = req.files.video[0].path;
+          if (fs.existsSync(path)) fs.unlinkSync(path);
+        }
+      }
+    };
+
+    try {
+      // Si une nouvelle image est fournie
+      if (req.files && req.files.image && req.files.image[0]) {
+        const file = req.files.image[0];
+        const result = await cloudinary.uploader.upload(file.path, {
           folder: 'yely/banners',
           resource_type: 'image'
         });
         
-        // 2. Supprime l'ancienne image pour éviter l'encombrement
-        const oldPublicId = extractPublicId(banner.image);
-        if (oldPublicId) {
-          await cloudinary.uploader.destroy(oldPublicId);
-          logger.info(`[CLOUDINARY] Ancienne image supprimée : ${oldPublicId}`);
+        if (banner.image) {
+          const oldPublicId = extractPublicId(banner.image);
+          if (oldPublicId) {
+            await cloudinary.uploader.destroy(oldPublicId);
+            logger.info(`[CLOUDINARY] Ancienne image supprimée : ${oldPublicId}`);
+          }
         }
 
         updateData.image = result.secure_url;
-      } catch (uploadErr) {
-        logger.error(`[CLOUDINARY] Update upload error: ${uploadErr.message}`);
-        return next(new AppError("Erreur lors du téléversement de la nouvelle image.", 500));
-      } finally {
-        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       }
+
+      // Si une nouvelle vidéo est fournie
+      if (req.files && req.files.video && req.files.video[0]) {
+        const file = req.files.video[0];
+        const result = await cloudinary.uploader.upload(file.path, {
+          folder: 'yely/banners',
+          resource_type: 'video'
+        });
+        
+        if (banner.video) {
+          const oldVideoPublicId = extractPublicId(banner.video);
+          if (oldVideoPublicId) {
+            await cloudinary.uploader.destroy(oldVideoPublicId, { resource_type: 'video' });
+            logger.info(`[CLOUDINARY] Ancienne vidéo supprimée : ${oldVideoPublicId}`);
+          }
+        }
+
+        updateData.video = result.secure_url;
+      }
+    } catch (uploadErr) {
+      logger.error(`[CLOUDINARY] Update upload error: ${uploadErr.message}`);
+      cleanUpFiles();
+      return next(new AppError("Erreur lors du téléversement de la nouvelle ressource.", 500));
+    } finally {
+      cleanUpFiles();
     }
 
     // Gestion correcte des types primitifs
@@ -182,13 +270,16 @@ exports.updateBanner = async (req, res, next) => {
     if (updateData.isActive !== undefined) {
       updateData.isActive = updateData.isActive === 'true' || updateData.isActive === true;
     }
+    if (updateData.displayDuration !== undefined) {
+      updateData.displayDuration = updateData.displayDuration ? Number(updateData.displayDuration) : null;
+    }
 
     banner = await BannerSlide.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
       runValidators: true
     });
 
-    logger.info(`[BANNERS] Diapositive mise à jour par l'administrateur : ${banner.title}`);
+    logger.info(`[BANNERS] Diapositive mise à jour par l'administrateur : ${banner.title || 'Sans titre'}`);
     broadcastBannersUpdate(req);
 
     res.status(200).json({
@@ -215,7 +306,7 @@ exports.toggleBannerStatus = async (req, res, next) => {
     banner.isActive = !banner.isActive;
     await banner.save();
 
-    logger.info(`[BANNERS] Statut de la diapositive ${banner.title} changé pour : ${banner.isActive}`);
+    logger.info(`[BANNERS] Statut de la diapositive ${banner.title || 'Sans titre'} changé pour : ${banner.isActive}`);
     broadcastBannersUpdate(req);
 
     res.status(200).json({
@@ -240,20 +331,35 @@ exports.deleteBanner = async (req, res, next) => {
     }
 
     // 1. Supprimer l'image associée de Cloudinary
-    const publicId = extractPublicId(banner.image);
-    if (publicId) {
-      try {
-        await cloudinary.uploader.destroy(publicId);
-        logger.info(`[CLOUDINARY] Image de la diapositive supprimée : ${publicId}`);
-      } catch (cloudErr) {
-        logger.error(`[CLOUDINARY] Echec de suppression de l'image ${publicId} : ${cloudErr.message}`);
+    if (banner.image) {
+      const publicId = extractPublicId(banner.image);
+      if (publicId) {
+        try {
+          await cloudinary.uploader.destroy(publicId);
+          logger.info(`[CLOUDINARY] Image de la diapositive supprimée : ${publicId}`);
+        } catch (cloudErr) {
+          logger.error(`[CLOUDINARY] Echec de suppression de l'image ${publicId} : ${cloudErr.message}`);
+        }
       }
     }
 
-    // 2. Supprimer la diapositive de la base de données
+    // 2. Supprimer la vidéo associée de Cloudinary
+    if (banner.video) {
+      const videoPublicId = extractPublicId(banner.video);
+      if (videoPublicId) {
+        try {
+          await cloudinary.uploader.destroy(videoPublicId, { resource_type: 'video' });
+          logger.info(`[CLOUDINARY] Vidéo de la diapositive supprimée : ${videoPublicId}`);
+        } catch (cloudErr) {
+          logger.error(`[CLOUDINARY] Echec de suppression de la vidéo ${videoPublicId} : ${cloudErr.message}`);
+        }
+      }
+    }
+
+    // 3. Supprimer la diapositive de la base de données
     await BannerSlide.findByIdAndDelete(req.params.id);
 
-    logger.info(`[BANNERS] Diapositive supprimée de l'administration : ${banner.title}`);
+    logger.info(`[BANNERS] Diapositive supprimée de l'administration : ${banner.title || 'Sans titre'}`);
     broadcastBannersUpdate(req);
 
     res.status(200).json({

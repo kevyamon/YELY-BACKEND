@@ -7,23 +7,65 @@ const mongoose = require('mongoose');
 const bannerSlideSchema = new mongoose.Schema({
   title: {
     type: String,
-    required: [true, 'Le titre de la news est obligatoire'],
     trim: true,
     maxlength: [80, 'Le titre ne peut pas dépasser 80 caractères']
   },
   body: {
     type: String,
-    required: [true, 'Le texte descriptif est obligatoire'],
     maxlength: [200, 'La description ne peut pas dépasser 200 caractères']
   },
   image: {
-    type: String,
-    required: [true, 'L\'image de la bannière est obligatoire']
+    type: String
   },
   badge: {
     type: String,
     default: 'NOUVEAU',
     maxlength: [20, 'Le badge ne peut pas dépasser 20 caractères']
+  },
+  layoutType: {
+    type: String,
+    enum: {
+      values: ['standard', 'background'],
+      message: 'Type de disposition non supporté : {VALUE}'
+    },
+    default: 'standard'
+  },
+  mediaType: {
+    type: String,
+    enum: {
+      values: ['image', 'video'],
+      message: 'Type de média non supporté : {VALUE}'
+    },
+    default: 'image'
+  },
+  video: {
+    type: String
+  },
+  displayDuration: {
+    type: Number,
+    default: null
+  },
+  ctaType: {
+    type: String,
+    enum: {
+      values: ['none', 'external', 'internal'],
+      message: 'Type de redirection non supporté : {VALUE}'
+    },
+    default: 'none'
+  },
+  ctaUrl: {
+    type: String
+  },
+  ctaRoute: {
+    type: String
+  },
+  ctaRouteParams: {
+    type: String
+  },
+  ctaLabel: {
+    type: String,
+    default: 'Voir plus',
+    maxlength: [30, 'Le libellé ne peut pas dépasser 30 caractères']
   },
   animationType: {
     type: String,

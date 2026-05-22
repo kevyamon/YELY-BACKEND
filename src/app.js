@@ -33,6 +33,7 @@ const productRoutes = require('./routes/productRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const ledgerRoutes = require('./routes/ledgerRoutes');
 const bannerRoutes = require('./routes/bannerRoutes');
+const reviewRoutes = require('./routes/reviewRoutes');
 
 // Extraction des origines autorisées en tableau
 const allowedOriginsList = env.ALLOWED_ORIGINS.split(',').map(url => url.trim());
@@ -155,6 +156,7 @@ app.use(`${API_V1_PREFIX}/products`, productRoutes);
 app.use(`${API_V1_PREFIX}/orders`, orderRoutes);
 app.use(`${API_V1_PREFIX}/ledger`, ledgerRoutes);
 app.use(`${API_V1_PREFIX}/banners`, bannerRoutes);
+app.use(`${API_V1_PREFIX}/reviews`, reviewRoutes);
 
 // 404 Fallback
 app.use((req, res) => {
