@@ -38,7 +38,8 @@ const updateProductRating = async (productId) => {
 // Créer un avis
 const createReview = async (req, res, next) => {
   try {
-    const { productId, rating, comment } = req.body;
+    const productId = req.body.productId || req.body.product;
+    const { rating, comment } = req.body;
     const userId = req.user._id;
 
     // 1. Vérifier si l'utilisateur a commandé ce produit et si le statut est 'delivered'
