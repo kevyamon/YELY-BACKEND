@@ -167,7 +167,7 @@ const getShareImageUrl = async (seller) => {
     // et le l_fetch. Nous allons donc utiliser ce compte comme compte principal de traitement d'image,
     // peu importe si la photo du vendeur vient du compte "dhc4yidpa" ou d'ailleurs.
     const renderCloudName = 'dnps8hbco'; 
-    const coverTemplatePublicId = '44ed4160-411c-4462-9b22-beda1f6405b6';
+    const coverTemplatePublicId = 'd676581c-f7b9-4346-a3e1-5face25d9868';
     
     let baseImageUrl = seller.profilePicture || 'https://download-yely.vercel.app/logo.png';
     let sellerOverlayLayer = '';
@@ -180,10 +180,11 @@ const getShareImageUrl = async (seller) => {
     
     // Format: 
     // 1. Compte de traitement: dnps8hbco
-    // 2. Base: coverTemplatePublicId (L'image que l'utilisateur a uploadé)
-    // 3. Overlay 1: Photo du vendeur récupérée via l_fetch, coupée en cercle (w_600, h_600, c_fill, r_max), placée au centre (g_center)
+    // 2. Base: Image 'sample' colorisée à 100% en noir (w_1080,h_1080,c_fill,e_colorize:100,co_black)
+    // 3. Overlay 1: Photo du vendeur (l_fetch:b64Url,w_580,h_580,c_fill,r_max) placée au centre (g_center, y_-15)
+    // 4. Overlay 2: Template transparent sans fond (l_d676581c-f7b9-4346-a3e1-5face25d9868,w_1080,h_1080,c_fill,e_make_transparent) placé au-dessus du logo pour que le texte chevauche la photo de profil.
     
-    return `https://res.cloudinary.com/${renderCloudName}/image/upload/w_1080,h_1080,c_fill/l_${sellerOverlayLayer},w_600,h_600,c_fill,r_max/fl_layer_apply,g_center,y_-15/${coverTemplatePublicId}.jpg`;
+    return `https://res.cloudinary.com/${renderCloudName}/image/upload/w_1080,h_1080,c_fill,e_colorize:100,co_black/l_${sellerOverlayLayer},w_580,h_580,c_fill,r_max/fl_layer_apply,g_center,y_-15/l_${coverTemplatePublicId},w_1080,h_1080,c_fill,e_make_transparent/fl_layer_apply/sample.jpg`;
   } catch (error) {
     logger.error(`[SHARE IMAGE] Echec de generation de l'image de partage: ${error.message}`);
     return seller.profilePicture || 'https://download-yely.vercel.app/logo.png';
