@@ -467,28 +467,12 @@ const renderShareHtml = async (res, seller) => {
     
     var shopSlug = "${seller.shopSlug || seller._id}";
     var appUrl = "yely://store/" + shopSlug;
-    var intentUrl = "intent://store/" + shopSlug + "#Intent;scheme=yely;package=com.yely.app;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;S.browser_fallback_url=https%3A%2F%2Fdownload-yely.vercel.app;end";
     var fallbackUrl = "https://download-yely.vercel.app";
     var pwaUrl = "https://yely-amber.vercel.app/store/" + shopSlug;
 
     var btn = document.getElementById('open-app-btn');
-    var isChrome = /Chrome/i.test(navigator.userAgent);
 
-    if (isAndroid) {
-      if (isChrome) {
-        btn.href = intentUrl;
-      } else {
-        btn.href = appUrl;
-        btn.addEventListener('click', function(e) {
-          var start = Date.now();
-          setTimeout(function() {
-            if (!document.hidden && !document.webkitHidden && (Date.now() - start < 2500)) {
-              window.location.href = fallbackUrl;
-            }
-          }, 2000);
-        });
-      }
-    } else if (isIOS) {
+    if (isAndroid || isIOS) {
       btn.href = appUrl;
       btn.addEventListener('click', function(e) {
         var start = Date.now();
