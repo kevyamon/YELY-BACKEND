@@ -164,7 +164,10 @@ const getOrCreateSellerSlug = async (seller) => {
 const getShareImageUrl = async (seller) => {
   try {
     const cloudName = cloudinary.config().cloud_name || 'dpxslyr71';
-    const coverTemplateId = 'yely/assets/yely_cover_template'; // L'image de fond (1080x1080 par défaut)
+    
+    // L'URL de l'image de fond fournie par l'utilisateur
+    const coverTemplateUrl = 'https://res.cloudinary.com/dnps8hbco/image/upload/v1779556501/44ed4160-411c-4462-9b22-beda1f6405b6.png';
+    const encodedCoverUrl = encodeURIComponent(coverTemplateUrl);
     
     let baseImageUrl = seller.profilePicture;
     let sellerOverlayLayer = '';
@@ -188,17 +191,11 @@ const getShareImageUrl = async (seller) => {
       sellerOverlayLayer = 'yely:assets:yely_default_storefront';
     }
     
-    const badgeOverlay = 'yely:assets:yely_verified_badge_overlay';
-
-    // On utilise l'image de fond coverTemplateId.
-    // On superpose la photo du vendeur au centre (ajusté avec w_600, h_600, arrondi r_max, centré légèrement vers le haut y_-20).
-    // On peut aussi rajouter le badge vérifié par dessus si besoin, mais pour rester propre on place juste la photo.
-    
     // Format: 
-    // 1. Base: yely_cover_template (1080x1080)
-    // 2. Overlay 1: Photo du vendeur (w_620, h_620, c_fill, r_max) placée au centre (g_center)
+    // 1. Base: Image fetchée depuis coverTemplateUrl
+    // 2. Overlay 1: Photo du vendeur (w_600, h_600, c_fill, r_max) placée au centre (g_center)
     
-    return `https://res.cloudinary.com/${cloudName}/image/upload/w_1080,h_1080,c_fill/l_${sellerOverlayLayer},w_600,h_600,c_fill,r_max/fl_layer_apply,g_center,y_-15/${coverTemplateId}.jpg`;
+    return `https://res.cloudinary.com/${cloudName}/image/fetch/w_1080,h_1080,c_fill/l_${sellerOverlayLayer},w_600,h_600,c_fill,r_max/fl_layer_apply,g_center,y_-15/${encodedCoverUrl}`;
   } catch (error) {
     logger.error(`[SHARE IMAGE] Echec de generation de l'image de partage: ${error.message}`);
     return seller.profilePicture || 'https://download-yely.vercel.app/logo.png';
