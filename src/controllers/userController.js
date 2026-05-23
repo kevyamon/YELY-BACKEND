@@ -199,12 +199,28 @@ const getShareImageUrl = async (seller) => {
   }
 };
 
-const renderShareHtml = async (res, seller) => {
+const renderShareHtml = async (res, seller, userAgent = '') => {
   const ogImageUrl = await getShareImageUrl(seller);
   const shopTitle = `Boutique de ${seller.name}`;
   const shopDescription = `Découvrez ma boutique sur Yély. Commandez mes articles en direct et bénéficiez d'une livraison rapide.`;
   const shareUrl = `https://download-yely.vercel.app/shop/${seller.shopSlug || seller._id}`;
-  const cloudName = cloudinary.config().cloud_name || 'dpxslyr71';
+  const shopSlug = seller.shopSlug || seller._id;
+
+  // --- Server-side OS detection (contourne le CSP qui bloque les scripts inline) ---
+  const isAndroid = /Android/i.test(userAgent);
+  const isIOS = /iPhone|iPad|iPod/i.test(userAgent);
+
+  let deepLinkHref;
+  if (isAndroid) {
+    const fallbackEncoded = encodeURIComponent('https://download-yely.vercel.app');
+    deepLinkHref = `intent://store/${shopSlug}#Intent;scheme=yely;package=com.yely.app;S.browser_fallback_url=${fallbackEncoded};end`;
+  } else if (isIOS) {
+    deepLinkHref = `yely://store/${shopSlug}`;
+  } else {
+    deepLinkHref = `https://yely-amber.vercel.app/store/${shopSlug}`;
+  }
+
+  const webHref = `https://yely-amber.vercel.app/store/${shopSlug}`;
 
   res.setHeader('Content-Type', 'text/html');
   return res.send(`
@@ -446,11 +462,11 @@ const renderShareHtml = async (res, seller) => {
     <p>Bienvenue sur Yély ! Choisissez comment vous souhaitez visiter cette boutique.</p>
     
     <div class="btn-group">
-      <a id="open-app-btn" href="#" class="btn btn-primary">
+      <a href="${deepLinkHref}" class="btn btn-primary">
         <span class="btn-title">Ouvrir dans l'application</span>
         <span class="btn-subtitle">Si Yély est installée sur votre mobile</span>
       </a>
-      <a href="https://yely-amber.vercel.app/store/${seller.shopSlug || seller._id}" class="btn btn-secondary">
+      <a href="${webHref}" class="btn btn-secondary">
         <span class="btn-title">Continuer sur le site internet</span>
         <span class="btn-subtitle">Pour visiter la boutique sans rien installer</span>
       </a>
@@ -460,32 +476,6 @@ const renderShareHtml = async (res, seller) => {
       </a>
     </div>
   </div>
-
-  <script>
-    var isAndroid = /Android/i.test(navigator.userAgent);
-    var isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-    
-    var shopSlug = "${seller.shopSlug || seller._id}";
-    var appUrl = "yely://store/" + shopSlug;
-    var fallbackUrl = "https://download-yely.vercel.app";
-    var pwaUrl = "https://yely-amber.vercel.app/store/" + shopSlug;
-
-    var btn = document.getElementById('open-app-btn');
-
-    if (isAndroid || isIOS) {
-      btn.href = appUrl;
-      btn.addEventListener('click', function(e) {
-        var start = Date.now();
-        setTimeout(function() {
-          if (!document.hidden && !document.webkitHidden && (Date.now() - start < 2500)) {
-            window.location.href = fallbackUrl;
-          }
-        }, 2000);
-      });
-    } else {
-      btn.href = pwaUrl;
-    }
-  </script>
 </body>
 </html>
   `);
@@ -499,7 +489,7 @@ const shareSellerShop = async (req, res, next) => {
       throw new AppError('Boutique introuvable ou inactive', 404);
     }
     await getOrCreateSellerSlug(seller);
-    return renderShareHtml(res, seller);
+    return renderShareHtml(res, seller, req.headers['user-agent'] || '');
   } catch (error) {
     return next(error);
   }
@@ -522,7 +512,7 @@ const shareSellerShopBySlug = async (req, res, next) => {
       throw new AppError('Boutique introuvable ou inactive', 404);
     }
     await getOrCreateSellerSlug(seller);
-    return renderShareHtml(res, seller);
+    return renderShareHtml(res, seller, req.headers['user-agent'] || '');
   } catch (error) {
     return next(error);
   }
