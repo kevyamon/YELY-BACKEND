@@ -70,7 +70,7 @@ const bannerSlideSchema = new mongoose.Schema({
   animationType: {
     type: String,
     enum: {
-      values: ['none', 'bubbles', 'confetti', 'stars'],
+      values: ['none', 'bubbles', 'confetti', 'stars', 'balloons', 'meteors', 'fireflies', 'aurora', 'snow', 'hearts'],
       message: 'Type d\'animation non supporté : {VALUE}'
     },
     default: 'none'
