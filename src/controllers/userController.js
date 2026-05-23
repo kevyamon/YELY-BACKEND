@@ -164,35 +164,41 @@ const getOrCreateSellerSlug = async (seller) => {
 const getShareImageUrl = async (seller) => {
   try {
     const cloudName = cloudinary.config().cloud_name || 'dpxslyr71';
+    const coverTemplateId = 'yely/assets/yely_cover_template'; // L'image de fond (1080x1080 par défaut)
     
     let baseImageUrl = seller.profilePicture;
-    let publicId = '';
-    let isCloudinary = false;
+    let sellerOverlayLayer = '';
 
     if (baseImageUrl && baseImageUrl.includes('cloudinary.com')) {
       const parts = baseImageUrl.split('/image/upload/');
       if (parts.length >= 2) {
-        const pathPart = parts[1].replace(/^v\d+\//, '');
-        const dotIndex = pathPart.lastIndexOf('.');
-        publicId = dotIndex !== -1 ? pathPart.substring(0, dotIndex) : pathPart;
-        isCloudinary = true;
+        let publicId = parts[1].replace(/^v\d+\//, '');
+        const dotIndex = publicId.lastIndexOf('.');
+        if (dotIndex !== -1) publicId = publicId.substring(0, dotIndex);
+        // Pour utiliser un publicId comme overlay, il faut remplacer les '/' par des ':'
+        sellerOverlayLayer = publicId.replace(/\//g, ':');
       }
     }
 
-    if (!publicId) {
-      publicId = 'yely/assets/yely_default_storefront';
-      isCloudinary = true;
+    if (!sellerOverlayLayer && baseImageUrl) {
+      // Si ce n'est pas une image Cloudinary, on utilise l'API fetch avec base64 URL-safe
+      const b64Url = Buffer.from(baseImageUrl).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      sellerOverlayLayer = `fetch:${b64Url}`;
+    } else if (!sellerOverlayLayer) {
+      sellerOverlayLayer = 'yely:assets:yely_default_storefront';
     }
     
-    const logoOverlay = 'yely:assets:yely_logo_overlay';
     const badgeOverlay = 'yely:assets:yely_verified_badge_overlay';
 
-    if (isCloudinary) {
-      return `https://res.cloudinary.com/${cloudName}/image/upload/c_fill,g_face,w_500,h_500/l_${logoOverlay},w_110,r_max/fl_layer_apply,g_south_east,x_15,y_15/l_${badgeOverlay},w_70/fl_layer_apply,g_north_east,x_15,y_15/${publicId}.jpg`;
-    } else {
-      const encodedBaseUrl = encodeURIComponent(baseImageUrl);
-      return `https://res.cloudinary.com/${cloudName}/image/fetch/c_fill,g_face,w_500,h_500/l_${logoOverlay},w_110,r_max/fl_layer_apply,g_south_east,x_15,y_15/l_${badgeOverlay},w_70/fl_layer_apply,g_north_east,x_15,y_15/${encodedBaseUrl}`;
-    }
+    // On utilise l'image de fond coverTemplateId.
+    // On superpose la photo du vendeur au centre (ajusté avec w_600, h_600, arrondi r_max, centré légèrement vers le haut y_-20).
+    // On peut aussi rajouter le badge vérifié par dessus si besoin, mais pour rester propre on place juste la photo.
+    
+    // Format: 
+    // 1. Base: yely_cover_template (1080x1080)
+    // 2. Overlay 1: Photo du vendeur (w_620, h_620, c_fill, r_max) placée au centre (g_center)
+    
+    return `https://res.cloudinary.com/${cloudName}/image/upload/w_1080,h_1080,c_fill/l_${sellerOverlayLayer},w_600,h_600,c_fill,r_max/fl_layer_apply,g_center,y_-15/${coverTemplateId}.jpg`;
   } catch (error) {
     logger.error(`[SHARE IMAGE] Echec de generation de l'image de partage: ${error.message}`);
     return seller.profilePicture || 'https://download-yely.vercel.app/logo.png';
