@@ -188,10 +188,10 @@ const getShareImageUrl = async (seller) => {
     const badgeOverlay = 'yely:assets:yely_verified_badge_overlay';
 
     if (isCloudinary) {
-      return `https://res.cloudinary.com/${cloudName}/image/upload/c_fill,g_face,w_500,h_500/l_${logoOverlay},r_max,g_south_east,w_110,x_15,y_15/l_${badgeOverlay},g_north_east,w_70,x_15,y_15/${publicId}.jpg`;
+      return `https://res.cloudinary.com/${cloudName}/image/upload/c_fill,g_face,w_500,h_500/l_${logoOverlay},w_110,r_max/fl_layer_apply,g_south_east,x_15,y_15/l_${badgeOverlay},w_70/fl_layer_apply,g_north_east,x_15,y_15/${publicId}.jpg`;
     } else {
       const encodedBaseUrl = encodeURIComponent(baseImageUrl);
-      return `https://res.cloudinary.com/${cloudName}/image/fetch/c_fill,g_face,w_500,h_500/l_${logoOverlay},r_max,g_south_east,w_110,x_15,y_15/l_${badgeOverlay},g_north_east,w_70,x_15,y_15/${encodedBaseUrl}`;
+      return `https://res.cloudinary.com/${cloudName}/image/fetch/c_fill,g_face,w_500,h_500/l_${logoOverlay},w_110,r_max/fl_layer_apply,g_south_east,x_15,y_15/l_${badgeOverlay},w_70/fl_layer_apply,g_north_east,x_15,y_15/${encodedBaseUrl}`;
     }
   } catch (error) {
     logger.error(`[SHARE IMAGE] Echec de generation de l'image de partage: ${error.message}`);
@@ -450,7 +450,7 @@ const renderShareHtml = async (res, seller) => {
         <span class="btn-title">Ouvrir dans l'application</span>
         <span class="btn-subtitle">Si Yély est installée sur votre mobile</span>
       </button>
-      <a href="https://download-yely.vercel.app/store/${seller.shopSlug || seller._id}" class="btn btn-secondary">
+      <a href="https://yely-amber.vercel.app/store/${seller.shopSlug || seller._id}" class="btn btn-secondary">
         <span class="btn-title">Continuer sur le site internet</span>
         <span class="btn-subtitle">Pour visiter la boutique sans rien installer</span>
       </a>
@@ -471,20 +471,19 @@ const renderShareHtml = async (res, seller) => {
       var appUrl = "yely://store/" + shopSlug;
       var intentUrl = "intent://store/" + shopSlug + "#Intent;scheme=yely;package=com.yely.app;S.browser_fallback_url=https%3A%2F%2Fdownload-yely.vercel.app;end";
       var fallbackUrl = "https://download-yely.vercel.app";
+      var pwaUrl = "https://yely-amber.vercel.app/store/" + shopSlug;
 
-      if (isAndroid) {
-        window.location.href = intentUrl;
-      } else if (isIOS) {
+      if (isAndroid || isIOS) {
         var start = Date.now();
         var timeout = setTimeout(function() {
-          if (!document.hidden && !document.webkitHidden && (Date.now() - start < 2200)) {
+          if (!document.hidden && !document.webkitHidden && (Date.now() - start < 2500)) {
             window.location.href = fallbackUrl;
           }
         }, 2000);
         window.location.href = appUrl;
       } else {
         // Desktop ou autre : on ouvre la PWA directement
-        window.location.href = "https://download-yely.vercel.app/store/" + shopSlug;
+        window.location.href = pwaUrl;
       }
     });
   </script>
