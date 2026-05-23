@@ -214,10 +214,10 @@ const getShareImageUrl = async (seller) => {
     const badgeOverlay = 'yely:assets:yely_verified_badge_overlay';
 
     if (isCloudinary) {
-      return `https://res.cloudinary.com/${cloudName}/image/upload/c_fill,g_face,w_500,h_500/l_${logoOverlay},g_south_east,w_120,x_15,y_15/l_${badgeOverlay},g_south_west,w_100,x_15,y_15/${publicId}.jpg`;
+      return `https://res.cloudinary.com/${cloudName}/image/upload/c_fill,g_face,w_500,h_500/l_${logoOverlay},r_max,g_south_east,w_110,x_15,y_15/l_${badgeOverlay},g_north_east,w_70,x_15,y_15/${publicId}.jpg`;
     } else {
       const encodedBaseUrl = encodeURIComponent(baseImageUrl);
-      return `https://res.cloudinary.com/${cloudName}/image/fetch/c_fill,g_face,w_500,h_500/l_${logoOverlay},g_south_east,w_120,x_15,y_15/l_${badgeOverlay},g_south_west,w_100,x_15,y_15/${encodedBaseUrl}`;
+      return `https://res.cloudinary.com/${cloudName}/image/fetch/c_fill,g_face,w_500,h_500/l_${logoOverlay},r_max,g_south_east,w_110,x_15,y_15/l_${badgeOverlay},g_north_east,w_70,x_15,y_15/${encodedBaseUrl}`;
     }
   } catch (error) {
     logger.error(`[SHARE IMAGE] Echec de generation de l'image de partage: ${error.message}`);
@@ -229,7 +229,7 @@ const renderShareHtml = async (res, seller) => {
   const ogImageUrl = await getShareImageUrl(seller);
   const shopTitle = `Boutique de ${seller.name}`;
   const shopDescription = `Découvrez ma boutique sur Yély. Commandez mes articles en direct et bénéficiez d'une livraison rapide.`;
-  const shareUrl = `https://yely-backend-yzw4.onrender.com/shop/${seller.shopSlug || seller._id}`;
+  const shareUrl = `https://download-yely.vercel.app/shop/${seller.shopSlug || seller._id}`;
 
   res.setHeader('Content-Type', 'text/html');
   return res.send(`
@@ -244,6 +244,9 @@ const renderShareHtml = async (res, seller) => {
   <meta property="og:title" content="${shopTitle}">
   <meta property="og:description" content="${shopDescription}">
   <meta property="og:image" content="${ogImageUrl}">
+  <meta property="og:image:width" content="500">
+  <meta property="og:image:height" content="500">
+  <meta property="og:image:type" content="image/jpeg">
   <meta property="og:url" content="${shareUrl}">
 
   <!-- Twitter -->
