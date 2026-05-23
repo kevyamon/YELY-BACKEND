@@ -131,6 +131,9 @@ app.get('/', (req, res) => {
   res.status(200).send('Yely API (Iron Dome) is running');
 });
 
+// Route publique de partage de boutique via slug ou ID
+app.get('/shop/:slug', require('./controllers/userController').shareSellerShopBySlug);
+
 // ==========================================
 // ENREGISTREMENT DES ROUTES (VERSIONING)
 // ==========================================

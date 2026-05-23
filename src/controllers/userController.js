@@ -12,6 +12,9 @@ const AppError = require('../utils/AppError');
 const getProfile = async (req, res, next) => {
   try {
     const user = await userService.getUserProfile(req.user._id);
+    if (user && user.role === 'seller' && !user.shopSlug) {
+      await getOrCreateSellerSlug(user);
+    }
     return successResponse(res, user, 'Profil recupere');
   } catch (error) {
     return next(error);
@@ -101,9 +104,12 @@ const getSellers = async (req, res, next) => {
 
 const getSellerProfile = async (req, res, next) => {
   try {
-    const seller = await User.findOne({ _id: req.params.id, role: 'seller', isBanned: false, isDeleted: false }).select('name profilePicture rating email phone');
+    const seller = await User.findOne({ _id: req.params.id, role: 'seller', isBanned: false, isDeleted: false }).select('name profilePicture rating email phone shopSlug');
     if (!seller) {
       throw new AppError('Vendeur introuvable', 404);
+    }
+    if (!seller.shopSlug) {
+      await getOrCreateSellerSlug(seller);
     }
     const count = await Product.countDocuments({ seller: seller._id, isActive: true });
     return successResponse(res, {
@@ -119,22 +125,45 @@ const cloudinary = require('../config/cloudinary');
 const fs = require('fs');
 const path = require('path');
 const logger = require('../config/logger');
+const crypto = require('crypto');
+
+// Helpers de génération de slug
+const slugify = (text) => {
+  return text
+    .toString()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w-]+/g, '')
+    .replace(/--+/g, '-');
+};
+
+const getOrCreateSellerSlug = async (seller) => {
+  if (seller.shopSlug) return seller.shopSlug;
+  const baseSlug = slugify(seller.name || 'boutique');
+  const randomHex = crypto.randomBytes(3).toString('hex');
+  const uniqueSlug = `${baseSlug}-${randomHex}`;
+  seller.shopSlug = uniqueSlug;
+  await seller.save({ validateBeforeSave: false });
+  return uniqueSlug;
+};
 
 // Helper pour générer l'image Open Graph avec overlays
 const getShareImageUrl = async (seller) => {
   try {
-    const logoLocalPath = path.resolve(__dirname, '../../../YELY/assets/logo.png');
+    const cloudName = cloudinary.config().cloud_name || 'dpxslyr71';
     const logoPublicId = 'yely_logo_overlay';
     const badgePublicId = 'yely_verified_badge_overlay';
     
-    // Tentative d'upload du logo s'il existe et n'est pas encore présent
-    if (fs.existsSync(logoLocalPath)) {
-      await cloudinary.uploader.upload(logoLocalPath, {
-        public_id: logoPublicId,
-        overwrite: false,
-        folder: 'yely/assets'
-      }).catch(err => logger.debug(`[CLOUDINARY] Logo déjà présent ou erreur: ${err.message}`));
-    }
+    // Téléchargement du logo depuis l'URL de Vercel (indépendant du système de fichiers)
+    const logoUrl = 'https://download-yely.vercel.app/logo.png';
+    await cloudinary.uploader.upload(logoUrl, {
+      public_id: logoPublicId,
+      overwrite: false,
+      folder: 'yely/assets'
+    }).catch(err => logger.debug(`[CLOUDINARY] Logo déjà présent ou erreur: ${err.message}`));
     
     // SVG du badge de certification
     const badgeSvg = `
@@ -150,7 +179,20 @@ const getShareImageUrl = async (seller) => {
     }).catch(err => logger.debug(`[CLOUDINARY] Badge déjà présent ou erreur: ${err.message}`));
     
     let baseImageUrl = seller.profilePicture;
-    if (!baseImageUrl) {
+    let publicId = '';
+    let isCloudinary = false;
+
+    if (baseImageUrl && baseImageUrl.includes('cloudinary.com')) {
+      const parts = baseImageUrl.split('/image/upload/');
+      if (parts.length >= 2) {
+        const pathPart = parts[1].replace(/^v\d+\//, '');
+        const dotIndex = pathPart.lastIndexOf('.');
+        publicId = dotIndex !== -1 ? pathPart.substring(0, dotIndex) : pathPart;
+        isCloudinary = true;
+      }
+    }
+
+    if (!publicId) {
       const defaultStoreSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="400" height="400">
   <rect width="100" height="100" fill="#F5D142" />
@@ -164,32 +206,33 @@ const getShareImageUrl = async (seller) => {
         folder: 'yely/assets'
       }).catch(() => null);
       
-      baseImageUrl = defaultStoreUpload?.secure_url || 'https://res.cloudinary.com/demo/image/upload/sample.jpg';
+      publicId = 'yely/assets/yely_default_storefront';
+      isCloudinary = true;
     }
     
-    const encodedBaseUrl = encodeURIComponent(baseImageUrl);
-    const cloudName = cloudinary.config().cloud_name;
-    return `https://res.cloudinary.com/${cloudName}/image/fetch/c_fill,g_face,w_500,h_500/l_yely:assets:yely_logo_overlay,g_south_east,w_120,x_15,y_15/l_yely:assets:yely_verified_badge_overlay,g_south_west,w_100,x_15,y_15/${encodedBaseUrl}`;
+    const logoOverlay = 'yely:assets:yely_logo_overlay';
+    const badgeOverlay = 'yely:assets:yely_verified_badge_overlay';
+
+    if (isCloudinary) {
+      return `https://res.cloudinary.com/${cloudName}/image/upload/c_fill,g_face,w_500,h_500/l_${logoOverlay},g_south_east,w_120,x_15,y_15/l_${badgeOverlay},g_south_west,w_100,x_15,y_15/${publicId}.jpg`;
+    } else {
+      const encodedBaseUrl = encodeURIComponent(baseImageUrl);
+      return `https://res.cloudinary.com/${cloudName}/image/fetch/c_fill,g_face,w_500,h_500/l_${logoOverlay},g_south_east,w_120,x_15,y_15/l_${badgeOverlay},g_south_west,w_100,x_15,y_15/${encodedBaseUrl}`;
+    }
   } catch (error) {
     logger.error(`[SHARE IMAGE] Echec de generation de l'image de partage: ${error.message}`);
     return seller.profilePicture || 'https://download-yely.vercel.app/logo.png';
   }
 };
 
-const shareSellerShop = async (req, res, next) => {
-  try {
-    const sellerId = req.params.id;
-    const seller = await User.findOne({ _id: sellerId, role: 'seller', isBanned: false, isDeleted: false });
-    if (!seller) {
-      throw new AppError('Boutique introuvable ou inactive', 404);
-    }
-    
-    const ogImageUrl = await getShareImageUrl(seller);
-    const shopTitle = `Boutique de ${seller.name}`;
-    const shopDescription = `Découvrez ma boutique sur Yély. Commandez mes articles en direct et bénéficiez d'une livraison rapide.`;
+const renderShareHtml = async (res, seller) => {
+  const ogImageUrl = await getShareImageUrl(seller);
+  const shopTitle = `Boutique de ${seller.name}`;
+  const shopDescription = `Découvrez ma boutique sur Yély. Commandez mes articles en direct et bénéficiez d'une livraison rapide.`;
+  const shareUrl = `https://yely-backend-yzw4.onrender.com/shop/${seller.shopSlug || seller._id}`;
 
-    res.setHeader('Content-Type', 'text/html');
-    return res.send(`
+  res.setHeader('Content-Type', 'text/html');
+  return res.send(`
 <!DOCTYPE html>
 <html>
 <head>
@@ -201,7 +244,7 @@ const shareSellerShop = async (req, res, next) => {
   <meta property="og:title" content="${shopTitle}">
   <meta property="og:description" content="${shopDescription}">
   <meta property="og:image" content="${ogImageUrl}">
-  <meta property="og:url" content="https://yely-backend-yzw4.onrender.com/api/v1/users/sellers/${sellerId}/share">
+  <meta property="og:url" content="${shareUrl}">
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
@@ -226,6 +269,7 @@ const shareSellerShop = async (req, res, next) => {
       text-align: center;
     }
     .container {
+      width: 100%;
       max-width: 400px;
       padding: 30px;
       border-radius: 20px;
@@ -235,6 +279,7 @@ const shareSellerShop = async (req, res, next) => {
       display: flex;
       flex-direction: column;
       align-items: center;
+      box-sizing: border-box;
     }
     .logo-img {
       width: 100px;
@@ -257,35 +302,60 @@ const shareSellerShop = async (req, res, next) => {
       margin-bottom: 25px;
     }
     .btn {
-      display: inline-block;
-      background-color: #D4AF37;
-      color: #000000;
+      display: block;
+      width: 100%;
       text-decoration: none;
-      padding: 12px 30px;
+      padding: 14px 20px;
       border-radius: 30px;
       font-weight: bold;
       font-size: 15px;
-      transition: background-color 0.2s;
+      margin-bottom: 12px;
+      box-sizing: border-box;
+      transition: all 0.2s ease;
+      cursor: pointer;
     }
-    .btn:hover {
+    .btn-primary {
+      background-color: #D4AF37;
+      color: #000000;
+      box-shadow: 0 4px 15px rgba(212, 175, 55, 0.3);
+    }
+    .btn-primary:hover {
       background-color: #f1c40f;
+      transform: translateY(-2px);
+    }
+    .btn-secondary {
+      background-color: transparent;
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    .btn-secondary:hover {
+      background-color: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.4);
+      transform: translateY(-2px);
     }
   </style>
   <script>
     window.onload = function() {
-      var appUrl = "yely://seller/${sellerId}";
+      var isAndroid = /Android/i.test(navigator.userAgent);
+      var appUrl = "yely://seller/${seller._id}";
+      var intentUrl = "intent://seller/${seller._id}#Intent;scheme=yely;package=com.yely.app;S.browser_fallback_url=https%3A%2F%2Fdownload-yely.vercel.app;end";
       var fallbackUrl = "https://download-yely.vercel.app";
       
-      window.location.href = appUrl;
+      // Mettre à jour l'URL du bouton principal d'ouverture
+      var openBtn = document.getElementById("open-app-btn");
+      if (openBtn) {
+        openBtn.href = isAndroid ? intentUrl : appUrl;
+      }
       
-      setTimeout(function() {
-        var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-        if (isMobile) {
+      // Tentative de redirection automatique
+      if (isAndroid) {
+        window.location.href = intentUrl;
+      } else {
+        window.location.href = appUrl;
+        setTimeout(function() {
           window.location.href = fallbackUrl;
-        } else {
-          window.location.href = fallbackUrl;
-        }
-      }, 1500);
+        }, 2000);
+      }
     };
   </script>
 </head>
@@ -294,11 +364,47 @@ const shareSellerShop = async (req, res, next) => {
     <img class="logo-img" src="${seller.profilePicture || 'https://res.cloudinary.com/' + cloudinary.config().cloud_name + '/image/upload/v1/yely/assets/yely_default_storefront'}" alt="Boutique" />
     <h1>${seller.name}</h1>
     <p>Redirection en cours vers la boutique...</p>
-    <a class="btn" href="https://download-yely.vercel.app">Télécharger Yély</a>
+    
+    <a id="open-app-btn" class="btn btn-primary" href="yely://seller/${seller._id}">Ouvrir dans l'app Yély</a>
+    <a class="btn btn-secondary" href="https://download-yely.vercel.app">Télécharger l'application</a>
   </div>
 </body>
 </html>
-    `);
+  `);
+};
+
+const shareSellerShop = async (req, res, next) => {
+  try {
+    const sellerId = req.params.id;
+    const seller = await User.findOne({ _id: sellerId, role: 'seller', isBanned: false, isDeleted: false });
+    if (!seller) {
+      throw new AppError('Boutique introuvable ou inactive', 404);
+    }
+    await getOrCreateSellerSlug(seller);
+    return renderShareHtml(res, seller);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const shareSellerShopBySlug = async (req, res, next) => {
+  try {
+    const slug = req.params.slug;
+    let query = { role: 'seller', isBanned: false, isDeleted: false };
+    
+    const mongoose = require('mongoose');
+    if (mongoose.Types.ObjectId.isValid(slug)) {
+      query._id = slug;
+    } else {
+      query.shopSlug = slug;
+    }
+    
+    const seller = await User.findOne(query);
+    if (!seller) {
+      throw new AppError('Boutique introuvable ou inactive', 404);
+    }
+    await getOrCreateSellerSlug(seller);
+    return renderShareHtml(res, seller);
   } catch (error) {
     return next(error);
   }
@@ -312,5 +418,6 @@ module.exports = {
   updateAvailability,
   getSellers,
   getSellerProfile,
-  shareSellerShop
+  shareSellerShop,
+  shareSellerShopBySlug
 };

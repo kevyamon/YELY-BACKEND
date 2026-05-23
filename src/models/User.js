@@ -51,6 +51,12 @@ const userSchema = new mongoose.Schema({
     type: String, 
     default: '' 
   },
+  shopSlug: {
+    type: String,
+    unique: true,
+    sparse: true,
+    index: true
+  },
   role: {
     type: String,
     enum: {
