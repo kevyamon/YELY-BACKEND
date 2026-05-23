@@ -38,9 +38,13 @@ const updateProductRating = async (productId) => {
 // Créer un avis
 const createReview = async (req, res, next) => {
   try {
-    const productId = req.body.productId || req.body.product;
+    let productId = req.body.productId || req.body.product;
     const { rating, comment } = req.body;
     const userId = req.user._id;
+
+    if (productId && typeof productId === 'object') {
+      productId = productId._id || productId.id;
+    }
 
     if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
       throw new AppError('Identifiant de produit invalide.', 400);
