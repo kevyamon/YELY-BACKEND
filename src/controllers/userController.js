@@ -446,10 +446,10 @@ const renderShareHtml = async (res, seller) => {
     <p>Bienvenue sur Yély ! Choisissez comment vous souhaitez visiter cette boutique.</p>
     
     <div class="btn-group">
-      <button id="open-app-btn" class="btn btn-primary">
+      <a id="open-app-btn" href="#" class="btn btn-primary">
         <span class="btn-title">Ouvrir dans l'application</span>
         <span class="btn-subtitle">Si Yély est installée sur votre mobile</span>
-      </button>
+      </a>
       <a href="https://yely-amber.vercel.app/store/${seller.shopSlug || seller._id}" class="btn btn-secondary">
         <span class="btn-title">Continuer sur le site internet</span>
         <span class="btn-subtitle">Pour visiter la boutique sans rien installer</span>
@@ -462,30 +462,32 @@ const renderShareHtml = async (res, seller) => {
   </div>
 
   <script>
-    document.getElementById('open-app-btn').addEventListener('click', function() {
-      var isAndroid = /Android/i.test(navigator.userAgent);
-      var isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-      
-      var sellerId = "${seller._id}";
-      var shopSlug = "${seller.shopSlug}" || sellerId;
-      var appUrl = "yely://store/" + shopSlug;
-      var intentUrl = "intent://store/" + shopSlug + "#Intent;scheme=yely;package=com.yely.app;S.browser_fallback_url=https%3A%2F%2Fdownload-yely.vercel.app;end";
-      var fallbackUrl = "https://download-yely.vercel.app";
-      var pwaUrl = "https://yely-amber.vercel.app/store/" + shopSlug;
+    var isAndroid = /Android/i.test(navigator.userAgent);
+    var isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    
+    var shopSlug = "${seller.shopSlug || seller._id}";
+    var appUrl = "yely://store/" + shopSlug;
+    var intentUrl = "intent://store/" + shopSlug + "#Intent;scheme=yely;package=com.yely.app;S.browser_fallback_url=https%3A%2F%2Fdownload-yely.vercel.app;end";
+    var fallbackUrl = "https://download-yely.vercel.app";
+    var pwaUrl = "https://yely-amber.vercel.app/store/" + shopSlug;
 
-      if (isAndroid || isIOS) {
+    var btn = document.getElementById('open-app-btn');
+
+    if (isAndroid) {
+      btn.href = intentUrl;
+    } else if (isIOS) {
+      btn.href = appUrl;
+      btn.addEventListener('click', function(e) {
         var start = Date.now();
-        var timeout = setTimeout(function() {
+        setTimeout(function() {
           if (!document.hidden && !document.webkitHidden && (Date.now() - start < 2500)) {
             window.location.href = fallbackUrl;
           }
         }, 2000);
-        window.location.href = appUrl;
-      } else {
-        // Desktop ou autre : on ouvre la PWA directement
-        window.location.href = pwaUrl;
-      }
-    });
+      });
+    } else {
+      btn.href = pwaUrl;
+    }
   </script>
 </body>
 </html>
