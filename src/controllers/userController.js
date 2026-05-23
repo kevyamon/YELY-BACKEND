@@ -195,7 +195,7 @@ const renderShareHtml = async (res, seller, userAgent = '') => {
   const ogImageUrl = await getShareImageUrl(seller);
   const shopTitle = `Boutique de ${seller.name}`;
   const shopDescription = `Découvrez ma boutique sur Yély. Commandez mes articles en direct et bénéficiez d'une livraison rapide.`;
-  const shareUrl = `https://download-yely.vercel.app/shop/${seller.shopSlug || seller._id}`;
+  const shareUrl = `https://yely-amber.vercel.app/shop/${seller.shopSlug || seller._id}`;
   const shopSlug = seller.shopSlug || seller._id;
 
   // --- Server-side OS detection (contourne le CSP qui bloque les scripts inline) ---
