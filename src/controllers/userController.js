@@ -230,6 +230,7 @@ const renderShareHtml = async (res, seller) => {
   const shopTitle = `Boutique de ${seller.name}`;
   const shopDescription = `Découvrez ma boutique sur Yély. Commandez mes articles en direct et bénéficiez d'une livraison rapide.`;
   const shareUrl = `https://download-yely.vercel.app/shop/${seller.shopSlug || seller._id}`;
+  const cloudName = cloudinary.config().cloud_name || 'dpxslyr71';
 
   res.setHeader('Content-Type', 'text/html');
   return res.send(`
@@ -255,122 +256,241 @@ const renderShareHtml = async (res, seller) => {
   <meta name="twitter:description" content="${shopDescription}">
   <meta name="twitter:image" content="${ogImageUrl}">
 
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  
   <style>
+    :root {
+      --primary: #D4AF37;
+      --bg: #050505;
+      --card-bg: rgba(20, 20, 20, 0.6);
+      --border: rgba(212, 175, 55, 0.2);
+      --text: #ffffff;
+      --text-muted: rgba(255, 255, 255, 0.6);
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
     body {
-      background-color: #0b0b0b;
-      color: #ffffff;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      height: 100vh;
-      margin: 0;
+      min-height: 100vh;
       padding: 20px;
-      box-sizing: border-box;
-      text-align: center;
+      overflow-x: hidden;
+      background-image: radial-gradient(circle at 50% 30%, rgba(212, 175, 55, 0.08), transparent 60%);
     }
+    
     .container {
       width: 100%;
       max-width: 400px;
-      padding: 30px;
-      border-radius: 20px;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(212, 175, 55, 0.2);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      padding: 35px 25px;
+      border-radius: 28px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       display: flex;
       flex-direction: column;
       align-items: center;
-      box-sizing: border-box;
+      text-align: center;
     }
-    .logo-img {
-      width: 100px;
-      height: 100px;
-      border-radius: 50%;
-      border: 2px solid #D4AF37;
+    
+    .avatar-wrapper {
+      position: relative;
       margin-bottom: 20px;
+    }
+    
+    .logo-img {
+      width: 110px;
+      height: 110px;
+      border-radius: 50%;
+      border: 2.5px solid var(--primary);
       object-fit: cover;
+      box-shadow: 0 8px 24px rgba(212, 175, 55, 0.25);
     }
+    
+    .badge-icon {
+      position: absolute;
+      bottom: 2px;
+      right: 2px;
+      background: #000;
+      border-radius: 50%;
+      width: 26px;
+      height: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
     h1 {
-      color: #D4AF37;
-      margin-top: 0;
-      margin-bottom: 10px;
+      font-family: 'Outfit', sans-serif;
       font-size: 24px;
+      font-weight: 900;
+      color: #fff;
+      margin-bottom: 6px;
+      letter-spacing: -0.5px;
     }
+    
+    .rating-badge {
+      display: flex;
+      align-items: center;
+      background: rgba(212, 175, 55, 0.1);
+      border: 1px solid rgba(212, 175, 55, 0.2);
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 13px;
+      color: var(--primary);
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+    
+    .rating-badge span {
+      margin-right: 4px;
+    }
+    
     p {
-      color: rgba(255,255,255,0.7);
-      font-size: 15px;
-      line-height: 1.5;
-      margin-bottom: 25px;
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1.6;
+      margin-bottom: 30px;
+      max-width: 90%;
     }
-    .btn {
-      display: block;
+    
+    .btn-group {
       width: 100%;
-      text-decoration: none;
-      padding: 14px 20px;
-      border-radius: 30px;
-      font-weight: bold;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      padding: 15px 24px;
+      border-radius: 18px;
+      font-family: 'Outfit', sans-serif;
+      font-weight: 800;
       font-size: 15px;
-      margin-bottom: 12px;
-      box-sizing: border-box;
-      transition: all 0.2s ease;
+      text-decoration: none;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
       cursor: pointer;
+      border: none;
     }
+    
     .btn-primary {
-      background-color: #D4AF37;
+      background-color: var(--primary);
       color: #000000;
-      box-shadow: 0 4px 15px rgba(212, 175, 55, 0.3);
+      box-shadow: 0 6px 20px rgba(212, 175, 55, 0.25);
     }
+    
     .btn-primary:hover {
       background-color: #f1c40f;
       transform: translateY(-2px);
+      box-shadow: 0 8px 25px rgba(212, 175, 55, 0.35);
     }
+    
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+    
     .btn-secondary {
-      background-color: transparent;
+      background-color: rgba(255, 255, 255, 0.04);
       color: #ffffff;
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.08);
     }
+    
     .btn-secondary:hover {
-      background-color: rgba(255, 255, 255, 0.05);
-      border-color: rgba(255, 255, 255, 0.4);
+      background-color: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.2);
       transform: translateY(-2px);
     }
+    
+    .btn-secondary:active {
+      transform: translateY(0);
+    }
+    
+    .btn-text {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: underline;
+      margin-top: 15px;
+      cursor: pointer;
+      transition: color 0.2s;
+    }
+    
+    .btn-text:hover {
+      color: #fff;
+    }
   </style>
-  <script>
-    window.onload = function() {
-      var isAndroid = /Android/i.test(navigator.userAgent);
-      var appUrl = "yely://seller/${seller._id}";
-      var intentUrl = "intent://seller/${seller._id}#Intent;scheme=yely;package=com.yely.app;S.browser_fallback_url=https%3A%2F%2Fdownload-yely.vercel.app;end";
-      var fallbackUrl = "https://download-yely.vercel.app";
-      
-      // Mettre à jour l'URL du bouton principal d'ouverture
-      var openBtn = document.getElementById("open-app-btn");
-      if (openBtn) {
-        openBtn.href = isAndroid ? intentUrl : appUrl;
-      }
-      
-      // Tentative de redirection automatique
-      if (isAndroid) {
-        window.location.href = intentUrl;
-      } else {
-        window.location.href = appUrl;
-        setTimeout(function() {
-          window.location.href = fallbackUrl;
-        }, 2000);
-      }
-    };
-  </script>
 </head>
 <body>
   <div class="container">
-    <img class="logo-img" src="${seller.profilePicture || 'https://res.cloudinary.com/' + cloudinary.config().cloud_name + '/image/upload/v1/yely/assets/yely_default_storefront'}" alt="Boutique" />
-    <h1>${seller.name}</h1>
-    <p>Redirection en cours vers la boutique...</p>
+    <div class="avatar-wrapper">
+      <img class="logo-img" src="${seller.profilePicture || 'https://res.cloudinary.com/' + cloudName + '/image/upload/v1/yely/assets/yely_default_storefront'}" alt="Boutique" />
+      <div class="badge-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M23 12L20.56 9.22L20.9 5.54L17.29 4.72L15 1.4L11.5 2.92L8 1.4L5.71 4.72L2.1 5.54L2.44 9.22L0 12L2.44 14.78L2.1 18.46L5.71 19.28L8 22.6L11.5 21.08L15 22.6L17.29 19.28L20.9 18.46L20.56 14.78L23 12ZM10 17L6 13L7.41 11.59L10 14.17L16.59 7.58L18 9L10 17Z" fill="#D4AF37"/>
+        </svg>
+      </div>
+    </div>
     
-    <a id="open-app-btn" class="btn btn-primary" href="yely://seller/${seller._id}">Ouvrir dans l'app Yély</a>
-    <a class="btn btn-secondary" href="https://download-yely.vercel.app">Télécharger l'application</a>
+    <h1>${seller.name}</h1>
+    
+    <div class="rating-badge">
+      <span>★</span> ${seller.rating ? seller.rating.toFixed(1) : '5.0'} / 5.0
+    </div>
+    
+    <p>Bienvenue sur Yély ! Ouvrez cette boutique dans notre application native ou continuez directement sur le site web.</p>
+    
+    <div class="btn-group">
+      <button id="open-app-btn" class="btn btn-primary">Ouvrir dans l'app Yély</button>
+      <a href="https://download-yely.vercel.app/seller/${seller._id}" class="btn btn-secondary">Continuer sur le Web (PWA)</a>
+      <a href="https://download-yely.vercel.app" class="btn btn-text">Télécharger l'application</a>
+    </div>
   </div>
+
+  <script>
+    document.getElementById('open-app-btn').addEventListener('click', function() {
+      var isAndroid = /Android/i.test(navigator.userAgent);
+      var isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      
+      var sellerId = "${seller._id}";
+      var appUrl = "yely://seller/" + sellerId;
+      var intentUrl = "intent://seller/" + sellerId + "#Intent;scheme=yely;package=com.yely.app;S.browser_fallback_url=https%3A%2F%2Fdownload-yely.vercel.app;end";
+      var fallbackUrl = "https://download-yely.vercel.app";
+
+      if (isAndroid) {
+        window.location.href = intentUrl;
+      } else if (isIOS) {
+        var start = Date.now();
+        var timeout = setTimeout(function() {
+          if (!document.hidden && !document.webkitHidden && (Date.now() - start < 2200)) {
+            window.location.href = fallbackUrl;
+          }
+        }, 2000);
+        window.location.href = appUrl;
+      } else {
+        // Desktop ou autre : on ouvre la PWA directement
+        window.location.href = "https://download-yely.vercel.app/seller/" + sellerId;
+      }
+    });
+  </script>
 </body>
 </html>
   `);
