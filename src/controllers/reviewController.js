@@ -50,6 +50,22 @@ const createReview = async (req, res, next) => {
       throw new AppError('Identifiant de produit invalide.', 400);
     }
 
+    if (rating === undefined || rating === null) {
+      throw new AppError('La note est obligatoire.', 400);
+    }
+    const numRating = Number(rating);
+    if (!Number.isInteger(numRating) || numRating < 1 || numRating > 5) {
+      throw new AppError('La note doit être un nombre entier compris entre 1 et 5.', 400);
+    }
+
+    if (!comment || typeof comment !== 'string' || !comment.trim()) {
+      throw new AppError('Le commentaire est obligatoire et ne peut pas être vide.', 400);
+    }
+    const trimmedComment = comment.trim();
+    if (trimmedComment.length > 5000) {
+      throw new AppError('Le commentaire ne peut dépasser 5000 caractères.', 400);
+    }
+
     const productObjectId = new mongoose.Types.ObjectId(productId);
 
     // 1. Vérifier si l'utilisateur a commandé ce produit et si le statut est 'delivered'
@@ -73,8 +89,8 @@ const createReview = async (req, res, next) => {
     const review = await Review.create({
       product: productObjectId,
       user: userId,
-      rating,
-      comment
+      rating: numRating,
+      comment: trimmedComment
     });
 
     // 4. Recalculer la note moyenne du produit
@@ -102,8 +118,25 @@ const updateReview = async (req, res, next) => {
       throw new AppError("Vous n'êtes pas autorisé à modifier cet avis.", 403);
     }
 
-    review.rating = rating || review.rating;
-    review.comment = comment || review.comment;
+    if (rating !== undefined && rating !== null) {
+      const numRating = Number(rating);
+      if (!Number.isInteger(numRating) || numRating < 1 || numRating > 5) {
+        throw new AppError('La note doit être un nombre entier compris entre 1 et 5.', 400);
+      }
+      review.rating = numRating;
+    }
+
+    if (comment !== undefined && comment !== null) {
+      if (typeof comment !== 'string' || !comment.trim()) {
+        throw new AppError('Le commentaire ne peut pas être vide.', 400);
+      }
+      const trimmedComment = comment.trim();
+      if (trimmedComment.length > 5000) {
+        throw new AppError('Le commentaire ne peut dépasser 5000 caractères.', 400);
+      }
+      review.comment = trimmedComment;
+    }
+
     await review.save();
 
     // Recalculer la note moyenne du produit
@@ -146,7 +179,12 @@ const deleteReview = async (req, res, next) => {
 const getProductReviews = async (req, res, next) => {
   try {
     const { productId } = req.params;
-    const reviews = await Review.find({ product: productId })
+
+    if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
+      throw new AppError('Identifiant de produit invalide.', 400);
+    }
+
+    const reviews = await Review.find({ product: new mongoose.Types.ObjectId(productId) })
       .populate('user', 'name profilePicture')
       .sort({ createdAt: -1 });
 
