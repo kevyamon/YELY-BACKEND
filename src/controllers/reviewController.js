@@ -42,11 +42,17 @@ const createReview = async (req, res, next) => {
     const { rating, comment } = req.body;
     const userId = req.user._id;
 
+    if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
+      throw new AppError('Identifiant de produit invalide.', 400);
+    }
+
+    const productObjectId = new mongoose.Types.ObjectId(productId);
+
     // 1. Vérifier si l'utilisateur a commandé ce produit et si le statut est 'delivered'
     const order = await Order.findOne({
       customer: userId,
       status: 'delivered',
-      'items.product': productId
+      'items.product': productObjectId
     });
 
     if (!order) {
@@ -54,14 +60,14 @@ const createReview = async (req, res, next) => {
     }
 
     // 2. Vérifier si un avis existe déjà pour ce produit
-    const existingReview = await Review.findOne({ product: productId, user: userId });
+    const existingReview = await Review.findOne({ product: productObjectId, user: userId });
     if (existingReview) {
       throw new AppError('Vous avez déjà laissé un avis pour ce produit.', 400);
     }
 
     // 3. Créer l'avis
     const review = await Review.create({
-      product: productId,
+      product: productObjectId,
       user: userId,
       rating,
       comment
