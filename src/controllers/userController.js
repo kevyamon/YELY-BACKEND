@@ -164,29 +164,6 @@ const getOrCreateSellerSlug = async (seller) => {
 const getShareImageUrl = async (seller) => {
   try {
     const cloudName = cloudinary.config().cloud_name || 'dpxslyr71';
-    const logoPublicId = 'yely_logo_overlay';
-    const badgePublicId = 'yely_verified_badge_overlay';
-    
-    // Téléchargement du logo depuis l'URL de Vercel (indépendant du système de fichiers)
-    const logoUrl = 'https://download-yely.vercel.app/logo.png';
-    await cloudinary.uploader.upload(logoUrl, {
-      public_id: logoPublicId,
-      overwrite: false,
-      folder: 'yely/assets'
-    }).catch(err => logger.debug(`[CLOUDINARY] Logo déjà présent ou erreur: ${err.message}`));
-    
-    // SVG du badge de certification
-    const badgeSvg = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="200" height="200">
-  <path d="M23,12L20.56,9.22L20.9,5.54L17.29,4.72L15.4,1.54L12,3L8.6,1.54L6.71,4.72L3.1,5.53L3.44,9.21L1,12L3.44,14.78L3.1,18.47L6.71,19.29L8.6,22.47L12,21L15.4,22.46L17.29,19.28L20.9,18.46L20.56,14.78L23,12M10,17L6,13L7.41,11.59L10,14.17L16.59,7.58L18,9L10,17Z" fill="#D4AF37" />
-</svg>`;
-    const badgeBase64 = `data:image/svg+xml;base64,${Buffer.from(badgeSvg.trim()).toString('base64')}`;
-    
-    await cloudinary.uploader.upload(badgeBase64, {
-      public_id: badgePublicId,
-      overwrite: false,
-      folder: 'yely/assets'
-    }).catch(err => logger.debug(`[CLOUDINARY] Badge déjà présent ou erreur: ${err.message}`));
     
     let baseImageUrl = seller.profilePicture;
     let publicId = '';
@@ -203,19 +180,6 @@ const getShareImageUrl = async (seller) => {
     }
 
     if (!publicId) {
-      const defaultStoreSvg = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="400" height="400">
-  <rect width="100" height="100" fill="#F5D142" />
-  <circle cx="50" cy="50" r="45" fill="#000000" opacity="0.05" />
-  <path d="M20 20.01L5 34v4h90v-4L80 20.01H20zm0 8.38l10.8 8.38H13.2L20 28.39zM8 44v4h84v-4H8zm4 8v20c0 2.2 1.8 4 4 4h68c2.2 0 4-1.8 4-4V52H12zm16 8h40v12H28V60z" fill="#000000" transform="scale(0.8) translate(12, 12)" />
-</svg>`;
-      const defaultStoreBase64 = `data:image/svg+xml;base64,${Buffer.from(defaultStoreSvg.trim()).toString('base64')}`;
-      const defaultStoreUpload = await cloudinary.uploader.upload(defaultStoreBase64, {
-        public_id: 'yely_default_storefront',
-        overwrite: false,
-        folder: 'yely/assets'
-      }).catch(() => null);
-      
       publicId = 'yely/assets/yely_default_storefront';
       isCloudinary = true;
     }
@@ -386,18 +350,31 @@ const renderShareHtml = async (res, seller) => {
     
     .btn {
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
       width: 100%;
-      padding: 15px 24px;
+      padding: 13px 20px;
       border-radius: 18px;
       font-family: 'Outfit', sans-serif;
-      font-weight: 800;
-      font-size: 15px;
       text-decoration: none;
       transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
       cursor: pointer;
       border: none;
+      gap: 2px;
+    }
+    
+    .btn-title {
+      font-weight: 900;
+      font-size: 15.5px;
+      letter-spacing: -0.2px;
+    }
+    
+    .btn-subtitle {
+      font-family: 'Inter', sans-serif;
+      font-size: 10.5px;
+      font-weight: 500;
+      opacity: 0.85;
     }
     
     .btn-primary {
@@ -466,12 +443,21 @@ const renderShareHtml = async (res, seller) => {
       <span>★</span> ${seller.rating ? seller.rating.toFixed(1) : '5.0'} / 5.0
     </div>
     
-    <p>Bienvenue sur Yély ! Ouvrez cette boutique dans notre application native ou continuez directement sur le site web.</p>
+    <p>Bienvenue sur Yély ! Choisissez comment vous souhaitez visiter cette boutique.</p>
     
     <div class="btn-group">
-      <button id="open-app-btn" class="btn btn-primary">Ouvrir dans l'app Yély</button>
-      <a href="https://download-yely.vercel.app/store/${seller.shopSlug || seller._id}" class="btn btn-secondary">Continuer sur le Web (PWA)</a>
-      <a href="https://download-yely.vercel.app" class="btn btn-text">Télécharger l'application</a>
+      <button id="open-app-btn" class="btn btn-primary">
+        <span class="btn-title">Ouvrir dans l'application</span>
+        <span class="btn-subtitle">Si Yély est installée sur votre mobile</span>
+      </button>
+      <a href="https://download-yely.vercel.app/store/${seller.shopSlug || seller._id}" class="btn btn-secondary">
+        <span class="btn-title">Continuer sur le site internet</span>
+        <span class="btn-subtitle">Pour visiter la boutique sans rien installer</span>
+      </a>
+      <a href="https://download-yely.vercel.app" class="btn btn-text" style="display: flex; flex-direction: column; align-items: center; text-decoration: none; gap: 4px; margin-top: 10px;">
+        <span style="font-weight: 800; font-family: 'Outfit', sans-serif; font-size: 14.5px; text-decoration: underline; color: var(--primary);">Installer l'application Yély</span>
+        <span style="font-size: 10.5px; color: var(--text-muted); font-weight: normal; text-decoration: none;">Pour commander et suivre vos livraisons facilement</span>
+      </a>
     </div>
   </div>
 
