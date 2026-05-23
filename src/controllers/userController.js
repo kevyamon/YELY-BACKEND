@@ -104,7 +104,17 @@ const getSellers = async (req, res, next) => {
 
 const getSellerProfile = async (req, res, next) => {
   try {
-    const seller = await User.findOne({ _id: req.params.id, role: 'seller', isBanned: false, isDeleted: false }).select('name profilePicture rating email phone shopSlug');
+    const idOrSlug = req.params.id;
+    let query = { role: 'seller', isBanned: false, isDeleted: false };
+    
+    const mongoose = require('mongoose');
+    if (mongoose.Types.ObjectId.isValid(idOrSlug)) {
+      query._id = idOrSlug;
+    } else {
+      query.shopSlug = idOrSlug;
+    }
+
+    const seller = await User.findOne(query).select('name profilePicture rating email phone shopSlug');
     if (!seller) {
       throw new AppError('Vendeur introuvable', 404);
     }
@@ -460,7 +470,7 @@ const renderShareHtml = async (res, seller) => {
     
     <div class="btn-group">
       <button id="open-app-btn" class="btn btn-primary">Ouvrir dans l'app Yély</button>
-      <a href="https://download-yely.vercel.app/seller/${seller._id}" class="btn btn-secondary">Continuer sur le Web (PWA)</a>
+      <a href="https://download-yely.vercel.app/store/${seller.shopSlug || seller._id}" class="btn btn-secondary">Continuer sur le Web (PWA)</a>
       <a href="https://download-yely.vercel.app" class="btn btn-text">Télécharger l'application</a>
     </div>
   </div>
@@ -471,8 +481,9 @@ const renderShareHtml = async (res, seller) => {
       var isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
       
       var sellerId = "${seller._id}";
-      var appUrl = "yely://seller/" + sellerId;
-      var intentUrl = "intent://seller/" + sellerId + "#Intent;scheme=yely;package=com.yely.app;S.browser_fallback_url=https%3A%2F%2Fdownload-yely.vercel.app;end";
+      var shopSlug = "${seller.shopSlug}" || sellerId;
+      var appUrl = "yely://store/" + shopSlug;
+      var intentUrl = "intent://store/" + shopSlug + "#Intent;scheme=yely;package=com.yely.app;S.browser_fallback_url=https%3A%2F%2Fdownload-yely.vercel.app;end";
       var fallbackUrl = "https://download-yely.vercel.app";
 
       if (isAndroid) {
@@ -487,7 +498,7 @@ const renderShareHtml = async (res, seller) => {
         window.location.href = appUrl;
       } else {
         // Desktop ou autre : on ouvre la PWA directement
-        window.location.href = "https://download-yely.vercel.app/seller/" + sellerId;
+        window.location.href = "https://download-yely.vercel.app/store/" + shopSlug;
       }
     });
   </script>
