@@ -257,7 +257,7 @@ exports.updateProduct = async (req, res, next) => {
     updateData.image = finalImages[0];
 
     // Gestion automatique du stock selon la catégorie (La nourriture n'a pas de stock)
-    if (updateData.category === 'Food' || (product && product.category === 'Food')) {
+    if (updateData.category === 'Food' || (updateData.category === undefined && product && product.category === 'Food')) {
       updateData.manageStock = false;
       updateData.stockCount = 0;
       updateData.isSoldOut = false;
