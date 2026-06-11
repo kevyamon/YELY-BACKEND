@@ -67,6 +67,59 @@ const enrichAddressWithPOI = async (address, coords, redisClient) => {
   }
 };
 
+const resolveCoordsFromAddress = async (address, sellerName, redisClient) => {
+  const fallbackCoords = [-3.0325855, 5.4125925];
+  try {
+    let pois = [];
+    const cachedPOIs = await redisClient.get('yely_active_pois');
+    if (cachedPOIs) {
+      pois = JSON.parse(cachedPOIs);
+    } else {
+      pois = await POI.find({ isActive: true }).select('name latitude longitude').lean();
+      await redisClient.set('yely_active_pois', JSON.stringify(pois), 'EX', 3600);
+    }
+
+    if (!pois || pois.length === 0) return fallbackCoords;
+
+    const addrStr = String(address || '').trim().toLowerCase();
+    const nameStr = String(sellerName || '').trim().toLowerCase();
+
+    const match = addrStr.match(/de\s*:\s*([^)]+)/i);
+    if (match) {
+      const poiName = match[1].trim().toLowerCase();
+      const foundPoi = pois.find(p => p.name.toLowerCase() === poiName);
+      if (foundPoi) return [foundPoi.longitude, foundPoi.latitude];
+    }
+
+    if (addrStr && addrStr !== 'point de retrait vendeur') {
+      let foundPoi = pois.find(p => p.name.toLowerCase() === addrStr);
+      if (foundPoi) return [foundPoi.longitude, foundPoi.latitude];
+
+      foundPoi = pois.find(p => addrStr.includes(p.name.toLowerCase()));
+      if (foundPoi) return [foundPoi.longitude, foundPoi.latitude];
+
+      foundPoi = pois.find(p => p.name.toLowerCase().includes(addrStr));
+      if (foundPoi) return [foundPoi.longitude, foundPoi.latitude];
+    }
+
+    if (nameStr) {
+      let foundPoi = pois.find(p => p.name.toLowerCase() === nameStr);
+      if (foundPoi) return [foundPoi.longitude, foundPoi.latitude];
+
+      foundPoi = pois.find(p => nameStr.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(nameStr));
+      if (foundPoi) return [foundPoi.longitude, foundPoi.latitude];
+    }
+
+    const centrePoi = pois.find(p => p.name.toLowerCase().includes('centre'));
+    if (centrePoi) return [centrePoi.longitude, centrePoi.latitude];
+
+    return fallbackCoords;
+  } catch (error) {
+    logger.warn(`[POI RESOLUTION] Echec silencieux de la resolution d'adresse : ${error.message}`);
+    return fallbackCoords;
+  }
+};
+
 const getRouteDistance = async (originCoords, destCoords) => {
   try {
     const token = env.LOCATION_IQ_TOKEN;
@@ -90,5 +143,6 @@ const getRouteDistance = async (originCoords, destCoords) => {
 module.exports = {
   calculateHaversineDistance,
   enrichAddressWithPOI,
+  resolveCoordsFromAddress,
   getRouteDistance
 };

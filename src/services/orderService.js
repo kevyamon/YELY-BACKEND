@@ -46,12 +46,18 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
 
     try {
       const rideLifecycleService = require('./ride/rideLifecycleService');
+      const rideHelpers = require('./ride/rideHelpers');
       const uniqueSellersMap = new Map();
       
+      let sellerCoords = order.seller.currentLocation?.coordinates;
+      if (!sellerCoords || (sellerCoords[0] === 0 && sellerCoords[1] === 0)) {
+        sellerCoords = await rideHelpers.resolveCoordsFromAddress(order.seller.address, order.seller.name, redisClient);
+      }
+
       uniqueSellersMap.set(order.seller._id.toString(), {
         seller: order.seller._id,
         address: order.seller.address || 'Point de retrait vendeur',
-        coordinates: order.seller.currentLocation.coordinates,
+        coordinates: sellerCoords,
         isCollected: false
       });
 
@@ -61,10 +67,14 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
           if (!uniqueSellersMap.has(sId)) {
             const secondarySeller = await User.findById(item.product.seller._id || item.product.seller);
             if (secondarySeller) {
+              let secCoords = secondarySeller.currentLocation?.coordinates;
+              if (!secCoords || (secCoords[0] === 0 && secCoords[1] === 0)) {
+                secCoords = await rideHelpers.resolveCoordsFromAddress(secondarySeller.address, secondarySeller.name, redisClient);
+              }
               uniqueSellersMap.set(sId, {
                 seller: secondarySeller._id,
                 address: secondarySeller.address || 'Point de retrait vendeur secondaire',
-                coordinates: secondarySeller.currentLocation.coordinates,
+                coordinates: secCoords,
                 isCollected: false
               });
             }
@@ -77,7 +87,7 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
       const deliveryData = {
         origin: {
           address: order.seller.address || 'Point de retrait vendeur',
-          coordinates: order.seller.currentLocation.coordinates
+          coordinates: sellerCoords
         },
         destination: {
           address: order.shippingAddress.address,

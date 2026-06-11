@@ -30,11 +30,18 @@ const retryDeliverySearch = async (io, orderId) => {
 
     logger.info(`[DELIVERY RETRY] Relance de la recherche de livreur pour la commande ${order._id}`);
 
+    const rideHelpers = require('./rideHelpers');
     const uniqueSellersMap = new Map();
+    
+    let sellerCoords = order.seller.currentLocation?.coordinates;
+    if (!sellerCoords || (sellerCoords[0] === 0 && sellerCoords[1] === 0)) {
+      sellerCoords = await rideHelpers.resolveCoordsFromAddress(order.seller.address, order.seller.name, redis);
+    }
+
     uniqueSellersMap.set(order.seller._id.toString(), {
       seller: order.seller._id,
       address: order.seller.address || 'Point de retrait vendeur',
-      coordinates: order.seller.currentLocation.coordinates,
+      coordinates: sellerCoords,
       isCollected: false
     });
 
@@ -44,10 +51,14 @@ const retryDeliverySearch = async (io, orderId) => {
         if (!uniqueSellersMap.has(sId)) {
           const secondarySeller = await User.findById(item.product.seller._id || item.product.seller);
           if (secondarySeller) {
+            let secCoords = secondarySeller.currentLocation?.coordinates;
+            if (!secCoords || (secCoords[0] === 0 && secCoords[1] === 0)) {
+              secCoords = await rideHelpers.resolveCoordsFromAddress(secondarySeller.address, secondarySeller.name, redis);
+            }
             uniqueSellersMap.set(sId, {
               seller: secondarySeller._id,
               address: secondarySeller.address || 'Point de retrait vendeur secondaire',
-              coordinates: secondarySeller.currentLocation.coordinates,
+              coordinates: secCoords,
               isCollected: false
             });
           }
@@ -60,7 +71,7 @@ const retryDeliverySearch = async (io, orderId) => {
     const deliveryData = {
       origin: {
         address: order.seller.address || 'Point de retrait vendeur',
-        coordinates: order.seller.currentLocation.coordinates
+        coordinates: sellerCoords
       },
       destination: {
         address: order.shippingAddress.address,

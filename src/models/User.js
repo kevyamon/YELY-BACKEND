@@ -103,6 +103,7 @@ const userSchema = new mongoose.Schema({
     type: { type: String, enum: ['Point'], default: 'Point' },
     coordinates: { type: [Number], default: [0, 0] }
   },
+  address: { type: String, default: '' },
 
   fcmToken: { type: String, default: null, select: false },
   
