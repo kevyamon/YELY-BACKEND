@@ -1,52 +1,15 @@
 // src/controllers/bannerController.js
 // CONTROLLER BANNIÈRES - Gestion du Carrousel Marketplace
-// STANDARD: Industriel (Validation strict & Nettoyage ressources)
+// STANDARD: Industriel / Bank Grade
 
 const BannerSlide = require('../models/BannerSlide');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
-const cloudinary = require('../config/cloudinary');
-const fs = require('fs');
-
-/**
- * Extrait le public_id Cloudinary depuis une URL sécurisée pour le nettoyage des ressources.
- */
-const extractPublicId = (url) => {
-  if (!url || !url.includes('/upload/')) return null;
-  try {
-    const parts = url.split('/upload/');
-    let publicIdWithFormat = parts[1];
-    
-    // Enlever la version (ex: v12345678/)
-    if (publicIdWithFormat.startsWith('v')) {
-      const slashIndex = publicIdWithFormat.indexOf('/');
-      if (slashIndex !== -1) {
-        publicIdWithFormat = publicIdWithFormat.substring(slashIndex + 1);
-      }
-    }
-    
-    // Enlever l'extension (.jpg, .png, etc.)
-    const dotIndex = publicIdWithFormat.lastIndexOf('.');
-    if (dotIndex !== -1) {
-      return publicIdWithFormat.substring(0, dotIndex);
-    }
-    return publicIdWithFormat;
-  } catch (err) {
-    logger.error(`[CLOUDINARY] Echec de l'extraction du public_id: ${err.message}`);
-    return null;
-  }
-};
-
-/**
- * Émet un signal de mise à jour temps réel à tous les clients connectés.
- */
-const broadcastBannersUpdate = (req) => {
-  const io = req.app.get('socketio');
-  if (io) {
-    io.emit('banners_updated');
-    logger.info('[SOCKET] Signal banners_updated émis globalement.');
-  }
-};
+const { 
+  broadcastBannersUpdate, 
+  uploadBannerFiles, 
+  deleteSingleMedia 
+} = require('../utils/bannerHelpers');
 
 /**
  * @desc    Récupérer les bannières actives pour le carrousel utilisateur
@@ -93,47 +56,7 @@ exports.getAllBannersAdmin = async (req, res, next) => {
  */
 exports.createBanner = async (req, res, next) => {
   try {
-    const cleanUpFiles = () => {
-      if (req.files) {
-        if (req.files.image && req.files.image[0]) {
-          const path = req.files.image[0].path;
-          if (fs.existsSync(path)) fs.unlinkSync(path);
-        }
-        if (req.files.video && req.files.video[0]) {
-          const path = req.files.video[0].path;
-          if (fs.existsSync(path)) fs.unlinkSync(path);
-        }
-      }
-    };
-
-    let imageUrl = null;
-    let videoUrl = null;
-
-    try {
-      if (req.files && req.files.image && req.files.image[0]) {
-        const file = req.files.image[0];
-        const result = await cloudinary.uploader.upload(file.path, {
-          folder: 'yely/banners',
-          resource_type: 'image'
-        });
-        imageUrl = result.secure_url;
-      }
-
-      if (req.files && req.files.video && req.files.video[0]) {
-        const file = req.files.video[0];
-        const result = await cloudinary.uploader.upload(file.path, {
-          folder: 'yely/banners',
-          resource_type: 'video'
-        });
-        videoUrl = result.secure_url;
-      }
-    } catch (uploadErr) {
-      logger.error(`[CLOUDINARY] Upload error: ${uploadErr.message}`);
-      cleanUpFiles();
-      return next(new AppError("Erreur lors du téléversement des fichiers sur le Cloud.", 500));
-    } finally {
-      cleanUpFiles();
-    }
+    const { imageUrl, videoUrl } = await uploadBannerFiles(req.files);
 
     const { 
       title, 
@@ -206,63 +129,16 @@ exports.updateBanner = async (req, res, next) => {
 
     const updateData = { ...req.body };
 
-    const cleanUpFiles = () => {
-      if (req.files) {
-        if (req.files.image && req.files.image[0]) {
-          const path = req.files.image[0].path;
-          if (fs.existsSync(path)) fs.unlinkSync(path);
-        }
-        if (req.files.video && req.files.video[0]) {
-          const path = req.files.video[0].path;
-          if (fs.existsSync(path)) fs.unlinkSync(path);
-        }
-      }
-    };
+    const { imageUrl, videoUrl } = await uploadBannerFiles(req.files);
 
-    try {
-      // Si une nouvelle image est fournie
-      if (req.files && req.files.image && req.files.image[0]) {
-        const file = req.files.image[0];
-        const result = await cloudinary.uploader.upload(file.path, {
-          folder: 'yely/banners',
-          resource_type: 'image'
-        });
-        
-        if (banner.image) {
-          const oldPublicId = extractPublicId(banner.image);
-          if (oldPublicId) {
-            await cloudinary.uploader.destroy(oldPublicId);
-            logger.info(`[CLOUDINARY] Ancienne image supprimée : ${oldPublicId}`);
-          }
-        }
+    if (imageUrl) {
+      if (banner.image) await deleteSingleMedia(banner.image, 'image');
+      updateData.image = imageUrl;
+    }
 
-        updateData.image = result.secure_url;
-      }
-
-      // Si une nouvelle vidéo est fournie
-      if (req.files && req.files.video && req.files.video[0]) {
-        const file = req.files.video[0];
-        const result = await cloudinary.uploader.upload(file.path, {
-          folder: 'yely/banners',
-          resource_type: 'video'
-        });
-        
-        if (banner.video) {
-          const oldVideoPublicId = extractPublicId(banner.video);
-          if (oldVideoPublicId) {
-            await cloudinary.uploader.destroy(oldVideoPublicId, { resource_type: 'video' });
-            logger.info(`[CLOUDINARY] Ancienne vidéo supprimée : ${oldVideoPublicId}`);
-          }
-        }
-
-        updateData.video = result.secure_url;
-      }
-    } catch (uploadErr) {
-      logger.error(`[CLOUDINARY] Update upload error: ${uploadErr.message}`);
-      cleanUpFiles();
-      return next(new AppError("Erreur lors du téléversement de la nouvelle ressource.", 500));
-    } finally {
-      cleanUpFiles();
+    if (videoUrl) {
+      if (banner.video) await deleteSingleMedia(banner.video, 'video');
+      updateData.video = videoUrl;
     }
 
     // Gestion correcte des types primitifs
@@ -330,33 +206,9 @@ exports.deleteBanner = async (req, res, next) => {
       return next(new AppError("Bannière introuvable.", 404));
     }
 
-    // 1. Supprimer l'image associée de Cloudinary
-    if (banner.image) {
-      const publicId = extractPublicId(banner.image);
-      if (publicId) {
-        try {
-          await cloudinary.uploader.destroy(publicId);
-          logger.info(`[CLOUDINARY] Image de la diapositive supprimée : ${publicId}`);
-        } catch (cloudErr) {
-          logger.error(`[CLOUDINARY] Echec de suppression de l'image ${publicId} : ${cloudErr.message}`);
-        }
-      }
-    }
+    if (banner.image) await deleteSingleMedia(banner.image, 'image');
+    if (banner.video) await deleteSingleMedia(banner.video, 'video');
 
-    // 2. Supprimer la vidéo associée de Cloudinary
-    if (banner.video) {
-      const videoPublicId = extractPublicId(banner.video);
-      if (videoPublicId) {
-        try {
-          await cloudinary.uploader.destroy(videoPublicId, { resource_type: 'video' });
-          logger.info(`[CLOUDINARY] Vidéo de la diapositive supprimée : ${videoPublicId}`);
-        } catch (cloudErr) {
-          logger.error(`[CLOUDINARY] Echec de suppression de la vidéo ${videoPublicId} : ${cloudErr.message}`);
-        }
-      }
-    }
-
-    // 3. Supprimer la diapositive de la base de données
     await BannerSlide.findByIdAndDelete(req.params.id);
 
     logger.info(`[BANNERS] Diapositive supprimée de l'administration : ${banner.title || 'Sans titre'}`);

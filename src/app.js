@@ -132,7 +132,7 @@ app.get('/', (req, res) => {
 });
 
 // Route publique de partage de boutique via slug ou ID
-app.get('/shop/:slug', require('./controllers/userController').shareSellerShopBySlug);
+app.get('/shop/:slug', require('./controllers/userShareController').shareSellerShopBySlug);
 
 // ==========================================
 // ENREGISTREMENT DES ROUTES (VERSIONING)

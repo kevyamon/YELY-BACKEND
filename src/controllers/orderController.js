@@ -1,308 +1,51 @@
 // src/controllers/orderController.js
+// CONTROLLER COMMANDE - Exposition des Endpoints HTTP
+// STANDARD: Industriel / Bank Grade (Délégation de logique active)
+
 const mongoose = require('mongoose');
 const Order = require('../models/Order');
-const Product = require('../models/Product');
-const User = require('../models/User');
-const Ledger = require('../models/Ledger');
-const { sendNotification } = require('../services/notificationService');
-const { sendEmail } = require('../utils/emailService');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
-const { calculateDistance, calculateDeliveryPrice } = require('../utils/geoUtils');
+const orderService = require('../services/orderService');
 
-/**
- * @desc    Créer une nouvelle commande
- */
 exports.createOrder = async (req, res, next) => {
   try {
-    const { items, shippingAddress, sellerId, paymentMethod = 'Cash' } = req.body;
-
-    if (!items || items.length === 0) return next(new AppError('Le panier est vide', 400));
-
-    const seller = await User.findById(sellerId);
-    if (!seller) return next(new AppError('Vendeur introuvable', 404));
-
-    let itemsPrice = 0;
-    const validatedItems = [];
-
-    for (const item of items) {
-      const product = await Product.findById(item.product || item.id);
-      if (!product || product.isSoldOut) return next(new AppError(`Produit ${item.name || 'indéfini'} indisponible`, 400));
-      
-      if (product.manageStock && product.stockCount < item.quantity) {
-        return next(new AppError(`Stock insuffisant pour ${product.name} (Disponible : ${product.stockCount})`, 400));
-      }
-      
-      itemsPrice += product.price * item.quantity;
-      validatedItems.push({
-        product: product._id,
-        name: product.name,
-        quantity: item.quantity,
-        price: product.price
-      });
-    }
-
-    // CALCUL DE LIVRAISON (Forfait Ville: 100F base + 50F par vendeur extra, max 300F)
-    // CALCUL DE LIVRAISON (Forfait Ville: 100F base + 50F par vendeur extra, max 300F)
-    const uniqueSellers = new Set(items.map(item => (item.sellerId || sellerId).toString()));
-    const nbSellers = uniqueSellers.size;
-    
-    let deliveryPrice = 100 + (nbSellers - 1) * 50;
-    
-    // Plafond de sécurité (Max 300F)
-    if (deliveryPrice > 300) deliveryPrice = 300;
-
-    const totalPrice = itemsPrice + deliveryPrice;
-    
-    logger.info(`[ORDER] Calc: Vendeurs=${nbSellers}, Livraison=${deliveryPrice}F, Total=${totalPrice}F`);
-
-    const order = await Order.create({
-      customer: req.user._id,
-      seller: sellerId,
-      items: validatedItems,
-      itemsPrice,
-      deliveryPrice,
-      totalPrice,
-      shippingAddress,
-      paymentMethod,
-      status: 'pending',
-      history: [{ status: 'pending', comment: 'Commande effectuée' }]
-    });
-
-    // Incrémentation atomique du nombre de ventes pour la popularité
-    for (const item of validatedItems) {
-      try {
-        await Product.findByIdAndUpdate(item.product, { $inc: { salesCount: item.quantity } });
-      } catch (err) {
-        logger.error(`[ORDER POPULARITY] Échec incrémentation salesCount pour ${item.product}: ${err.message}`);
-      }
-    }
-
-    const populatedOrder = await Order.findById(order._id).populate('customer seller');
-
-    // TEMPS RÉEL
     const io = req.app.get('socketio');
-    if (io) {
-      io.to(sellerId.toString()).emit('new_order', populatedOrder);
-    }
-
-    // NOTIFICATIONS & EMAILS (Enveloppés pour éviter de bloquer la réponse client)
-    try {
-      await sendNotification(
-        sellerId,
-        'Nouvelle commande ! 🛍️',
-        `Vous avez reçu une commande de ${(itemsPrice).toLocaleString()} F.`,
-        'NEW_ORDER',
-        { orderId: order._id.toString() }
-      );
-
-      await sendEmail({
-        email: seller.email,
-        subject: `[YELY] Nouvelle commande #${order._id.toString().slice(-6)}`,
-        message: `Vous avez reçu une nouvelle commande de ${req.user.name}. Connectez-vous sur votre dashboard vendeur pour la valider.`
-      });
-    } catch (sideEffectError) {
-      logger.error(`[ORDER SIDE-EFFECTS] Erreur non bloquante: ${sideEffectError.message}`);
-    }
-
+    const populatedOrder = await orderService.createOrder(
+      req.user._id,
+      req.user.name,
+      req.body,
+      io
+    );
     res.status(201).json({ success: true, data: populatedOrder });
   } catch (error) {
     next(error);
   }
 };
 
-/**
- * @desc    Mettre à jour le statut de la commande
- */
 exports.updateOrderStatus = async (req, res, next) => {
   try {
     const { status, comment } = req.body;
-    const order = await Order.findById(req.params.id)
-      .populate('customer seller driver')
-      .populate('items.product');
-
-    if (!order) return next(new AppError('Commande introuvable', 404));
-
-    // Transitions et Notifications
-    if (status === 'confirmed') {
-      order.confirmedAt = Date.now();
-      
-      await sendNotification(
-        order.customer._id, 
-        'Commande confirmée', 
-        `${order.seller.name} prépare votre commande.`, 
-        'ORDER_UPDATE', 
-        { orderId: order._id }
-      );
-    } 
-    else if (status === 'searching') {
-      const isManualRetry = ['searching_delivery_retry', 'cancelled_no_driver'].includes(order.status);
-      
-      order.deliveryRetryCount = 0; // Réinitialise les tentatives de relance automatique
-      
-      await sendNotification(
-        order.customer._id, 
-        'Recherche de livreur lancée', 
-        isManualRetry
-          ? `${order.seller.name} relance la recherche d'un livreur pour votre commande.`
-          : `Votre commande est prête. Recherche d'un livreur disponible.`, 
-        'ORDER_UPDATE', 
-        { orderId: order._id }
-      );
-
-      // --- LOGIQUE DE DISPATCH LIVREUR AVEC COLLECTE MULTI-VENDEURS ---
-      try {
-        const rideLifecycleService = require('../services/ride/rideLifecycleService');
-        const redisClient = req.app.get('redis');
-        const io = req.app.get('socketio');
-        const User = require('../models/User');
-
-        // Extraire tous les vendeurs uniques des articles de la commande
-        const uniqueSellersMap = new Map();
-        
-        // Ajouter le vendeur principal de la commande en premier
-        uniqueSellersMap.set(order.seller._id.toString(), {
-          seller: order.seller._id,
-          address: order.seller.address || 'Point de retrait vendeur',
-          coordinates: order.seller.currentLocation.coordinates,
-          isCollected: false
-        });
-
-        // Parcourir les articles pour trouver d'autres vendeurs
-        for (const item of order.items) {
-          if (item.product && item.product.seller) {
-            const sId = item.product.seller._id.toString();
-            if (!uniqueSellersMap.has(sId)) {
-              // Récupérer les détails du vendeur secondaire
-              const secondarySeller = await User.findById(item.product.seller._id || item.product.seller);
-              if (secondarySeller) {
-                uniqueSellersMap.set(sId, {
-                  seller: secondarySeller._id,
-                  address: secondarySeller.address || 'Point de retrait vendeur secondaire',
-                  coordinates: secondarySeller.currentLocation.coordinates,
-                  isCollected: false
-                });
-              }
-            }
-          }
-        }
-
-        const collectionPoints = Array.from(uniqueSellersMap.values());
-
-        const deliveryData = {
-          origin: {
-            address: order.seller.address || 'Point de retrait vendeur',
-            coordinates: order.seller.currentLocation.coordinates
-          },
-          destination: {
-            address: order.shippingAddress.address,
-            coordinates: order.shippingAddress.coordinates
-          },
-          forfait: 'STANDARD',
-          passengersCount: 1,
-          type: 'DELIVERY', // Type spécial pour distinguer des taxis
-          orderId: order._id, // Référence croisée
-          deliveryPrice: order.deliveryPrice,
-          collectionPoints
-        };
-
-        const { ride, drivers } = await rideLifecycleService.createRideRequest(order.customer._id, deliveryData, redisClient);
-        
-        // On lie la livraison à la commande
-        order.deliveryRideId = ride._id;
-        logger.info(`[MARKETPLACE DISPATCH] Livraison créée pour commande ${order._id} : Ride ${ride._id}. ${drivers.length} livreurs ciblés.`);
-
-        // Émission Socket instantanée aux chauffeurs/livreurs ciblés
-        if (drivers && drivers.length > 0 && io) {
-          drivers.forEach(driver => {
-            io.to(driver._id.toString()).emit('new_ride_request', {
-              rideId: ride._id,
-              origin: ride.origin,       
-              destination: ride.destination, 
-              distance: ride.distance,
-              forfait: ride.forfait,
-              passengersCount: ride.passengersCount,
-              priceOptions: ride.priceOptions,
-              riderName: order.customer.name,
-              riderProfilePicture: order.customer.profilePicture,
-              collectionPoints: ride.collectionPoints,
-              type: 'DELIVERY'
-            });
-          });
-        }
-      } catch (dispatchError) {
-        logger.error(`[MARKETPLACE DISPATCH] Erreur lors de la création de la livraison : ${dispatchError.message}`);
-      }
-    }
-    else if (status === 'rejected') {
-      await sendNotification(
-        order.customer._id, 
-        'Commande refusée', 
-        `${order.seller.name} ne peut pas honorer votre commande : ${comment || 'Indisponible'}`, 
-        'ORDER_UPDATE', 
-        { orderId: order._id }
-      );
-    }
-    else if (status === 'delivered') {
-      order.deliveredAt = Date.now();
-      if (order.driver) {
-        await Ledger.create({
-          driver: order.driver._id,
-          seller: order.seller._id,
-          order: order._id,
-          amount: order.itemsPrice,
-          status: 'pending'
-        });
-      }
-
-      // --- LOGIQUE DE DÉDUCTION DES STOCKS EN TEMPS RÉEL (SAUF NOURRITURE) ---
-      if (order.status !== 'delivered') {
-        for (const item of order.items) {
-          try {
-            const product = await Product.findById(item.product);
-            if (product && product.manageStock && product.category !== 'Food') {
-              const currentStock = product.stockCount || 0;
-              const newStock = Math.max(0, currentStock - item.quantity);
-              
-              product.stockCount = newStock;
-              if (newStock === 0) {
-                product.isSoldOut = true;
-              }
-              await product.save();
-              
-              logger.info(`[STOCK DEDUCTION] Produit ${product.name} (${product._id}) déduit de ${item.quantity}. Ancien stock: ${currentStock}, Nouveau stock: ${newStock}`);
-              
-              const io = req.app.get('socketio');
-              if (io) {
-                io.emit('product_updated', product);
-              }
-            }
-          } catch (stockErr) {
-            logger.error(`[STOCK DEDUCTION ERROR] Impossible de mettre à jour le stock pour le produit ${item.product}: ${stockErr.message}`);
-          }
-        }
-      }
-
-      await sendNotification(
-        order.customer._id, 
-        'Commande livrée', 
-        'Votre commande a été livrée. Merci de votre confiance !', 
-        'ORDER_COMPLETE', 
-        { orderId: order._id }
-      );
-    }
-
-    order.status = status;
-    order.history.push({ status, comment, timestamp: Date.now() });
-    await order.save();
-
-    // TEMPS RÉEL UPDATE
     const io = req.app.get('socketio');
-    if (io) {
-      io.to(order.customer._id.toString()).emit('order_updated', order);
-      io.to(order.seller._id.toString()).emit('order_updated', order);
-    }
+    const redisClient = req.app.get('redis');
+    
+    const order = await orderService.updateOrderStatus(
+      req.params.id,
+      status,
+      comment,
+      io,
+      redisClient
+    );
+    res.status(200).json({ success: true, data: order });
+  } catch (error) {
+    next(error);
+  }
+};
 
+exports.cancelOrder = async (req, res, next) => {
+  try {
+    const io = req.app.get('socketio');
+    const order = await orderService.cancelOrder(req.params.id, req.user, io);
     res.status(200).json({ success: true, data: order });
   } catch (error) {
     next(error);
@@ -329,58 +72,6 @@ exports.getSellerOrders = async (req, res, next) => {
       .populate('items.product');
     logger.info(`[MARKETPLACE] Orders found for seller ${sellerId}: ${orders.length}`);
     res.status(200).json({ success: true, data: orders });
-  } catch (error) { next(error); }
-};
-
-exports.cancelOrder = async (req, res, next) => {
-  try {
-    const order = await Order.findById(req.params.id);
-    if (!order) return next(new AppError('Commande introuvable', 404));
-
-    const cancelableStatuses = ['pending', 'searching', 'searching_delivery_retry', 'cancelled_no_driver'];
-    if (!cancelableStatuses.includes(order.status)) {
-      return next(new AppError('Impossible d\'annuler une commande déjà prise en charge ou livrée.', 400));
-    }
-
-    if (order.deliveryRideId) {
-      try {
-        const rideService = require('../services/ride/rideLifecycleService');
-        // cancelRideAction s'occupera d'annuler la course ET la commande associée de manière unifiée
-        await rideService.cancelRideAction(order.deliveryRideId, order.customer, 'rider', 'Commande annulée par le client');
-        
-        // On récupère la commande mise à jour par cancelRideAction
-        const updatedOrder = await Order.findById(req.params.id).populate('customer seller driver');
-        
-        // Émettre la mise à jour via socket.io en temps réel pour notifier immédiatement le vendeur et le client
-        const io = req.app.get('socketio');
-        if (io) {
-          io.to(updatedOrder.seller._id.toString()).emit('order_updated', updatedOrder);
-          io.to(updatedOrder.customer._id.toString()).emit('order_updated', updatedOrder);
-        }
-
-        // Envoyer la notification push au vendeur
-        await sendNotification(updatedOrder.seller._id, 'Commande annulée', `Le client a annulé sa commande #${updatedOrder._id.toString().slice(-6)}`, 'ORDER_CANCELLED');
-
-        return res.status(200).json({ success: true, data: updatedOrder });
-      } catch (rideCancelError) {
-        logger.error(`[CANCEL ORDER RIDE ERROR] Échec de l'annulation de la course associée : ${rideCancelError.message}`);
-      }
-    }
-
-    order.status = 'cancelled';
-    order.cancelledAt = Date.now();
-    order.history.push({ status: 'cancelled', comment: 'Annulée par le client', timestamp: Date.now() });
-    await order.save();
-
-    const io = req.app.get('socketio');
-    if (io) {
-      io.to(order.seller.toString()).emit('order_updated', order);
-      io.to(order.customer.toString()).emit('order_updated', order);
-    }
-    
-    await sendNotification(order.seller, 'Commande annulée', `Le client a annulé sa commande #${order._id.toString().slice(-6)}`, 'ORDER_CANCELLED');
-
-    res.status(200).json({ success: true, data: order });
   } catch (error) { next(error); }
 };
 

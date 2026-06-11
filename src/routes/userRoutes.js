@@ -4,6 +4,7 @@
 
 const express = require('express');
 const userController = require('../controllers/userController');
+const userShareController = require('../controllers/userShareController');
 const { protect } = require('../middleware/authMiddleware');
 const { uploadProfilePic, validateFileSignature } = require('../middleware/uploadMiddleware');
 
@@ -12,7 +13,7 @@ const router = express.Router();
 // Routes publiques pour les vendeurs (marketplace, recherche et partage)
 router.get('/sellers', userController.getSellers);
 router.get('/sellers/:id', userController.getSellerProfile);
-router.get('/sellers/:id/share', userController.shareSellerShop);
+router.get('/sellers/:id/share', userShareController.shareSellerShop);
 
 // Toutes les routes ci-dessous sont protégées par l'Iron Dome (JWT)
 router.use(protect);

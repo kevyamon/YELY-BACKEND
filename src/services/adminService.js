@@ -1,6 +1,6 @@
 // src/services/adminService.js
 // LOGIQUE DE GOUVERNANCE - Diagnostics d'erreurs stricts et precis
-// CSCSM Level: Bank Grade
+// STANDARD: Bank Grade
 
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
@@ -10,6 +10,9 @@ const Ride = require('../models/Ride');
 const AppError = require('../utils/AppError');
 const mongoose = require('mongoose');
 const redisClient = require('../config/redis');
+
+// Import des modules configurés
+const adminConfigService = require('./adminConfigService');
 
 const logSystemAction = async (actorId, action, targetId, details) => {
   try {
@@ -184,63 +187,6 @@ const rejectTransaction = async (transactionId, reason, validatorId) => {
   return { transaction, driver };
 };
 
-const getDashboardStats = async () => {
-  const [totalRiders, totalDrivers, activeDrivers, pendingValidations, revenueData, settings] = await Promise.all([
-    User.countDocuments({ role: 'rider' }),
-    User.countDocuments({ role: 'driver' }),
-    User.countDocuments({ role: 'driver', isAvailable: true }),
-    Transaction.countDocuments({ status: 'PENDING' }),
-    Transaction.aggregate([
-      { $match: { status: 'APPROVED' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]),
-    Settings.findOne().lean()
-  ]);
-
-  return {
-    totalUsers: totalRiders + totalDrivers,
-    totalRiders,
-    totalDrivers,
-    activeDrivers,
-    pendingValidations,
-    totalRevenue: revenueData.length > 0 ? revenueData[0].total : 0,
-    settings 
-  };
-};
-
-const getFinanceData = async (period) => {
-  const pipeline = [
-    { $match: { status: 'APPROVED' } },
-    { $group: { _id: '$planId', totalAmount: { $sum: '$amount' }, count: { $sum: 1 } } }
-  ];
-  return await Transaction.aggregate(pipeline);
-};
-
-const togglePromo = async (isActive, requesterId) => {
-  let settings = await Settings.findOne();
-  if (!settings) settings = new Settings();
-  
-  settings.isPromoActive = isActive;
-  settings.updatedBy = requesterId;
-  await settings.save();
-  
-  await logSystemAction(requesterId, 'TOGGLE_PROMO', settings._id, `Statut promo: ${isActive}`);
-  return { isPromoActive: settings.isPromoActive };
-};
-
-const updateWaveLinks = async (weeklyLink, monthlyLink, requesterId) => {
-  let settings = await Settings.findOne();
-  if (!settings) settings = new Settings();
-  
-  if (weeklyLink) settings.waveLinkWeekly = weeklyLink;
-  if (monthlyLink) settings.waveLinkMonthly = monthlyLink;
-  settings.updatedBy = requesterId;
-  
-  await settings.save();
-  await logSystemAction(requesterId, 'UPDATE_WAVE_LINKS', settings._id, 'Mise a jour liens Wave');
-  return { waveLinkWeekly: settings.waveLinkWeekly, waveLinkMonthly: settings.waveLinkMonthly };
-};
-
 const getAllUsers = async (query, userRole, requesterId) => {
   const page = Math.max(1, parseInt(query.page) || 1);
   const limit = Math.min(50, parseInt(query.limit) || 20);
@@ -269,18 +215,6 @@ const getAllUsers = async (query, userRole, requesterId) => {
   ]);
 
   return { users, pagination: { page, total, pages: Math.ceil(total / limit) } };
-};
-
-const toggleGlobalFreeAccess = async (isActive, requesterId) => {
-  let settings = await Settings.findOne();
-  if (!settings) settings = new Settings();
-  
-  settings.isGlobalFreeAccess = isActive;
-  settings.updatedBy = requesterId;
-  await settings.save();
-  
-  await logSystemAction(requesterId, 'TOGGLE_FREE_ACCESS', settings._id, `Gratuite globale pour les chauffeurs: ${isActive}`);
-  return { isGlobalFreeAccess: settings.isGlobalFreeAccess };
 };
 
 const getAllRidesHistory = async (query) => {
@@ -317,17 +251,20 @@ const toggleRideArchive = async (rideId, requesterId) => {
 };
 
 module.exports = {
+  // Re-exports pour retrocompatibilité
+  getDashboardStats: adminConfigService.getDashboardStats,
+  getFinanceData: adminConfigService.getFinanceData,
+  togglePromo: adminConfigService.togglePromo,
+  updateWaveLinks: adminConfigService.updateWaveLinks,
+  toggleGlobalFreeAccess: adminConfigService.toggleGlobalFreeAccess,
+
+  // Core Service Methods
   updateUserRole,
   toggleUserBan,
   updateMapSettings,
   approveTransaction,
   rejectTransaction,
-  getDashboardStats,
-  getFinanceData,
-  togglePromo,
-  updateWaveLinks,
   getAllUsers,
-  toggleGlobalFreeAccess,
   getAllRidesHistory,
   toggleRideArchive
 };

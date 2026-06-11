@@ -8,73 +8,15 @@ const logger = require('../config/logger');
 const cloudinary = require('../config/cloudinary');
 const fs = require('fs');
 
+const { buildProductQuery } = require('../utils/productHelpers');
+
 /**
  * @desc    Récupérer tous les produits (avec filtres optionnels)
  */
 exports.getAllProducts = async (req, res, next) => {
   try {
-    const { category, seller, search, popular, limit } = req.query;
-    const query = { isActive: true };
-
-    if (category) query.category = category;
-    if (seller) {
-      query.seller = seller;
-    } else if (req.user) {
-      // Exclure les propres produits du vendeur connecté
-      query.seller = { $ne: req.user._id };
-    }
-    if (search) {
-      const cleanSearch = search.trim();
-      const lowerSearch = cleanSearch.toLowerCase();
-      
-      // Mappage intelligent pour faire correspondre les recherches de catégories en Français
-      const CATEGORY_MAP = {
-        'nourriture': 'Food',
-        'food': 'Food',
-        'resto': 'Food',
-        'restaurant': 'Food',
-        'plat': 'Food',
-        'repas': 'Food',
-        'manger': 'Food',
-        'supermarche': 'Supermarket',
-        'supermarché': 'Supermarket',
-        'epicerie': 'Supermarket',
-        'épicerie': 'Supermarket',
-        'courses': 'Supermarket',
-        'panier': 'Supermarket',
-        'cosmetique': 'Cosmetics',
-        'cosmétique': 'Cosmetics',
-        'beaute': 'Cosmetics',
-        'beauté': 'Cosmetics',
-        'soins': 'Cosmetics',
-        'maquillage': 'Cosmetics',
-        'electronique': 'Electronics',
-        'électronique': 'Electronics',
-        'hightech': 'Electronics',
-        'high-tech': 'Electronics',
-        'telephone': 'Electronics',
-        'téléphone': 'Electronics',
-        'pc': 'Electronics',
-        'maison': 'Home',
-        'deco': 'Home',
-        'déco': 'Home',
-        'decoration': 'Home',
-        'décoration': 'Home',
-        'entretien': 'Home'
-      };
-
-      const matchedCategory = CATEGORY_MAP[lowerSearch];
-
-      query.$or = [
-        { name: { $regex: cleanSearch, $options: 'i' } },
-        { description: { $regex: cleanSearch, $options: 'i' } }
-      ];
-
-      // Si le mot clé correspond à une catégorie, on l'ajoute dans le match $or
-      if (matchedCategory) {
-        query.$or.push({ category: matchedCategory });
-      }
-    }
+    const { popular, limit } = req.query;
+    const query = buildProductQuery(req.query, req.user);
 
     let queryBuilder = Product.find(query).populate('seller', 'name profilePicture rating');
 
