@@ -54,10 +54,9 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
     isBanned: false
   };
 
-  // Filtrage par type de mission résilient aux champs manquants et exclusion ledger sélective
   if (missionType === 'DELIVERY') {
     query['deliveryPreferences.isDeliveryActive'] = { $ne: false };
-    query['ledger.isBlocked'] = { $ne: true }; // Seul le flux livraison est bloqué par la dette cash
+    query['ledger.isBlocked'] = { $ne: true }; 
   } else {
     query['deliveryPreferences.isVtcActive'] = { $ne: false };
   }
@@ -66,12 +65,17 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
     query._id = { $nin: rejectedDriverIds };
   }
 
+  logger.info(`[DAO-USER] Recherche livreurs: missionType=${missionType}, coords=[${safeLng}, ${safeLat}], maxDist=${safeMaxDistance}m, useRedis=${useRedis}`);
+  if (useRedis && driverIds) {
+    logger.info(`[DAO-USER] Redis active_drivers geosearch a trouve ${driverIds.length} IDs: ${JSON.stringify(driverIds)}`);
+  }
+
   try {
     let drivers = [];
 
     if (useRedis && driverIds && driverIds.length > 0) {
-      // Filtrer les drivers trouvés par Redis
       query._id = { ...query._id, $in: driverIds };
+      logger.info(`[DAO-USER] Validation MongoDB avec query: ${JSON.stringify(query)}`);
       
       drivers = await User.find(query)
         .select('name phone vehicle currentLocation rating isAvailable')
@@ -79,15 +83,16 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
         .lean()
         .exec();
 
-      // Ré-ordonner selon la distance Redis (puisque $in ne garantit pas l'ordre)
       const sortedDrivers = driverIds
         .map(id => drivers.find(d => d._id.toString() === id))
         .filter(d => d !== undefined)
         .slice(0, 10);
 
-      logger.info(`[DAO-USER] Redis a trouve ${driverIds.length} IDs, MongoDB a valide ${sortedDrivers.length} chauffeurs actifs.`);
+      logger.info(`[DAO-USER] MongoDB a valide ${sortedDrivers.length}/${drivers.length} chauffeurs.`);
       return sortedDrivers;
     } else {
+      logger.info(`[DAO-USER] Aucun ID trouve par Redis ou geosearch desactive. Repli sur $nearSphere MongoDB...`);
+      logger.info(`[DAO-USER] Query repli MongoDB: ${JSON.stringify(query)}`);
       // 3. FALLBACK MONGODB GEOSPATIAL (Si Redis a échoué ou ne renvoie rien)
       logger.info(`[DAO-USER] Repli sur la recherche géospatiale MongoDB ($nearSphere)...`);
       

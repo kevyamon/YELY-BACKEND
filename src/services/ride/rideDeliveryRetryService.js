@@ -4,6 +4,7 @@
 
 const Order = require('../../models/Order');
 const User = require('../../models/User');
+const redis = require('../../config/redis');
 const notificationService = require('../notificationService');
 const logger = require('../../config/logger');
 
@@ -85,7 +86,6 @@ const retryDeliverySearch = async (io, orderId) => {
       collectionPoints
     };
 
-    const redis = require('../../config/redis');
     const rideLifecycleService = require('./rideLifecycleService');
     const { ride, drivers } = await rideLifecycleService.createRideRequest(order.customer._id, deliveryData, redis);
     
