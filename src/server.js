@@ -78,7 +78,7 @@ io.use(async (socket, next) => {
     const cacheKey = `auth:user:${decoded.userId}`;
     const cachedUser = await redis.get(cacheKey);
     
-    const user = cachedUser ? JSON.parse(cachedUser) : await User.findById(decoded.userId).select('_id role isBanned currentLocation isDeleted').lean();
+    const user = cachedUser ? JSON.parse(cachedUser) : await User.findById(decoded.userId).select('_id role isBanned currentLocation isDeleted isAvailable').lean();
 
     if (!cachedUser && user) {
       await redis.setex(cacheKey, 900, JSON.stringify(user)).catch(() => {});
@@ -103,7 +103,19 @@ io.on('connection', (socket) => {
   const user = socket.user; 
   
   socket.join(user._id.toString());
-  if (user.role === 'driver') socket.join('drivers');
+  if (user.role === 'driver') {
+    socket.join('drivers');
+    
+    // Auto-enregistrement Redis si disponible et a une position GPS
+    if (user.isAvailable && user.currentLocation?.coordinates) {
+      const [lng, lat] = user.currentLocation.coordinates;
+      if (lng && lat && (lng !== 0 || lat !== 0)) {
+        redis.geoadd('active_drivers', lng, lat, user._id.toString()).catch(err => {
+          logger.error(`[SOCKET CONNECT] Echec geoadd pour chauffeur ${user._id}: ${err.message}`);
+        });
+      }
+    }
+  }
   if (user.role === 'admin' || user.role === 'superadmin') socket.join('admins');
 
   socket.on('update_location', async (rawData) => {

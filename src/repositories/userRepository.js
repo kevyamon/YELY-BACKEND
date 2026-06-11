@@ -51,13 +51,13 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
   const query = {
     role: 'driver',
     isAvailable: true,
-    isBanned: false,
-    'ledger.isBlocked': { $ne: true } // Utilisation de $ne pour être robuste aux champs manquants/non-initialisés
+    isBanned: false
   };
 
-  // Filtrage par type de mission résilient aux champs manquants
+  // Filtrage par type de mission résilient aux champs manquants et exclusion ledger sélective
   if (missionType === 'DELIVERY') {
     query['deliveryPreferences.isDeliveryActive'] = { $ne: false };
+    query['ledger.isBlocked'] = { $ne: true }; // Seul le flux livraison est bloqué par la dette cash
   } else {
     query['deliveryPreferences.isVtcActive'] = { $ne: false };
   }

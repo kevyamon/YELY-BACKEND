@@ -150,6 +150,18 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
         });
       }
       await Ledger.create(ledgerEntries);
+
+      const driverDoc = await User.findById(order.driver._id);
+      if (driverDoc) {
+        driverDoc.ledger = driverDoc.ledger || {};
+        driverDoc.ledger.currentCashDebt = (driverDoc.ledger.currentCashDebt || 0) + order.itemsPrice;
+        
+        if (driverDoc.ledger.currentCashDebt >= (driverDoc.ledger.maxCashDebt || 50000)) {
+          driverDoc.ledger.isBlocked = true;
+          logger.warn(`[SECURITY] Livreur ${driverDoc.email} bloqué automatiquement suite à dépassement de la dette maximale.`);
+        }
+        await driverDoc.save();
+      }
     }
 
     if (order.status !== 'delivered') {

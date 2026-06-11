@@ -27,10 +27,14 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
     }
     lockAcquired = true;
  
-    const existingRide = await Ride.findOne({
-      rider: riderId,
-      status: { $in: ['searching', 'negotiating', 'accepted', 'arrived', 'in_progress'] }
-    });
+    const isDelivery = rideData?.type === 'DELIVERY';
+    const existingRide = isDelivery
+      ? null
+      : await Ride.findOne({
+          rider: riderId,
+          type: 'RIDE',
+          status: { $in: ['searching', 'negotiating', 'accepted', 'arrived', 'in_progress'] }
+        });
     
     if (existingRide) {
       if (['accepted', 'arrived', 'in_progress'].includes(existingRide.status)) {
