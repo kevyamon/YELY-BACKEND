@@ -62,4 +62,61 @@ router.get('/config', async (req, res) => {
   }
 });
 
+router.get('/debug-drivers', async (req, res) => {
+  try {
+    const User = require('../models/User');
+    const Order = require('../models/Order');
+    const redis = require('../config/redis');
+
+    const drivers = await User.find({ role: 'driver' }).lean();
+    const orders = await Order.find({})
+      .sort('-createdAt')
+      .limit(5)
+      .populate('seller customer')
+      .lean();
+
+    let redisDriverIds = [];
+    try {
+      redisDriverIds = await redis.zrange('active_drivers', 0, -1);
+    } catch (err) {
+      redisDriverIds = ['Redis error: ' + err.message];
+    }
+
+    const response = {
+      redisDrivers: redisDriverIds,
+      drivers: drivers.map(d => ({
+        id: d._id,
+        name: d.name,
+        email: d.email,
+        phone: d.phone,
+        isAvailable: d.isAvailable,
+        isBanned: d.isBanned,
+        isDeleted: d.isDeleted,
+        currentLocation: d.currentLocation,
+        deliveryPreferences: d.deliveryPreferences,
+        ledger: d.ledger,
+        createdAt: d.createdAt
+      })),
+      orders: orders.map(o => ({
+        id: o._id,
+        status: o.status,
+        seller: o.seller ? {
+          id: o.seller._id,
+          name: o.seller.name,
+          address: o.seller.address,
+          currentLocation: o.seller.currentLocation
+        } : null,
+        customer: o.customer ? {
+          name: o.customer.name
+        } : null,
+        createdAt: o.createdAt
+      }))
+    };
+
+    res.status(200).json(response);
+  } catch (error) {
+    res.status(500).json({ error: error.message, stack: error.stack });
+  }
+});
+
 module.exports = router;
