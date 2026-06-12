@@ -82,6 +82,51 @@ const updateAvailability = async (req, res, next) => {
   }
 };
 
+const updateShopLocation = async (req, res, next) => {
+  try {
+    const { coordinates, address } = req.body;
+
+    if (req.user.role !== 'seller') {
+      throw new AppError('Seuls les vendeurs peuvent définir la localisation de leur boutique.', 403);
+    }
+
+    if (!coordinates || !Array.isArray(coordinates) || coordinates.length !== 2) {
+      throw new AppError('Coordonnées invalides. Un tableau [longitude, latitude] est requis.', 400);
+    }
+
+    const [longitude, latitude] = coordinates.map(Number);
+
+    if (isNaN(longitude) || isNaN(latitude)) {
+      throw new AppError('Les coordonnées doivent être des nombres valides.', 400);
+    }
+
+    // Validation géographique stricte pour l'index 2dsphere
+    if (longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90) {
+      throw new AppError('Coordonnées géographiques hors limites.', 400);
+    }
+
+    if (!address || typeof address !== 'string' || address.trim() === '') {
+      throw new AppError('L\'adresse de la boutique est requise.', 400);
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      {
+        currentLocation: {
+          type: 'Point',
+          coordinates: [longitude, latitude]
+        },
+        address: address.trim()
+      },
+      { new: true, runValidators: true }
+    ).select('name email role currentLocation address');
+
+    return successResponse(res, user, 'Localisation de la boutique mise à jour avec succès.');
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const getSellers = async (req, res, next) => {
   try {
     const { search } = req.query;
@@ -138,6 +183,7 @@ module.exports = {
   uploadProfilePicture,
   deleteAccount,
   updateAvailability,
+  updateShopLocation,
   getSellers,
   getSellerProfile
 };

@@ -19,6 +19,12 @@ const createOrder = async (customerId, customerName, orderData, io) => {
   const seller = await User.findById(sellerId);
   if (!seller) throw new AppError('Vendeur introuvable', 404);
 
+  if (!seller.currentLocation || 
+      !seller.currentLocation.coordinates || 
+      (seller.currentLocation.coordinates[0] === 0 && seller.currentLocation.coordinates[1] === 0)) {
+    throw new AppError("La boutique de ce vendeur n'est pas encore localisée sur la carte. Les commandes ne sont pas disponibles pour le moment.", 400);
+  }
+
   let itemsPrice = 0;
   const validatedItems = [];
 

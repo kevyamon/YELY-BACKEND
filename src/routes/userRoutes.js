@@ -21,6 +21,7 @@ router.use(protect);
 router.get('/profile', userController.getProfile);
 router.patch('/update-profile', userController.updateProfile);
 router.patch('/update-availability', userController.updateAvailability);
+router.patch('/update-shop-location', userController.updateShopLocation);
 
 // Nouvelles routes d'Étape 1
 router.patch('/profile-picture', uploadProfilePic, validateFileSignature, userController.uploadProfilePicture);

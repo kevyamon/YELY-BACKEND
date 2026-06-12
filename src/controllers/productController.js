@@ -86,6 +86,14 @@ exports.getProduct = async (req, res, next) => {
 exports.createProduct = async (req, res, next) => {
   try {
     req.body.seller = req.user._id;
+
+    // Validation obligatoire de la localisation de la boutique pour le vendeur
+    if (req.user.role === 'seller') {
+      const location = req.user.currentLocation;
+      if (!location || !location.coordinates || (location.coordinates[0] === 0 && location.coordinates[1] === 0)) {
+        return next(new AppError('Vous devez obligatoirement définir la localisation de votre boutique avant de publier un article.', 400));
+      }
+    }
     
     // Gestion automatique du stock selon la catégorie (La nourriture n'a pas de stock)
     if (req.body.category === 'Food') {
