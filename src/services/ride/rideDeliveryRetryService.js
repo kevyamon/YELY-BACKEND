@@ -48,7 +48,7 @@ const retryDeliverySearch = async (io, orderId) => {
 
     for (const item of order.items) {
       if (item.product && item.product.seller) {
-        const sId = item.product.seller._id.toString();
+        const sId = (item.product.seller._id || item.product.seller).toString();
         if (!uniqueSellersMap.has(sId)) {
           const secondarySeller = await User.findById(item.product.seller._id || item.product.seller);
           if (secondarySeller) {

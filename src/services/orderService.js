@@ -63,7 +63,7 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
 
       for (const item of order.items) {
         if (item.product && item.product.seller) {
-          const sId = item.product.seller._id.toString();
+          const sId = (item.product.seller._id || item.product.seller).toString();
           if (!uniqueSellersMap.has(sId)) {
             const secondarySeller = await User.findById(item.product.seller._id || item.product.seller);
             if (secondarySeller) {
@@ -141,7 +141,7 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
       const sellerAmounts = new Map();
       for (const item of order.items) {
         const sellerId = item.product && item.product.seller
-          ? item.product.seller._id.toString()
+          ? (item.product.seller._id || item.product.seller).toString()
           : order.seller._id.toString();
         
         const itemTotal = item.price * item.quantity;
