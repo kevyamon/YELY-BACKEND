@@ -55,7 +55,7 @@ const expandSearchRadius = async (io, rideId) => {
   if (!ride) return; 
 
   const initialRadius = 1000;
-  const maxRadius = 2500; 
+  const maxRadius = ride.type === 'DELIVERY' ? 4900 : 2500; 
   const step = 300;
 
   let nextRadius = (ride.currentSearchRadius || initialRadius) + step;
