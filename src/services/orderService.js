@@ -45,6 +45,7 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
     );
 
     try {
+      console.log(`[DISPATCH DEBUG] Début du dispatch de livraison pour la commande : ${order._id}`);
       const rideLifecycleService = require('./ride/rideLifecycleService');
       const rideHelpers = require('./ride/rideHelpers');
       const uniqueSellersMap = new Map();
@@ -53,6 +54,8 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
       if (!sellerCoords || (sellerCoords[0] === 0 && sellerCoords[1] === 0)) {
         sellerCoords = await rideHelpers.resolveCoordsFromAddress(order.seller.address, order.seller.name, redisClient);
       }
+      console.log(`[DISPATCH DEBUG] Coordonnées Vendeur résolues : ${JSON.stringify(sellerCoords)}`);
+      console.log(`[DISPATCH DEBUG] Coordonnées Client : ${JSON.stringify(order.shippingAddress.coordinates)}`);
 
       uniqueSellersMap.set(order.seller._id.toString(), {
         seller: order.seller._id,
@@ -123,6 +126,7 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
         });
       }
     } catch (dispatchError) {
+      console.error("[DISPATCH DEBUG CRITICAL ERROR] Échec complet de la création de course :", dispatchError);
       logger.error(`[MARKETPLACE DISPATCH] Erreur lors de la création de la livraison : ${dispatchError.message}`);
     }
   }
