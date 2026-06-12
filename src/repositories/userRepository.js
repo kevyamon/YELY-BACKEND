@@ -3,6 +3,7 @@
 // STANDARD: Industriel (Sonde de diagnostic active)
 
 const User = require('../models/User');
+const Settings = require('../models/Settings');
 const logger = require('../config/logger');
 const redisClient = require('../config/redis');
 
@@ -48,11 +49,18 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
   }
 
   // 2. CONSTITUTION DE LA REQUÊTE MONGODB
+  const settings = await Settings.findOne();
+  const isGlobalFreeAccess = settings?.isGlobalFreeAccess || false;
+
   const query = {
     role: 'driver',
     isAvailable: true,
     isBanned: false
   };
+
+  if (!isGlobalFreeAccess) {
+    query['subscription.isActive'] = true;
+  }
 
   if (missionType === 'DELIVERY') {
     query['deliveryPreferences.isDeliveryActive'] = { $ne: false };
