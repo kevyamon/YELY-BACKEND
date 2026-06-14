@@ -5,7 +5,7 @@
 const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
 const AppError = require('../utils/AppError');
-const cloudinary = require('cloudinary').v2;
+const cloudinary = require('../config/cloudinary');
 const fs = require('fs');
 
 const getUserProfile = async (userId) => {
@@ -120,9 +120,33 @@ const anonymizeAccount = async (userId) => {
   return true;
 };
 
+const updatePassword = async (userId, currentPassword, newPassword) => {
+  const user = await User.findById(userId).select('+password');
+  if (!user) throw new AppError('Utilisateur introuvable.', 404);
+
+  const isMatch = await user.comparePassword(currentPassword);
+  if (!isMatch) throw new AppError('Le mot de passe actuel est incorrect.', 400);
+
+  const isSame = await user.comparePassword(newPassword);
+  if (isSame) throw new AppError("Le nouveau mot de passe doit etre different de l'ancien.", 400);
+
+  user.password = newPassword;
+  await user.save();
+
+  await AuditLog.create({
+    actor: userId,
+    action: 'UPDATE_PASSWORD',
+    target: userId,
+    details: 'Mise a jour securisee du mot de passe.'
+  }).catch(() => {});
+
+  return true;
+};
+
 module.exports = {
   getUserProfile,
   updateProfile,
   uploadProfilePicture,
-  anonymizeAccount
+  anonymizeAccount,
+  updatePassword
 };

@@ -28,4 +28,15 @@ const updateProfileSchema = z.object({
   message: "Vous devez modifier au moins une information pour mettre a jour votre profil."
 });
 
-module.exports = { updateProfileSchema };
+const updatePasswordSchema = z.object({
+  currentPassword: z.string()
+    .min(1, 'Le mot de passe actuel est requis.'),
+  newPassword: z.string()
+    .min(8, 'Le nouveau mot de passe doit faire au moins 8 caracteres.')
+    .max(128, 'Le nouveau mot de passe est trop long.')
+    .refine(val => /[0-9]/.test(val) && /[a-zA-Z]/.test(val), {
+      message: 'Le nouveau mot de passe doit contenir au moins une lettre et un chiffre.'
+    })
+}).strict();
+
+module.exports = { updateProfileSchema, updatePasswordSchema };

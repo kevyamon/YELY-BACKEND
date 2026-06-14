@@ -1,7 +1,7 @@
 // src/controllers/reportController.js
 const Report = require('../models/Report');
 const User = require('../models/User'); 
-const cloudinary = require('cloudinary').v2;
+const cloudinary = require('../config/cloudinary');
 const fs = require('fs');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const notificationService = require('../services/notificationService'); 

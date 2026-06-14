@@ -177,6 +177,16 @@ const getSellerProfile = async (req, res, next) => {
   }
 };
 
+const updatePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    await userService.updatePassword(req.user._id, currentPassword, newPassword);
+    return successResponse(res, null, 'Votre mot de passe a ete modifie avec succes.');
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = { 
   getProfile, 
   updateProfile, 
@@ -185,5 +195,6 @@ module.exports = {
   updateAvailability,
   updateShopLocation,
   getSellers,
-  getSellerProfile
+  getSellerProfile,
+  updatePassword
 };
