@@ -29,7 +29,9 @@ const registerUser = async (req, res, next) => {
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
       subscription: user.subscription,
-      vehicle: user.vehicle
+      vehicle: user.vehicle,
+      currentLocation: user.currentLocation,
+      address: user.address
     };
 
     return successResponse(res, { 
@@ -78,7 +80,9 @@ const loginUser = async (req, res, next) => {
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
       subscription: user.subscription,
-      vehicle: user.vehicle 
+      vehicle: user.vehicle,
+      currentLocation: user.currentLocation,
+      address: user.address
     };
 
     return successResponse(res, { 
@@ -157,7 +161,9 @@ const refreshToken = async (req, res, next) => {
       totalRides: user.totalRides,
       totalEarnings: user.totalEarnings,
       subscription: user.subscription,
-      vehicle: user.vehicle 
+      vehicle: user.vehicle,
+      currentLocation: user.currentLocation,
+      address: user.address
     };
 
     return successResponse(res, { 

@@ -62,27 +62,33 @@ router.get('/config', async (req, res) => {
   }
 });
 
+// ROUTE DE DIAGNOSTIC CHAUFFEURS TEMPORAIRE
 router.get('/debug-drivers', async (req, res) => {
   try {
     const User = require('../models/User');
     const Order = require('../models/Order');
     const redis = require('../config/redis');
-
+    
+    // Récupération de tous les chauffeurs
     const drivers = await User.find({ role: 'driver' }).lean();
+    
+    // Récupération des 5 dernières commandes pour analyser les coordonnées du vendeur
     const orders = await Order.find({})
-      .sort('-createdAt')
+      .sort({ createdAt: -1 })
       .limit(5)
       .populate('seller customer')
       .lean();
-
+      
+    // Récupération des identifiants dans le registre Redis active_drivers
     let redisDriverIds = [];
     try {
       redisDriverIds = await redis.zrange('active_drivers', 0, -1);
-    } catch (err) {
-      redisDriverIds = ['Redis error: ' + err.message];
+    } catch (redisErr) {
+      redisDriverIds = [`Erreur Redis : ${redisErr.message}`];
     }
-
-    const response = {
+    
+    res.status(200).json({
+      success: true,
       redisDrivers: redisDriverIds,
       drivers: drivers.map(d => ({
         id: d._id,
@@ -111,11 +117,10 @@ router.get('/debug-drivers', async (req, res) => {
         } : null,
         createdAt: o.createdAt
       }))
-    };
-
-    res.status(200).json(response);
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message, stack: error.stack });
+    logger.error(`[HEALTH DEBUG DRIVERS] Erreur : ${error.message}`);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
