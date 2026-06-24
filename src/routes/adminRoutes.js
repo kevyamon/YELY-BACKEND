@@ -16,6 +16,8 @@ const {
   updateAppVersionSchema
 } = require('../validations/adminValidation');
 
+const adminSubscriptionsController = require('../controllers/adminSubscriptionsController');
+
 router.get('/stats', protect, authorize('admin', 'superadmin'), adminController.getDashboardStats);
 router.get('/users', protect, authorize('admin', 'superadmin'), adminController.getAllUsers);
 router.get('/validations', protect, authorize('admin', 'superadmin'), adminController.getValidationQueue);
@@ -51,6 +53,11 @@ router.put('/app-version', protect, authorize('superadmin'), validate(updateAppV
 router.post('/update-role', protect, authorize('superadmin'), validate(updateRoleSchema), adminController.updateAdminStatus);
 router.post('/toggle-ban', protect, authorize('superadmin'), validate(toggleBanSchema), adminController.toggleUserBan);
 router.post('/map-lock', protect, authorize('superadmin'), validate(mapSettingsSchema), adminController.updateMapSettings);
+
+// --- ROUTES DE GESTION DES ABONNEMENTS (ADMIN & SUPERADMIN) ---
+router.get('/subscriptions', protect, authorize('admin', 'superadmin'), adminSubscriptionsController.getSubscriptions);
+router.get('/subscriptions/history/:userId', protect, authorize('admin', 'superadmin'), adminSubscriptionsController.getSubscriptionHistory);
+router.post('/subscriptions/toggle-ban', protect, authorize('admin', 'superadmin'), validate(toggleBanSchema), adminSubscriptionsController.toggleSubscriptionBan);
 
 // --- ROUTES DE MODÉRATION ET D'OVERRIDE MARKETPLACE ---
 router.get('/marketplace/stats', protect, authorize('admin', 'superadmin'), adminController.getMarketplaceStats);
