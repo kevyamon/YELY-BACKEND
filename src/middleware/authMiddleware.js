@@ -115,9 +115,51 @@ const optionalAuth = async (req, res, next) => {
   }
 };
 
+const requireActiveSubscription = async (req, res, next) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      throw new AppError('Vous n\'êtes pas connecté. Veuillez vous connecter.', 401);
+    }
+
+    // L'abonnement ne concerne que les chauffeurs et les vendeurs
+    if (user.role === 'driver' || user.role === 'seller') {
+      // Si un chauffeur repasse offline (isAvailable: false), on l'autorise sans abonnement
+      if (req.body && req.body.isAvailable === false) {
+        return next();
+      }
+
+      // Recharger l'utilisateur de la base de données pour avoir le dernier statut d'abonnement en DB
+      const fullUser = await User.findById(user._id);
+      if (!fullUser) {
+        throw new AppError('Utilisateur introuvable.', 404);
+      }
+
+      // Synchroniser avec l'heure réelle du serveur (anti time tampering)
+      if (typeof fullUser.syncSubscription === 'function') {
+        fullUser.syncSubscription();
+        await fullUser.save({ validateBeforeSave: false });
+      }
+
+      // Vérifier si le superadmin a activé l'accès libre global
+      const Settings = require('../models/Settings');
+      const settings = await Settings.findOne();
+      const hasFreeAccess = settings?.isGlobalFreeAccess || false;
+
+      if (!fullUser.subscription?.isActive && !hasFreeAccess) {
+        throw new AppError('Votre abonnement a expiré. Veuillez le renouveler pour continuer.', 403);
+      }
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = { 
   protect, 
   authorize, 
   optionalAuth,
-  isValidObjectId 
+  isValidObjectId,
+  requireActiveSubscription
 };

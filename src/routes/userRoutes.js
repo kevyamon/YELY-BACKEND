@@ -5,7 +5,7 @@
 const express = require('express');
 const userController = require('../controllers/userController');
 const userShareController = require('../controllers/userShareController');
-const { protect } = require('../middleware/authMiddleware');
+const { protect, requireActiveSubscription } = require('../middleware/authMiddleware');
 const { uploadProfilePic, validateFileSignature } = require('../middleware/uploadMiddleware');
 const validate = require('../middleware/validationMiddleware');
 const { updatePasswordSchema } = require('../validations/userValidation');
@@ -23,8 +23,8 @@ router.use(protect);
 router.get('/profile', userController.getProfile);
 router.patch('/update-profile', userController.updateProfile);
 router.patch('/update-password', validate(updatePasswordSchema), userController.updatePassword);
-router.patch('/update-availability', userController.updateAvailability);
-router.patch('/update-shop-location', userController.updateShopLocation);
+router.patch('/update-availability', requireActiveSubscription, userController.updateAvailability);
+router.patch('/update-shop-location', requireActiveSubscription, userController.updateShopLocation);
 
 // Nouvelles routes d'Étape 1
 router.patch('/profile-picture', uploadProfilePic, validateFileSignature, userController.uploadProfilePicture);

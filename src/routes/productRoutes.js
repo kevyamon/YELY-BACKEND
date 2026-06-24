@@ -3,7 +3,7 @@
 
 const express = require('express');
 const productController = require('../controllers/productController');
-const { protect, authorize, optionalAuth } = require('../middleware/authMiddleware');
+const { protect, authorize, optionalAuth, requireActiveSubscription } = require('../middleware/authMiddleware');
 const { uploadProductImages, validateFileSignature } = require('../middleware/uploadMiddleware');
 
 const router = express.Router();
@@ -15,6 +15,7 @@ router.get('/:id', productController.getProduct);
 
 // Routes protégées (Vendeurs & Admins)
 router.use(protect);
+router.use(requireActiveSubscription);
 
 router.post(
   '/', 
