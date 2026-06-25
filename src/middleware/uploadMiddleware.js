@@ -93,11 +93,17 @@ const validateFileSignature = (req, res, next) => {
   }
 };
 
+const uploadIdentityCards = upload.fields([
+  { name: 'idCardFront', maxCount: 1 },
+  { name: 'idCardBack', maxCount: 1 }
+]);
+
 module.exports = { 
   uploadSingle, 
   uploadProfilePic, 
   uploadReportCaptures,
   uploadProductImages,
   uploadBannerImage,
+  uploadIdentityCards,
   validateFileSignature 
 };

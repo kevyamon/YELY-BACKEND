@@ -109,6 +109,14 @@ const userSchema = new mongoose.Schema({
   
   isAvailable: { type: Boolean, default: false, index: true },
 
+  verificationStatus: { 
+    type: String, 
+    enum: ['none', 'pending', 'approved', 'rejected'], 
+    default: 'none', 
+    index: true 
+  },
+  rejectionReason: { type: String, default: '' },
+
   totalRides: { type: Number, default: 0 },
   totalEarnings: { type: Number, default: 0 },
   rating: { type: Number, default: 5.0 },
@@ -116,6 +124,7 @@ const userSchema = new mongoose.Schema({
   
   vehicle: {
     category: { type: String, enum: ['ECHO', 'STANDARD', 'VIP'], default: null },
+    type: { type: String, enum: ['salonie', 'apsonic'], default: null },
     model: { type: String, default: '' },
     plate: { type: String, default: '' },
     color: { type: String, default: '' }
@@ -130,6 +139,8 @@ const userSchema = new mongoose.Schema({
   
   documents: {
     idCard: { type: String, default: '' },
+    idCardFront: { type: String, default: '' },
+    idCardBack: { type: String, default: '' },
     license: { type: String, default: '' },
     insurance: { type: String, default: '' }
   }

@@ -25,7 +25,8 @@ const dispatchToNearbyDrivers = async (ride, radius) => {
     radius,
     ride.forfait,
     excludedDrivers,
-    ride.type
+    ride.type,
+    ride.passengersCount
   );
 
   if (drivers.length > 0) {

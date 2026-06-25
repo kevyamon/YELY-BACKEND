@@ -254,6 +254,10 @@ const updateAvailability = async (userId, isAvailable) => {
   if (!user) throw new AppError('Utilisateur introuvable.', 404);
   if (user.isDeleted) throw new AppError('Action impossible sur un compte supprime.', 403);
 
+  if (isAvailable && user.role === 'driver' && user.verificationStatus !== 'approved') {
+    throw new AppError('Votre identité et votre véhicule doivent être approuvés par l\'administration pour vous mettre en ligne.', 403);
+  }
+
   const updatedUser = await User.findByIdAndUpdate(
     userId,
     { isAvailable },

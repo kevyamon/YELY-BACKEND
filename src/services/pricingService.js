@@ -45,12 +45,40 @@ const detectZone = (coordinates) => {
 };
 
 /**
- * Genere les 3 options de prix pour la negociation basees sur la matrice des Zones et le nombre de passagers
+ * Helpers pour calculer les multiplicateurs cumulatifs
  */
-const generatePriceOptions = async (originCoords, destCoords, distanceKm, passengersCount = 1, isDelivery = false) => {
+const getTimeMultiplier = (date = new Date()) => {
+  const hours = date.getUTCHours();
+  const minutes = date.getUTCMinutes();
+  const timeInMinutes = hours * 60 + minutes;
+
+  // Nuit : 22h00 à 06h00 UTC (1320 minutes à 360 minutes)
+  if (timeInMinutes >= 1320 || timeInMinutes < 360) {
+    return 1.25;
+  }
+
+  // Heures de pointe : 07h00 - 09h30 (420-570) et 16h30 - 19h30 (990-1170) UTC
+  if ((timeInMinutes >= 420 && timeInMinutes <= 570) || (timeInMinutes >= 990 && timeInMinutes <= 1170)) {
+    return 1.20;
+  }
+
+  return 1.00;
+};
+
+const getWeatherMultiplier = (weather = 'sunny') => {
+  if (weather && ['rainy', 'rain', 'pluie', 'pleut'].includes(weather.toLowerCase())) {
+    return 1.15;
+  }
+  return 1.00;
+};
+
+/**
+ * Génère les options de prix basées sur les formules simplifiées et les multiplicateurs
+ */
+const generatePriceOptions = async (originCoords, destCoords, distanceKm, passengersCount = 1, isDelivery = false, weather = 'sunny', date = new Date()) => {
   
-  // Sécurisation validation entrée
-  const count = Math.max(1, Math.min(4, Number(passengersCount) || 1));
+  // Sécurisation validation entrée (jusqu'à 6 places pour le covoiturage)
+  const count = Math.max(1, Math.min(6, Number(passengersCount) || 1));
 
   if (isDelivery) {
     // LOGIQUE DE LIVRAISON DE PROXIMITÉ (PETITE VILLE)
@@ -92,22 +120,21 @@ const generatePriceOptions = async (originCoords, destCoords, distanceKm, passen
   const startZone = detectZone(originCoords);
   const endZone = detectZone(destCoords);
 
-  // 2. Calculer le prix de base depuis la matrice (Prix par tête)
-  const basePricePerSeat = PRICE_MATRIX[startZone]?.[endZone] || 300; // 300 par défaut (Fallback)
+  // 2. Calculer le multiplicateur global
+  const timeMult = getTimeMultiplier(date);
+  const weatherMult = getWeatherMultiplier(weather);
+  const totalMultiplier = timeMult * weatherMult;
 
-  // 3. Application de la règle du village : Le prix se multiplie strictement par le nombre de personnes
-  const totalBasePrice = basePricePerSeat * count;
-
-  // 4. Génération des 3 Tiers (Psychologie locale)
+  // 3. Calculer les deux forfaits requis
   
-  // Option 1 : ECO (Le tarif normal par tête multiplié, juste le transport)
-  const ecoPrice = totalBasePrice;
+  // ECO (Partagé / Covoiturage) : base 200 + 100/km * multiplicateur + (passagers - 1) * 100
+  // Capping stricte entre 200 FCFA et 500 FCFA
+  const rawEco = (200 + 100 * distanceKm) * totalMultiplier + (count - 1) * 100;
+  const roundedEco = Math.round(rawEco / 50) * 50;
+  const ecoPrice = Math.max(200, Math.min(500, roundedEco));
 
-  // Option 2 : STANDARD (Départ immédiat sans attendre de remplir, petit bonus)
-  const stdPrice = totalBasePrice + 100;
-
-  // Option 3 : PREMIUM (Urgence, déplacement avec bagages de marché, confort)
-  const premPrice = totalBasePrice + 200;
+  // VIP (Solo / Privé) : Flat 700 FCFA
+  const vipPrice = 700;
 
   return {
     startZone,
@@ -116,17 +143,12 @@ const generatePriceOptions = async (originCoords, destCoords, distanceKm, passen
       {
         label: 'ECO',
         amount: ecoPrice,
-        description: `Tarif normal pour ${count} personne(s)`
+        description: `Option partagée (Covoiturage) - ${count} place(s)`
       },
       {
-        label: 'STANDARD',
-        amount: stdPrice,
-        description: 'Départ rapide & prioritaire'
-      },
-      {
-        label: 'PREMIUM',
-        amount: premPrice,
-        description: 'Confort, urgence ou bagages'
+        label: 'VIP',
+        amount: vipPrice,
+        description: 'Option privée (Seul dans le taxi)'
       }
     ]
   };

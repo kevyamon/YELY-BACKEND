@@ -7,7 +7,7 @@ const Settings = require('../models/Settings');
 const logger = require('../config/logger');
 const redisClient = require('../config/redis');
 
-const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait, rejectedDriverIds = [], missionType = 'RIDE') => {
+const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait, rejectedDriverIds = [], missionType = 'RIDE', passengersCount = 1) => {
   const safeLng = Number(coordinates[0]);
   const safeLat = Number(coordinates[1]);
 
@@ -55,7 +55,8 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
   const query = {
     role: 'driver',
     isAvailable: true,
-    isBanned: false
+    isBanned: false,
+    verificationStatus: 'approved' // Uniquement les chauffeurs approuvés par l'administration
   };
 
   if (!isGlobalFreeAccess) {
@@ -67,6 +68,22 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
     query['ledger.isBlocked'] = { $ne: true }; 
   } else {
     query['deliveryPreferences.isVtcActive'] = { $ne: false };
+
+    // Filtre sur le modèle de tricycle selon le forfait et le nombre de passagers
+    if (forfait === 'VIP') {
+      // VIP = Uniquement Salonie
+      query['vehicle.type'] = 'salonie';
+    } else {
+      // ECO (Covoiturage)
+      const count = Number(passengersCount) || 1;
+      if (count > 4) {
+        // Plus de 4 passagers -> Uniquement Apsonic (6 places)
+        query['vehicle.type'] = 'apsonic';
+      } else {
+        // 1 à 4 passagers -> Salonie ou Apsonic
+        query['vehicle.type'] = { $in: ['salonie', 'apsonic'] };
+      }
+    }
   }
 
   if (rejectedDriverIds && rejectedDriverIds.length > 0) {

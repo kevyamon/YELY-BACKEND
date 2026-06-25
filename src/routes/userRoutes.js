@@ -6,7 +6,7 @@ const express = require('express');
 const userController = require('../controllers/userController');
 const userShareController = require('../controllers/userShareController');
 const { protect, requireActiveSubscription } = require('../middleware/authMiddleware');
-const { uploadProfilePic, validateFileSignature } = require('../middleware/uploadMiddleware');
+const { uploadProfilePic, uploadIdentityCards, validateFileSignature } = require('../middleware/uploadMiddleware');
 const validate = require('../middleware/validationMiddleware');
 const { updatePasswordSchema } = require('../validations/userValidation');
 
@@ -28,6 +28,7 @@ router.patch('/update-shop-location', requireActiveSubscription, userController.
 
 // Nouvelles routes d'Étape 1
 router.patch('/profile-picture', uploadProfilePic, validateFileSignature, userController.uploadProfilePicture);
+router.patch('/verify-identity', uploadIdentityCards, validateFileSignature, userController.verifyIdentity);
 router.delete('/account', userController.deleteAccount);
 
 module.exports = router;

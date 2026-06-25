@@ -7,9 +7,11 @@ const AppError = require('../../utils/AppError');
 const { successResponse } = require('../../utils/responseHandler');
 const Ride = require('../../models/Ride');
 
+const pricingService = require('../../services/pricingService');
+
 const estimateRide = async (req, res, next) => {
   try {
-    const { pickupLat, pickupLng, dropoffLat, dropoffLng } = req.query;
+    const { pickupLat, pickupLng, dropoffLat, dropoffLng, passengersCount, weather } = req.query;
     
     if (!pickupLat || !pickupLng || !dropoffLat || !dropoffLng) {
       throw new AppError('Coordonnees GPS manquantes pour l\'estimation', 400);
@@ -24,10 +26,22 @@ const estimateRide = async (req, res, next) => {
 
     const distance = await rideService.getRouteDistance(origin, destination);
     
+    // Calcul des prix dynamiques et plafonnés
+    const pricingResult = await pricingService.generatePriceOptions(
+      origin, 
+      destination, 
+      distance, 
+      passengersCount || 1, 
+      false, 
+      weather || 'sunny'
+    );
+
+    const ecoPrice = pricingResult.options.find(o => o.label === 'ECO')?.amount || 200;
+    const vipPrice = pricingResult.options.find(o => o.label === 'VIP')?.amount || 700;
+
     const vehicles = [
-      { id: '1', type: 'echo', name: 'Echo', duration: Math.max(1, Math.ceil(distance * 3)) },
-      { id: '2', type: 'standard', name: 'Standard', duration: Math.max(1, Math.ceil(distance * 2)) },
-      { id: '3', type: 'vip', name: 'VIP', duration: Math.max(1, Math.ceil(distance * 1.5)) }
+      { id: '1', type: 'echo', name: 'Partagé', duration: Math.max(1, Math.ceil(distance * 3)), price: ecoPrice },
+      { id: '2', type: 'vip', name: 'Privé (Seul)', duration: Math.max(1, Math.ceil(distance * 1.5)), price: vipPrice }
     ];
 
     return successResponse(res, { distance, vehicles }, 'Estimation reussie');

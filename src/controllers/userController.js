@@ -5,6 +5,7 @@
 const User = require('../models/User');
 const Product = require('../models/Product');
 const userService = require('../services/userService');
+const authService = require('../services/authService');
 const { clearRefreshTokenCookie } = require('../utils/tokenService');
 const { successResponse } = require('../utils/responseHandler');
 const AppError = require('../utils/AppError');
@@ -70,13 +71,14 @@ const updateAvailability = async (req, res, next) => {
       throw new AppError('Statut de disponibilite invalide', 400);
     }
 
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      { isAvailable },
-      { new: true, runValidators: true }
-    ).select('isAvailable totalRides totalEarnings rating');
+    const user = await authService.updateAvailability(req.user._id, isAvailable);
 
-    return successResponse(res, user, `Vous etes maintenant ${isAvailable ? 'en service' : 'hors ligne'}`);
+    return successResponse(res, {
+      isAvailable: user.isAvailable,
+      totalRides: user.totalRides,
+      totalEarnings: user.totalEarnings,
+      rating: user.rating
+    }, `Vous etes maintenant ${isAvailable ? 'en service' : 'hors ligne'}`);
   } catch (error) {
     return next(error);
   }
@@ -187,6 +189,80 @@ const updatePassword = async (req, res, next) => {
   }
 };
 
+const verifyIdentity = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const { vehicleType } = req.body;
+
+    if (req.user.role !== 'driver') {
+      throw new AppError('Seuls les chauffeurs peuvent soumettre une vérification d\'identité.', 403);
+    }
+
+    if (vehicleType && !['salonie', 'apsonic'].includes(vehicleType)) {
+      throw new AppError('Type de véhicule invalide. Doit être salonie ou apsonic.', 400);
+    }
+
+    const user = await User.findById(userId);
+    if (!user) throw new AppError('Utilisateur introuvable.', 404);
+
+    const updateData = {};
+    if (vehicleType) {
+      updateData['vehicle.type'] = vehicleType;
+    }
+
+    // Upload sur Cloudinary si des fichiers sont fournis
+    if (req.files) {
+      const cloudinary = require('../config/cloudinary');
+      const fs = require('fs');
+
+      if (req.files.idCardFront && req.files.idCardFront[0]) {
+        const file = req.files.idCardFront[0];
+        const result = await cloudinary.uploader.upload(file.path, {
+          folder: 'yely/verifications',
+          transformation: [{ width: 1200, height: 900, crop: 'limit' }]
+        });
+        updateData['documents.idCardFront'] = result.secure_url;
+        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+      }
+
+      if (req.files.idCardBack && req.files.idCardBack[0]) {
+        const file = req.files.idCardBack[0];
+        const result = await cloudinary.uploader.upload(file.path, {
+          folder: 'yely/verifications',
+          transformation: [{ width: 1200, height: 900, crop: 'limit' }]
+        });
+        updateData['documents.idCardBack'] = result.secure_url;
+        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+      }
+    }
+
+    // Si on a à la fois le recto, le verso et le type de véhicule, le statut passe en pending
+    const finalFront = updateData['documents.idCardFront'] || user.documents?.idCardFront;
+    const finalBack = updateData['documents.idCardBack'] || user.documents?.idCardBack;
+    const finalType = updateData['vehicle.type'] || user.vehicle?.type;
+
+    if (finalFront && finalBack && finalType) {
+      updateData.verificationStatus = 'pending';
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $set: updateData },
+      { new: true, runValidators: true, select: '-password -__v' }
+    );
+
+    return successResponse(res, updatedUser, 'Demande de vérification enregistrée avec succès.');
+  } catch (error) {
+    if (req.files) {
+      const fs = require('fs');
+      Object.values(req.files).flat().forEach(file => {
+        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+      });
+    }
+    return next(error);
+  }
+};
+
 module.exports = { 
   getProfile, 
   updateProfile, 
@@ -196,5 +272,6 @@ module.exports = {
   updateShopLocation,
   getSellers,
   getSellerProfile,
-  updatePassword
+  updatePassword,
+  verifyIdentity
 };

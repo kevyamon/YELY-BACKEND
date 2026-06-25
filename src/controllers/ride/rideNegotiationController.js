@@ -20,21 +20,57 @@ const lockRide = async (req, res, next) => {
     const ride = await rideService.lockRideForNegotiation(rideId, req.user._id);
     const io = req.app.get('socketio');
  
-    io.to(ride.rider.toString()).emit('driver_found', {
+    // Récupérer le profil du passager pour le chauffeur
+    const riderUser = await User.findById(ride.rider).select('name phone profilePicture');
+
+    // Événement socket pour le passager (Rider)
+    const riderPayload = {
+      rideId: ride._id,
+      status: 'accepted',
       driverName: req.user.name,
+      driverPhone: req.user.phone,
+      driverProfilePicture: req.user.profilePicture,
+      driverLocation: req.user.currentLocation,
       vehicle: req.user.vehicle,
-      driverProfilePicture: req.user.profilePicture 
-    });
+      price: ride.price,
+      proposedPrice: ride.proposedPrice,
+      origin: ride.origin,
+      destination: ride.destination,
+      forfait: ride.forfait,
+      passengersCount: ride.passengersCount
+    };
+    io.to(ride.rider.toString()).emit('proposal_accepted', riderPayload);
  
+    // Événement socket pour le chauffeur (Driver)
+    const driverPayload = {
+      rideId: ride._id,
+      status: 'accepted',
+      riderName: riderUser?.name || 'Passager',
+      riderPhone: riderUser?.phone,
+      riderProfilePicture: riderUser?.profilePicture,
+      origin: ride.origin,
+      destination: ride.destination,
+      price: ride.price,
+      proposedPrice: ride.proposedPrice,
+      forfait: ride.forfait,
+      passengersCount: ride.passengersCount
+    };
+    io.to(req.user._id.toString()).emit('proposal_accepted', driverPayload);
+
+    // Notification Push pour le passager
     notificationService.sendNotification(
-      ride.rider, "Chauffeur trouvé", `${req.user.name} est intéressé par votre course et prépare son tarif.`, "DRIVER_FOUND", { rideId: ride._id.toString() }
+      ride.rider, 
+      "Course confirmée", 
+      `Le chauffeur ${req.user.name} a accepté votre course pour ${ride.price} FCFA. En route !`, 
+      "PROPOSAL_ACCEPTED", 
+      { rideId: ride._id.toString() }
     ).catch(() => {});
  
     return successResponse(res, { 
       rideId: ride._id, 
       status: ride.status, 
       priceOptions: ride.priceOptions 
-    }, 'Course verrouillée');
+    }, 'Course acceptée avec succès.');
   } catch (error) {
     return next(error);
   }

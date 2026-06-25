@@ -59,9 +59,20 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
     const distance = await rideHelpers.getRouteDistance(originCoords, destCoords);
     if (distance < 0.1) throw new AppError('Distance invalide.', 400);
  
-    const pricingResult = type === 'DELIVERY'
-      ? null
-      : await pricingService.generatePriceOptions(originCoords, destCoords, distance, count, false);
+    let selectedPrice = 0;
+    let selectedOptions = [];
+
+    if (type === 'DELIVERY') {
+      selectedPrice = rideData.deliveryPrice || 0;
+      selectedOptions = [{ label: 'STANDARD', amount: selectedPrice, description: 'Tarif de livraison fixe' }];
+    } else {
+      // Forfait par défaut 'ECO' (covoiturage)
+      const targetForfait = String(forfait || 'ECO').toUpperCase();
+      const pricingResult = await pricingService.generatePriceOptions(originCoords, destCoords, distance, count, false, 'sunny');
+      const selectedOption = pricingResult.options.find(o => o.label === targetForfait) || pricingResult.options.find(o => o.label === 'ECO');
+      selectedPrice = selectedOption?.amount || 200;
+      selectedOptions = [selectedOption]; // Ne stocker que le forfait choisi
+    }
     
     const initialRadius = 1000;
  
@@ -70,11 +81,11 @@ const createRideRequest = async (riderId, rideData, redisClient) => {
       origin: { ...origin, address: enrichedOriginAddress, coordinates: originCoords },
       destination: { ...destination, address: enrichedDestAddress, coordinates: destCoords },
       distance,
-      forfait: forfait || 'STANDARD',
+      forfait: forfait || 'ECO',
       passengersCount: count,
-      priceOptions: type === 'DELIVERY'
-        ? [{ label: 'STANDARD', amount: rideData.deliveryPrice || 0, description: 'Tarif de livraison fixe' }]
-        : pricingResult.options, 
+      priceOptions: selectedOptions, 
+      price: selectedPrice,
+      proposedPrice: selectedPrice,
       status: 'searching',
       rejectedDrivers: [],
       notifiedDrivers: [],

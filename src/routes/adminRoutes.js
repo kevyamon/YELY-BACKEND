@@ -21,6 +21,8 @@ const adminSubscriptionsController = require('../controllers/adminSubscriptionsC
 router.get('/stats', protect, authorize('admin', 'superadmin'), adminController.getDashboardStats);
 router.get('/users', protect, authorize('admin', 'superadmin'), adminController.getAllUsers);
 router.get('/validations', protect, authorize('admin', 'superadmin'), adminController.getValidationQueue);
+router.get('/drivers/pending', protect, authorize('admin', 'superadmin'), adminController.getPendingDrivers);
+router.post('/drivers/:id/verify', protect, authorize('admin', 'superadmin'), adminController.verifyDriver);
 router.get('/rides', protect, authorize('admin', 'superadmin'), adminController.getAllRides);
 router.put('/rides/:id/archive', protect, authorize('admin', 'superadmin'), adminController.toggleRideArchive);
 router.get('/logs', protect, authorize('admin', 'superadmin'), adminController.getAuditLogs);

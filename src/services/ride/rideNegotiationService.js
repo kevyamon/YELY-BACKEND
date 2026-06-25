@@ -14,9 +14,9 @@ const lockRideForNegotiation = async (rideId, driverId) => {
     { _id: rideId, status: 'searching' },
     { 
       $set: { 
-        status: 'negotiating', 
+        status: 'accepted', 
         driver: driverId, 
-        negotiationStartedAt: new Date() 
+        acceptedAt: new Date() 
       } 
     },
     { new: true }
@@ -24,12 +24,13 @@ const lockRideForNegotiation = async (rideId, driverId) => {
 
   if (!ride) throw new AppError('Course indisponible ou deja prise.', 409);
 
-  const { cleanupQueue } = require('./rideDispatchService');
-  await cleanupQueue.add(
-    'check-stuck-negotiation', 
-    { rideId: ride._id }, 
-    { delay: 60000, removeOnComplete: true }
-  );
+  const userRepository = require('../../repositories/userRepository');
+  await userRepository.updateDriverAvailability(driverId, false);
+
+  if (ride.type === 'DELIVERY' && ride.orderId) {
+    const Order = require('../../models/Order');
+    await Order.findByIdAndUpdate(ride.orderId, { driver: driverId });
+  }
 
   return ride;
 };
