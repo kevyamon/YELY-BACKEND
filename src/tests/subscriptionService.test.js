@@ -22,24 +22,18 @@ describe('SubscriptionService Logic', () => {
       const pricing = await getSubscriptionPricing();
       
       expect(pricing.isPromoActive).toBe(false);
-      expect(pricing.weekly.price).toBe(1000);
-      expect(pricing.weekly.originalPrice).toBe(1000);
-      expect(pricing.monthly.price).toBe(6000);
-      expect(pricing.monthly.originalPrice).toBe(6000);
+      expect(pricing.monthly.price).toBe(2000);
+      expect(pricing.monthly.originalPrice).toBe(2000);
     });
 
-    test('Doit appliquer strictement la reduction de 40% si la promotion est active', async () => {
+    test('Doit appliquer strictement la promotion de 1500 FCFA si active', async () => {
       Settings.findOne.mockResolvedValue({ isPromoActive: true });
       
       const pricing = await getSubscriptionPricing();
       
       expect(pricing.isPromoActive).toBe(true);
-      // 1000 * 0.6 = 600
-      expect(pricing.weekly.price).toBe(600);
-      expect(pricing.weekly.originalPrice).toBe(1000);
-      // 6000 * 0.6 = 3600
-      expect(pricing.monthly.price).toBe(3600);
-      expect(pricing.monthly.originalPrice).toBe(6000);
+      expect(pricing.monthly.price).toBe(1500);
+      expect(pricing.monthly.originalPrice).toBe(2000);
     });
 
     test('Doit gerer le cas ou la table Settings est vide', async () => {
@@ -48,7 +42,7 @@ describe('SubscriptionService Logic', () => {
       const pricing = await getSubscriptionPricing();
       
       expect(pricing.isPromoActive).toBe(false);
-      expect(pricing.weekly.price).toBe(1000);
+      expect(pricing.monthly.price).toBe(2000);
     });
   });
 });
