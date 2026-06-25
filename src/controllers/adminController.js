@@ -5,6 +5,7 @@
 const adminService = require('../services/adminService');
 const Transaction = require('../models/Transaction');
 const AuditLog = require('../models/AuditLog'); 
+const AppError = require('../utils/AppError');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const logger = require('../config/logger');
 const notificationService = require('../services/notificationService');
@@ -224,3 +225,137 @@ exports.getMarketplaceLedgers = adminMarketplaceController.getMarketplaceLedgers
 exports.forceClearLedger = adminMarketplaceController.forceClearLedger;
 exports.getAllRides = adminMarketplaceController.getAllRides;
 exports.toggleRideArchive = adminMarketplaceController.toggleRideArchive;
+
+// Helper pour extraire le Public ID Cloudinary
+const extractCloudinaryPublicId = (url) => {
+  if (!url || !url.includes('cloudinary.com')) return null;
+  const match = url.match(/\/upload\/v\d+\/(.+)\.[a-z0-9]+$/i);
+  return match ? match[1] : null;
+};
+
+// Helper pour supprimer un fichier Cloudinary
+const deleteCloudinaryFile = async (url) => {
+  try {
+    const publicId = extractCloudinaryPublicId(url);
+    if (publicId) {
+      const cloudinary = require('../config/cloudinary');
+      await cloudinary.uploader.destroy(publicId);
+      logger.info(`[Cloudinary] Image détruite : ${publicId}`);
+    }
+  } catch (err) {
+    logger.error(`[Cloudinary ERROR] Echec de suppression : ${err.message}`);
+  }
+};
+
+exports.getPendingDrivers = async (req, res, next) => {
+  try {
+    const User = require('../models/User');
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = 10;
+    const skip = (page - 1) * limit;
+
+    const query = { role: 'driver', verificationStatus: 'pending' };
+
+    const [drivers, total] = await Promise.all([
+      User.find(query)
+        .select('name phone email vehicle documents verificationStatus createdAt')
+        .sort({ updatedAt: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      User.countDocuments(query)
+    ]);
+
+    const data = {
+      drivers,
+      pagination: { page, total, pages: Math.ceil(total / limit) }
+    };
+
+    return successResponse(res, data, "Chauffeurs en attente récupérés avec succès.");
+  } catch (error) {
+    logger.error(`[PENDING DRIVERS ERROR] ${error.message}`);
+    return next(new AppError("Erreur lors de la récupération des validations d'identité.", 500));
+  }
+};
+
+exports.verifyDriver = async (req, res, next) => {
+  try {
+    const User = require('../models/User');
+    const { id } = req.params;
+    const { decision, reason } = req.body;
+
+    if (!['approved', 'rejected'].includes(decision)) {
+      throw new AppError('Décision invalide. Doit être approved ou rejected.', 400);
+    }
+
+    const driver = await User.findById(id);
+    if (!driver || driver.role !== 'driver') {
+      throw new AppError('Chauffeur introuvable.', 404);
+    }
+
+    const previousFrontUrl = driver.documents?.idCardFront;
+    const previousBackUrl = driver.documents?.idCardBack;
+
+    driver.verificationStatus = decision;
+    driver.isAvailable = false; // Par sécurité, forcer hors ligne
+
+    if (decision === 'rejected') {
+      driver.rejectionReason = reason || "Documents non conformes.";
+    } else {
+      driver.rejectionReason = "";
+    }
+
+    // RGPD & Libération de l'espace Cloudinary : Supprimer les images d'identité après décision
+    if (previousFrontUrl) {
+      await deleteCloudinaryFile(previousFrontUrl);
+      driver.documents.idCardFront = "";
+    }
+    if (previousBackUrl) {
+      await deleteCloudinaryFile(previousBackUrl);
+      driver.documents.idCardBack = "";
+    }
+    driver.documents.idCard = ""; // Nettoyer l'ancienne clé brute si présente
+
+    await driver.save();
+
+    // Journal d'audit
+    await AuditLog.create({
+      actor: req.user._id,
+      action: decision === 'approved' ? 'APPROVE_DRIVER_IDENTITY' : 'REJECT_DRIVER_IDENTITY',
+      target: driver._id,
+      details: decision === 'approved' ? 'Identité approuvée' : `Rejet: ${reason}`
+    }).catch(() => {});
+
+    // Notifications temps réel et push
+    try {
+      const io = req.app.get('socketio');
+      if (io) {
+        io.to(driver._id.toString()).emit('identity_verification_update', {
+          status: decision,
+          reason: driver.rejectionReason
+        });
+        io.to(driver._id.toString()).emit('force_availability_offline');
+      }
+
+      const pushTitle = decision === 'approved' ? "Identité Validée ✅" : "Vérification Refusée ❌";
+      const pushBody = decision === 'approved'
+        ? "Votre identité et votre modèle de tricycle ont été validés par l'administration !"
+        : `Votre dossier de vérification a été refusé : ${driver.rejectionReason}`;
+
+      notificationService.sendNotification(
+        driver._id.toString(),
+        pushTitle,
+        pushBody,
+        decision === 'approved' ? 'IDENTITY_APPROVED' : 'IDENTITY_REJECTED',
+        { status: decision }
+      ).catch(() => {});
+
+    } catch (e) {
+      logger.error(`[NOTIF ERROR] verifyDriver: ${e.message}`);
+    }
+
+    return successResponse(res, { verificationStatus: driver.verificationStatus }, `Dossier chauffeur traité avec succès (${decision}).`);
+  } catch (error) {
+    return next(error);
+  }
+};

@@ -26,11 +26,12 @@ const logSystemAction = async (actorId, action, targetId, details) => {
 };
 
 const getDashboardStats = async () => {
-  const [totalRiders, totalDrivers, activeDrivers, pendingValidations, revenueData, settings] = await Promise.all([
+  const [totalRiders, totalDrivers, activeDrivers, pendingValidations, pendingDriverValidations, revenueData, settings] = await Promise.all([
     User.countDocuments({ role: 'rider' }),
     User.countDocuments({ role: 'driver' }),
     User.countDocuments({ role: 'driver', isAvailable: true }),
     Transaction.countDocuments({ status: 'PENDING' }),
+    User.countDocuments({ role: 'driver', verificationStatus: 'pending' }),
     Transaction.aggregate([
       { $match: { status: 'APPROVED' } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
@@ -44,6 +45,7 @@ const getDashboardStats = async () => {
     totalDrivers,
     activeDrivers,
     pendingValidations,
+    pendingDriverValidations,
     totalRevenue: revenueData.length > 0 ? revenueData[0].total : 0,
     settings 
   };
