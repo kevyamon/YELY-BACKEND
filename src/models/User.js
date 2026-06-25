@@ -124,7 +124,7 @@ const userSchema = new mongoose.Schema({
   
   vehicle: {
     category: { type: String, enum: ['ECHO', 'STANDARD', 'VIP'], default: null },
-    type: { type: String, enum: ['salonie', 'apsonic'], default: null },
+    type: { type: String, enum: ['tvs', 'apsonic', 'salonie'], default: null },
     model: { type: String, default: '' },
     plate: { type: String, default: '' },
     color: { type: String, default: '' }

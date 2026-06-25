@@ -198,8 +198,8 @@ const verifyIdentity = async (req, res, next) => {
       throw new AppError('Seuls les chauffeurs peuvent soumettre une vérification d\'identité.', 403);
     }
 
-    if (vehicleType && !['salonie', 'apsonic'].includes(vehicleType)) {
-      throw new AppError('Type de véhicule invalide. Doit être salonie ou apsonic.', 400);
+    if (vehicleType && !['tvs', 'apsonic'].includes(vehicleType)) {
+      throw new AppError('Type de véhicule invalide. Doit être TVS ou apsonic.', 400);
     }
 
     const user = await User.findById(userId);

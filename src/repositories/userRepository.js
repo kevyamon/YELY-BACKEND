@@ -71,8 +71,8 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
 
     // Filtre sur le modèle de tricycle selon le forfait et le nombre de passagers
     if (forfait === 'VIP') {
-      // VIP = Uniquement Salonie
-      query['vehicle.type'] = 'salonie';
+      // VIP = Uniquement TVS (avec rétrocompatibilité Salonie)
+      query['vehicle.type'] = { $in: ['tvs', 'salonie'] };
     } else {
       // ECO (Covoiturage)
       const count = Number(passengersCount) || 1;
@@ -80,8 +80,8 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
         // Plus de 4 passagers -> Uniquement Apsonic (6 places)
         query['vehicle.type'] = 'apsonic';
       } else {
-        // 1 à 4 passagers -> Salonie ou Apsonic
-        query['vehicle.type'] = { $in: ['salonie', 'apsonic'] };
+        // 1 à 4 passagers -> TVS (ou Salonie historique) ou Apsonic
+        query['vehicle.type'] = { $in: ['tvs', 'apsonic', 'salonie'] };
       }
     }
   }

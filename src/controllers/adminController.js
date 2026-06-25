@@ -152,7 +152,7 @@ exports.getValidationQueue = async (req, res) => {
       Transaction.find(filter)
         .populate('user', 'name phone email currentLocation')
         .populate('assignedTo', 'name email')
-        .sort({ createdAt: 1 }) 
+        .sort({ createdAt: -1 }) // CORRECTION: les nouvelles soumissions s'affichent en haut de la liste (tri décroissant)
         .skip(skip)
         .limit(limit)
         .lean(),
@@ -259,7 +259,7 @@ exports.getPendingDrivers = async (req, res, next) => {
     const [drivers, total] = await Promise.all([
       User.find(query)
         .select('name phone email vehicle documents verificationStatus createdAt')
-        .sort({ updatedAt: 1 })
+        .sort({ createdAt: -1 }) // CORRECTION: nouvelles validations d'identité en haut (tri décroissant)
         .skip(skip)
         .limit(limit)
         .lean(),
