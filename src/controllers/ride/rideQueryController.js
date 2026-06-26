@@ -11,11 +11,16 @@ const pricingService = require('../../services/pricingService');
 
 const estimateRide = async (req, res, next) => {
   try {
-    const { pickupLat, pickupLng, dropoffLat, dropoffLng, passengersCount, weather } = req.query;
+    let { pickupLat, pickupLng, dropoffLat, dropoffLng, passengersCount, weather } = req.query;
     
     if (!pickupLat || !pickupLng || !dropoffLat || !dropoffLng) {
       throw new AppError('Coordonnees GPS manquantes pour l\'estimation', 400);
     }
+
+    if (typeof pickupLat === 'string') pickupLat = pickupLat.replace(',', '.');
+    if (typeof pickupLng === 'string') pickupLng = pickupLng.replace(',', '.');
+    if (typeof dropoffLat === 'string') dropoffLat = dropoffLat.replace(',', '.');
+    if (typeof dropoffLng === 'string') dropoffLng = dropoffLng.replace(',', '.');
 
     const origin = [parseFloat(pickupLng), parseFloat(pickupLat)];
     const destination = [parseFloat(dropoffLng), parseFloat(dropoffLat)];

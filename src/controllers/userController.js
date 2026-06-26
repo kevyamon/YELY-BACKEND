@@ -4,6 +4,7 @@
 
 const User = require('../models/User');
 const Product = require('../models/Product');
+const POI = require('../models/POI');
 const userService = require('../services/userService');
 const authService = require('../services/authService');
 const { clearRefreshTokenCookie } = require('../utils/tokenService');
@@ -122,6 +123,27 @@ const updateShopLocation = async (req, res, next) => {
       },
       { new: true, runValidators: true }
     ).select('name email role currentLocation address');
+
+    // AUTOMATISATION : Saisie communautaire automatique du commerce en POI
+    const poiName = user.name;
+    await POI.findOneAndUpdate(
+      { name: poiName },
+      {
+        name: poiName,
+        latitude: latitude,
+        longitude: longitude,
+        icon: 'Ionicons/storefront', // Icône boutique dédiée
+        iconColor: '#9b59b6', // Couleur violette distincte
+        isActive: true
+      },
+      { upsert: true, new: true, runValidators: true }
+    );
+
+    // Notification socket temps réel
+    const io = req.app.get('socketio');
+    if (io) {
+      io.emit('poi_updated', { action: 'create' });
+    }
 
     return successResponse(res, user, 'Localisation de la boutique mise à jour avec succès.');
   } catch (error) {

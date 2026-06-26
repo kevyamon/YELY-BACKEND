@@ -32,6 +32,15 @@ const poiSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    isSuggested: {
+      type: Boolean,
+      default: false,
+    },
+    suggestedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
     pendingAction: {
       type: String,
       enum: ['NONE', 'UPDATE', 'DELETE'],

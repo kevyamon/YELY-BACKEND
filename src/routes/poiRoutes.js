@@ -14,14 +14,22 @@ const router = express.Router();
 router.get('/', poiController.getAllPOIs);
 
 // --------------------------------------------------------------------------
-// ROUTES SÉCURISÉES (Réservées uniquement au SuperAdmin depuis le Dashboard)
+// ROUTES SECURISEES UTILISATEURS (Riders, Drivers, Sellers)
 // --------------------------------------------------------------------------
-// On active la vérification du token et on restreint au rôle "superadmin"
-router.use(authMiddleware.protect);
-router.use(authMiddleware.authorize('superadmin')); // CORRECTION : Utilisation de authorize au lieu de restrictTo
+router.get('/search', authMiddleware.protect, poiController.searchPOIs);
+router.post('/resolve-external', authMiddleware.protect, poiController.resolveExternalPOI);
+router.post('/suggest', authMiddleware.protect, poiController.suggestPOI);
 
+// --------------------------------------------------------------------------
+// ROUTES SÉCURISÉES SUPERADMIN (Dashboard de gestion)
+// --------------------------------------------------------------------------
+router.use(authMiddleware.protect);
+router.use(authMiddleware.authorize('superadmin'));
+
+router.get('/admin', poiController.getAdminPOIs);
+router.post('/auto-import', poiController.autoImportPOIs);
 router.post('/', poiController.createPOI);
-router.post('/bulk-import', poiController.bulkImportPOIs); // Route spéciale pour l'ajout en masse
+router.post('/bulk-import', poiController.bulkImportPOIs);
 router.put('/:id', poiController.updatePOI);
 router.delete('/:id', poiController.deletePOI);
 
