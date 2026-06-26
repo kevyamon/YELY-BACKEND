@@ -467,8 +467,9 @@ exports.autoImportPOIs = async (req, res, next) => {
 
     logger.info(`[OSM IMPORT] Lancement de l'importation Overpass sur un rayon de ${radius}m autour de Maféré...`);
     
-    const response = await axios.post(overpassUrl, `data=${encodeURIComponent(overpassQuery)}`, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    const url = `${overpassUrl}?data=${encodeURIComponent(overpassQuery)}`;
+    const response = await axios.get(url, {
+      headers: { 'User-Agent': 'YelyApp-POI-Importer/1.0 (contact@yely.com)' },
       timeout: 15000
     });
 
