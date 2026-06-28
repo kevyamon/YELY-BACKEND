@@ -98,6 +98,8 @@ router.get('/debug-drivers', async (req, res) => {
         isAvailable: d.isAvailable,
         isBanned: d.isBanned,
         isDeleted: d.isDeleted,
+        verificationStatus: d.verificationStatus,
+        subscription: d.subscription,
         currentLocation: d.currentLocation,
         deliveryPreferences: d.deliveryPreferences,
         ledger: d.ledger,
