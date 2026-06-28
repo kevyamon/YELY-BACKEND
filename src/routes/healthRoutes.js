@@ -126,4 +126,65 @@ router.get('/debug-drivers', async (req, res) => {
   }
 });
 
+// ROUTE DE DIAGNOSTIC DE RECHERCHE DE CHAUFFEURS
+router.get('/debug-find', async (req, res) => {
+  try {
+    const userRepository = require('../repositories/userRepository');
+    const Settings = require('../models/Settings');
+    const User = require('../models/User');
+
+    const origin = [-3.028218001127243, 5.415814471996204]; // Position vendeur
+    const radius = 1000;
+    const forfait = 'STANDARD';
+    const missionType = 'DELIVERY';
+
+    const drivers = await userRepository.findAvailableDriversNear(
+      origin,
+      radius,
+      forfait,
+      [],
+      missionType,
+      1
+    );
+
+    const settings = await Settings.findOne();
+    const isGlobalFreeAccess = settings?.isGlobalFreeAccess || false;
+
+    const baseQuery = {
+      role: 'driver',
+      isAvailable: true,
+      isBanned: false
+    };
+
+    const results = {};
+
+    results.allAvailableDrivers = await User.find(baseQuery).select('name verificationStatus subscription deliveryPreferences ledger').lean();
+    results.approvedOnly = await User.find({ ...baseQuery, verificationStatus: 'approved' }).select('name').lean();
+    results.withSub = !isGlobalFreeAccess 
+      ? await User.find({ ...baseQuery, 'subscription.isActive': true }).select('name').lean()
+      : 'skip';
+    results.withDeliveryPref = await User.find({ ...baseQuery, 'deliveryPreferences.isDeliveryActive': { $ne: false } }).select('name').lean();
+    results.withLedgerBlocked = await User.find({ ...baseQuery, 'ledger.isBlocked': { $ne: true } }).select('name').lean();
+
+    results.geoSearch = await User.find({
+      ...baseQuery,
+      currentLocation: {
+        $nearSphere: {
+          $geometry: { type: 'Point', coordinates: origin },
+          $maxDistance: radius
+        }
+      }
+    }).select('name').lean();
+
+    res.status(200).json({
+      success: true,
+      settings: { isGlobalFreeAccess },
+      finalFindDrivers: drivers.map(d => d.name),
+      results
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message, stack: error.stack });
+  }
+});
+
 module.exports = router;
