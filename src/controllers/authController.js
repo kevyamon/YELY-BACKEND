@@ -31,7 +31,8 @@ const registerUser = async (req, res, next) => {
       subscription: user.subscription,
       vehicle: user.vehicle,
       currentLocation: user.currentLocation,
-      address: user.address
+      address: user.address,
+      verificationStatus: user.verificationStatus
     };
 
     return successResponse(res, { 
@@ -82,7 +83,8 @@ const loginUser = async (req, res, next) => {
       subscription: user.subscription,
       vehicle: user.vehicle,
       currentLocation: user.currentLocation,
-      address: user.address
+      address: user.address,
+      verificationStatus: user.verificationStatus
     };
 
     return successResponse(res, { 
@@ -163,7 +165,8 @@ const refreshToken = async (req, res, next) => {
       subscription: user.subscription,
       vehicle: user.vehicle,
       currentLocation: user.currentLocation,
-      address: user.address
+      address: user.address,
+      verificationStatus: user.verificationStatus
     };
 
     return successResponse(res, { 

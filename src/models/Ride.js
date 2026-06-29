@@ -41,7 +41,7 @@ const rideSchema = new mongoose.Schema({
   // Historique conservant le type de vehicule pour la facturation ou les statistiques
   forfait: { 
     type: String, 
-    enum: ['ECHO', 'STANDARD', 'VIP'], 
+    enum: ['ECHO', 'ECO', 'STANDARD', 'PREMIUM', 'VIP'], 
     default: 'STANDARD' 
   },
 
@@ -59,7 +59,7 @@ const rideSchema = new mongoose.Schema({
   
   // Options de tarification pre-calculees par le moteur de prix
   priceOptions: [{
-    label: { type: String, enum: ['ECO', 'STANDARD', 'PREMIUM'] },
+    label: { type: String, enum: ['ECO', 'ECHO', 'STANDARD', 'PREMIUM', 'VIP'] },
     amount: { type: Number },
     description: { type: String }
   }],
