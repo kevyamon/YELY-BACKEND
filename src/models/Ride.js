@@ -45,13 +45,13 @@ const rideSchema = new mongoose.Schema({
     default: 'STANDARD' 
   },
 
-  // Capacite de transport (1 par defaut, 4 maximum)
+  // Capacite de transport (1 par defaut, 6 maximum)
   passengersCount: { 
     type: Number, 
     required: true, 
     default: 1, 
     min: [1, 'Il faut au moins 1 passager'], 
-    max: [4, 'Maximum 4 passagers autorises'] 
+    max: [6, 'Maximum 6 passagers autorises'] 
   },
 
   // Tarification et distance

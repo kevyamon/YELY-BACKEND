@@ -28,7 +28,7 @@ const requestRideSchema = z.object({
   passengersCount: z.number({ invalid_type_error: "Le nombre de passagers doit être un nombre." })
     .int("Le nombre de passagers doit être un entier.")
     .min(1, "Il faut au moins 1 passager pour la course.")
-    .max(4, "Le nombre maximum de passagers autorisés est de 4.")
+    .max(6, "Le nombre maximum de passagers autorisés est de 6.")
     .optional()
     .default(1)
 }); 
