@@ -70,11 +70,8 @@ const login = async (identifier, password, clientPlatform) => {
   if (user.isDeleted) throw new AppError('Ce compte a ete supprime et ne peut plus se connecter.', 403);
   if (user.isBanned) throw new AppError(`Compte suspendu: ${user.banReason}`, 403);
 
-  if (user.role === 'driver' && user.phone !== STORE_TESTER_PHONE) {
-    if (!clientPlatform || clientPlatform.toLowerCase() !== 'android') {
-      throw new AppError('DEVICE_NOT_SUPPORTED', 403);
-    }
-  }
+  // CORRECTION PWA DRIVER : Autoriser l'accès aux chauffeurs sur iOS/Web PWA.
+  // La sensibilisation est gérée par le composant PwaIOSWarningModal côté client sans bloquer le login.
 
   if (user.lockUntil && user.lockUntil > Date.now()) {
     const minutesLeft = Math.ceil((user.lockUntil - Date.now()) / 60000);
@@ -206,11 +203,7 @@ const validateSessionForRefresh = async (token, clientPlatform) => {
     if (user.isDeleted) throw new AppError('Session invalide, ce compte est supprime.', 403);
     if (user.isBanned) throw new AppError(`Session revoquee. Compte suspendu: ${user.banReason}`, 403);
     
-    if (user.role === 'driver' && user.phone !== STORE_TESTER_PHONE) {
-      if (!clientPlatform || clientPlatform.toLowerCase() !== 'android') {
-        throw new AppError('DEVICE_NOT_SUPPORTED', 403);
-      }
-    }
+    // CORRECTION PWA DRIVER : Autoriser le rafraîchissement de jeton pour les chauffeurs sur iOS/Web PWA.
     
     if (user.role === 'driver') {
       const settings = await Settings.findOne();

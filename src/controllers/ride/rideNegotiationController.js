@@ -20,6 +20,12 @@ const lockRide = async (req, res, next) => {
     const ride = await rideService.lockRideForNegotiation(rideId, req.user._id);
     const io = req.app.get('socketio');
  
+    // Fermer les modales des autres chauffeurs notifiés (Anti-doublons de commandes)
+    const otherNotifiedDrivers = (ride.notifiedDrivers || []).filter(id => id.toString() !== req.user._id.toString());
+    otherNotifiedDrivers.forEach(driverId => {
+      io.to(driverId.toString()).emit('ride_taken_by_other', { rideId: ride._id });
+    });
+ 
     // Récupérer le profil du passager pour le chauffeur
     const riderUser = await User.findById(ride.rider).select('name phone profilePicture');
 
@@ -89,6 +95,12 @@ const submitPrice = async (req, res, next) => {
 
     if (ride.type === 'DELIVERY') {
       const rider = await User.findById(ride.rider).select('name phone profilePicture');
+      
+      // Fermer les modales des autres chauffeurs notifiés pour cette livraison
+      const otherNotifiedDrivers = (ride.notifiedDrivers || []).filter(id => id.toString() !== req.user._id.toString());
+      otherNotifiedDrivers.forEach(driverId => {
+        io.to(driverId.toString()).emit('ride_taken_by_other', { rideId: ride._id });
+      });
       
       io.to(req.user._id.toString()).emit('proposal_accepted', {
         rideId: ride._id,

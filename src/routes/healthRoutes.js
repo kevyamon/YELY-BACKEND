@@ -187,4 +187,46 @@ router.get('/debug-find', async (req, res) => {
   }
 });
 
+// ROUTE DE DIAGNOSTIC D'ESTIMATION DE TARIFS
+router.get('/debug-estimate', async (req, res) => {
+  try {
+    const pickupLat = req.query.pickupLat || '5.4215';
+    const pickupLng = req.query.pickupLng || '-3.0285';
+    const dropoffLat = req.query.dropoffLat || '5.4028';
+    const dropoffLng = req.query.dropoffLng || '-3.0222';
+
+    const origin = [parseFloat(pickupLng), parseFloat(pickupLat)];
+    const destination = [parseFloat(dropoffLng), parseFloat(dropoffLat)];
+
+    const rideService = require('../services/ride/rideLifecycleService');
+    const pricingService = require('../services/pricingService');
+
+    const distance = await rideService.getRouteDistance(origin, destination);
+    const pricingResult = await pricingService.generatePriceOptions(
+      origin,
+      destination,
+      distance,
+      1,
+      false,
+      'sunny'
+    );
+
+    res.status(200).json({
+      success: true,
+      pickup: { lat: pickupLat, lng: pickupLng },
+      dropoff: { lat: dropoffLat, lng: dropoffLng },
+      origin,
+      destination,
+      distance,
+      pricingResult
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack
+    });
+  }
+});
+
 module.exports = router;

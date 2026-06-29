@@ -56,11 +56,19 @@ const cancelRide = async (req, res, next) => {
     const io = req.app.get('socketio');
     const ride = await rideService.cancelRideAction(rideId, req.user._id, req.user.role, reason, io);
 
-    if (req.user.role === 'rider' && ride.driver) {
-       io.to(ride.driver.toString()).emit('ride_cancelled', { rideId });
-       notificationService.sendNotification(
-         ride.driver, "Course annulée", "Le passager a annulé la demande.", "RIDE_CANCELLED", { rideId: rideId.toString() }
-       ).catch(() => {});
+    if (req.user.role === 'rider') {
+       const targetDrivers = ride.notifiedDrivers || [];
+       if (ride.driver && !targetDrivers.includes(ride.driver.toString())) {
+         targetDrivers.push(ride.driver);
+       }
+       targetDrivers.forEach(driverId => {
+         io.to(driverId.toString()).emit('ride_cancelled', { rideId, reason: 'Course annulée par le client' });
+       });
+       if (ride.driver) {
+         notificationService.sendNotification(
+           ride.driver, "Course annulée", "Le passager a annulé la demande.", "RIDE_CANCELLED", { rideId: rideId.toString() }
+         ).catch(() => {});
+       }
     } else if (req.user.role === 'driver') {
        io.to(ride.rider.toString()).emit('ride_cancelled', { rideId });
        notificationService.sendNotification(
