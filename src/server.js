@@ -223,6 +223,42 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('voice_call_request', (data) => {
+    if (data && data.targetUserId) {
+      io.to(data.targetUserId.toString()).emit('voice_call_received', {
+        callerId: user._id.toString(),
+        callerName: data.callerName,
+        callerAvatar: data.callerAvatar,
+        callerPhone: data.callerPhone,
+        rideId: data.rideId
+      });
+    }
+  });
+
+  socket.on('voice_call_accept', (data) => {
+    if (data && data.callerId) {
+      io.to(data.callerId.toString()).emit('voice_call_accepted', {
+        targetId: user._id.toString()
+      });
+    }
+  });
+
+  socket.on('voice_call_decline', (data) => {
+    if (data && data.callerId) {
+      io.to(data.callerId.toString()).emit('voice_call_declined', {
+        targetId: user._id.toString()
+      });
+    }
+  });
+
+  socket.on('voice_call_hangup', (data) => {
+    if (data && data.targetUserId) {
+      io.to(data.targetUserId.toString()).emit('voice_call_ended', {
+        endedBy: user._id.toString()
+      });
+    }
+  });
+
   socket.on('disconnect', async () => {
     if (user.role === 'driver') {
       await redis.zrem('active_drivers', user._id.toString());

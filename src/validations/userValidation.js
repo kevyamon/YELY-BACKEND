@@ -23,6 +23,11 @@ const updateProfileSchema = z.object({
     .trim()
     .optional(),
 
+  vehicle: z.object({
+    model: z.string().max(100).optional(),
+    plate: z.string().max(50).optional(),
+  }).optional(),
+
   hasFollowedFB: z.boolean().optional()
 }).strict().refine(data => Object.keys(data).length > 0, {
   message: "Vous devez modifier au moins une information pour mettre a jour votre profil."
