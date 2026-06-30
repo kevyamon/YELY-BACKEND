@@ -51,6 +51,7 @@ const lockRide = async (req, res, next) => {
     const driverPayload = {
       rideId: ride._id,
       status: 'accepted',
+      riderId: ride.rider,
       riderName: riderUser?.name || 'Passager',
       riderPhone: riderUser?.phone,
       riderProfilePicture: riderUser?.profilePicture,
@@ -196,6 +197,7 @@ const finalizeRide = async (req, res, next) => {
 
       io.to(driver._id.toString()).emit('proposal_accepted', {
         rideId: result.ride._id,
+        riderId: req.user._id,
         riderName: req.user.name,
         riderPhone: req.user.phone,
         riderProfilePicture: req.user.profilePicture, 

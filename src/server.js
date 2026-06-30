@@ -259,6 +259,34 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Relay for WebRTC Signaling
+  socket.on('webrtc_offer', (data) => {
+    if (data && data.targetUserId) {
+      io.to(data.targetUserId.toString()).emit('webrtc_offer', {
+        callerId: user._id.toString(),
+        sdp: data.sdp
+      });
+    }
+  });
+
+  socket.on('webrtc_answer', (data) => {
+    if (data && data.targetUserId) {
+      io.to(data.targetUserId.toString()).emit('webrtc_answer', {
+        callerId: user._id.toString(),
+        sdp: data.sdp
+      });
+    }
+  });
+
+  socket.on('webrtc_ice_candidate', (data) => {
+    if (data && data.targetUserId) {
+      io.to(data.targetUserId.toString()).emit('webrtc_ice_candidate', {
+        callerId: user._id.toString(),
+        candidate: data.candidate
+      });
+    }
+  });
+
   socket.on('disconnect', async () => {
     if (user.role === 'driver') {
       await redis.zrem('active_drivers', user._id.toString());
