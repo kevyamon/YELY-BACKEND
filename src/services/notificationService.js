@@ -36,6 +36,19 @@ exports.sendNotification = async (userId, title, body, type = 'GENERAL', data = 
           title: title,
           body: body,
         },
+        android: {
+          notification: {
+            sound: 'push.wav',
+            channelId: 'default',
+          }
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: 'push.wav',
+            }
+          }
+        },
         data: {
           ...data,
           type,
