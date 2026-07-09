@@ -155,8 +155,8 @@ const generatePriceOptions = async (originCoords, destCoords, distanceKm, passen
   const rawSingleEco = (200 + 100 * distanceKm) * timeMult * weatherMult;
   // Arrondi aux 50 FCFA les plus proches et capping entre 200 et 500 FCFA pour une seule place
   const singleEcoPrice = Math.max(200, Math.min(500, Math.round(rawSingleEco / 50) * 50));
-  // Ajout des places supplémentaires avec incrément dégressif fixé à 150 FCFA par personne additionnelle
-  const ecoPrice = singleEcoPrice + (count - 1) * 150;
+  // Tarif proportionnel strict : chaque place paie son prix unitaire complet (équitable pour le chauffeur)
+  const ecoPrice = singleEcoPrice * count;
 
   // 5. Calcul du forfait VIP (Privé - Solo)
   const hours = date.getUTCHours();

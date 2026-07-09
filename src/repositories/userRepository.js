@@ -7,6 +7,27 @@ const Settings = require('../models/Settings');
 const logger = require('../config/logger');
 const redisClient = require('../config/redis');
 
+const calculateHaversineDistance = (coords1, coords2) => {
+  const lon1 = coords1[0];
+  const lat1 = coords1[1];
+  const lon2 = coords2[0];
+  const lat2 = coords2[1];
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+const VEHICLE_CAPACITIES = {
+  apsonic: 6,
+  tvs: 4,
+  salonie: 4
+};
+
 const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait, rejectedDriverIds = [], missionType = 'RIDE', passengersCount = 1) => {
   const safeLng = Number(coordinates[0]);
   const safeLat = Number(coordinates[1]);
@@ -54,10 +75,19 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
 
   const query = {
     role: 'driver',
-    isAvailable: true,
     isBanned: false,
     verificationStatus: 'approved' // Uniquement les chauffeurs approuvés par l'administration
   };
+
+  // Pooling intelligent: Si la course demandée est ECO, on inclut aussi les chauffeurs occupés (isAvailable: false)
+  if (missionType === 'RIDE' && forfait === 'ECO') {
+    query.$or = [
+      { isAvailable: true },
+      { isAvailable: false }
+    ];
+  } else {
+    query.isAvailable = true;
+  }
 
   if (!isGlobalFreeAccess) {
     query['subscription.isActive'] = true;
@@ -104,23 +134,19 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
       
       drivers = await User.find(query)
         .select('name phone vehicle currentLocation rating isAvailable')
-        .limit(10)
+        .limit(30) // Augmenté pour permettre le filtrage asynchrone du pooling
         .lean()
         .exec();
 
       const sortedDrivers = driverIds
         .map(id => drivers.find(d => d._id.toString() === id))
-        .filter(d => d !== undefined)
-        .slice(0, 10);
-
-      logger.info(`[DAO-USER] MongoDB a valide ${sortedDrivers.length}/${drivers.length} chauffeurs.`);
-      return sortedDrivers;
+        .filter(d => d !== undefined);
+      
+      drivers = sortedDrivers;
     } else {
       logger.info(`[DAO-USER] Aucun ID trouve par Redis ou geosearch desactive. Repli sur $nearSphere MongoDB...`);
       logger.info(`[DAO-USER] Query repli MongoDB: ${JSON.stringify(query)}`);
       // 3. FALLBACK MONGODB GEOSPATIAL (Si Redis a échoué ou ne renvoie rien)
-      logger.info(`[DAO-USER] Repli sur la recherche géospatiale MongoDB ($nearSphere)...`);
-      
       query.currentLocation = {
         $nearSphere: {
           $geometry: {
@@ -133,13 +159,74 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
 
       drivers = await User.find(query)
         .select('name phone vehicle currentLocation rating isAvailable')
-        .limit(10)
+        .limit(30)
         .lean()
         .exec();
-
-      logger.info(`[DAO-USER] Recherche géospatiale MongoDB a trouvé ${drivers.length} chauffeurs.`);
-      return drivers;
     }
+
+    // --- FILTRAGE DE POOLING INTELLIGENT COVOITURAGE ---
+    const Ride = require('../models/Ride');
+    const filteredDrivers = [];
+
+    for (const driver of drivers) {
+      if (driver.isAvailable) {
+        filteredDrivers.push(driver);
+        if (filteredDrivers.length >= 10) break;
+        continue;
+      }
+
+      // Si le chauffeur est occupé, vérifier l'éligibilité au pooling ECO
+      if (missionType === 'RIDE' && forfait === 'ECO') {
+        try {
+          const activeRides = await Ride.find({
+            driver: driver._id,
+            status: { $in: ['accepted', 'arrived', 'in_progress'] }
+          });
+
+          // 1. Pas de pooling si le chauffeur a une course VIP ou livraison
+          const hasVipOrDelivery = activeRides.some(r => r.forfait === 'VIP' || r.type === 'DELIVERY');
+          if (hasVipOrDelivery) continue;
+
+          // 2. Vérifier la capacité en sièges restants
+          const currentPassengers = activeRides.reduce((sum, r) => sum + (r.passengersCount || 1), 0);
+          const vehicleType = driver.vehicle?.type || 'tvs';
+          const vehicleCapacity = VEHICLE_CAPACITIES[vehicleType] || 4;
+          const remainingSeats = vehicleCapacity - currentPassengers;
+
+          if (remainingSeats < Number(passengersCount)) {
+            continue; // Pas assez de places
+          }
+
+          // 3. Calcul du détour routier (Doit être dans la même direction / destination alignée)
+          if (activeRides.length > 0) {
+            const firstActiveRide = activeRides[0];
+            const driverCoords = driver.currentLocation?.coordinates;
+            const newPickupCoords = coordinates;
+            const activeDestCoords = firstActiveRide.destination?.coordinates;
+
+            if (driverCoords && newPickupCoords && activeDestCoords) {
+              const dDirect = calculateHaversineDistance(driverCoords, activeDestCoords);
+              const dCombined = calculateHaversineDistance(driverCoords, newPickupCoords) + 
+                                calculateHaversineDistance(newPickupCoords, activeDestCoords);
+
+              // Max 35% de détour
+              if (dDirect > 0.05 && (dCombined / dDirect) > 1.35) {
+                continue;
+              }
+            }
+          }
+
+          filteredDrivers.push(driver);
+          if (filteredDrivers.length >= 10) break;
+        } catch (poolErr) {
+          logger.error(`[DAO-USER] Echec verification pooling pour ${driver._id}: ${poolErr.message}`);
+        }
+      }
+    }
+
+    logger.info(`[DAO-USER] MongoDB a valide ${filteredDrivers.length} chauffeurs apres filtrage de pooling.`);
+    return filteredDrivers;
+
   } catch (error) {
     logger.error(`[DAO-USER] Erreur Pivot Redis/DB ou Fallback MongoDB : ${error.message}`);
     return [];

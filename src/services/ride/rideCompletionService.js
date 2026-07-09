@@ -51,7 +51,18 @@ const completeRideSession = async (driverId, rideId, io) => {
       ride.completedAt = new Date();
       await ride.save({ session });
       
-      await userRepository.updateDriverAvailability(driverId, true, session);
+      // Pooling check : ne repasser disponible que si aucune autre course active n'existe
+      const otherActiveRides = await Ride.findOne({
+        driver: driverId,
+        _id: { $ne: rideId },
+        status: { $in: ['accepted', 'arrived', 'in_progress'] }
+      }).session(session);
+
+      if (!otherActiveRides) {
+        await userRepository.updateDriverAvailability(driverId, true, session);
+      } else {
+        logger.info(`[POOLING] Chauffeur ${driverId} reste indisponible car il a d'autres courses actives.`);
+      }
       
       await User.findByIdAndUpdate(driverId, {
         $inc: { 

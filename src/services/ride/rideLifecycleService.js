@@ -128,7 +128,16 @@ const cancelRideAction = async (rideId, userId, userRole, reason, io = null) => 
   await ride.save();
 
   if (ride.driver) {
-    await userRepository.updateDriverAvailability(ride.driver, true);
+    const otherActiveRides = await Ride.findOne({
+      driver: ride.driver,
+      _id: { $ne: rideId },
+      status: { $in: ['accepted', 'arrived', 'in_progress'] }
+    });
+    if (!otherActiveRides) {
+      await userRepository.updateDriverAvailability(ride.driver, true);
+    } else {
+      logger.info(`[POOLING] Chauffeur ${ride.driver} reste indisponible après annulation car il a d'autres courses actives.`);
+    }
   }
 
   if (ride.type === 'DELIVERY' && ride.orderId) {
