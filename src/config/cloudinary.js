@@ -61,14 +61,13 @@ const multiCloudinary = {
       for (let i = currentActiveIndex; i < configs.length; i++) {
         const config = configs[i];
         try {
-          cloudinary.config({
+          const result = await cloudinary.uploader.upload(file, {
+            ...options,
             cloud_name: config.cloud_name,
             api_key: config.api_key,
             api_secret: config.api_secret,
             secure: true
           });
-
-          const result = await cloudinary.uploader.upload(file, options);
           
           // Inject the active cloud name in the result for tracking/debugging
           result.cloud_name = config.cloud_name;
@@ -94,14 +93,13 @@ const multiCloudinary = {
         for (let i = 0; i < currentActiveIndex; i++) {
           const config = configs[i];
           try {
-            cloudinary.config({
+            const result = await cloudinary.uploader.upload(file, {
+              ...options,
               cloud_name: config.cloud_name,
               api_key: config.api_key,
               api_secret: config.api_secret,
               secure: true
             });
-
-            const result = await cloudinary.uploader.upload(file, options);
             result.cloud_name = config.cloud_name;
             currentActiveIndex = i; // Reset permanent vers cette instance libérée
             logger.info(`[CLOUDINARY] Smart Cursor re-positionne vers l'instance #${config.index} (${config.cloud_name})`);
@@ -122,14 +120,13 @@ const multiCloudinary = {
       // We attempt to delete it on ALL configured accounts to ensure complete clean up
       for (const config of configs) {
         try {
-          cloudinary.config({
+          const result = await cloudinary.uploader.destroy(publicId, {
+            ...options,
             cloud_name: config.cloud_name,
             api_key: config.api_key,
             api_secret: config.api_secret,
             secure: true
           });
-
-          const result = await cloudinary.uploader.destroy(publicId, options);
           lastResult = result;
         } catch (err) {
           errors.push(`${config.cloud_name}: ${err.message}`);
