@@ -11,6 +11,7 @@ const redisClient = require('../config/redis');
 const { 
   registerUser, 
   loginUser, 
+  googleAuth,
   logoutUser, 
   forgotPassword,
   resetPassword,
@@ -65,6 +66,7 @@ const forgotPasswordLimiter = createAuthLimiter(3, 60, 'rl_forgot:');
 // ROUTES (Double bouclier : authLimiter protège l'IP, tes limiters protègent l'identifiant)
 router.post('/register', authLimiter, registerLimiter, validate(registerSchema), registerUser);
 router.post('/login', authLimiter, loginLimiter, validate(loginSchema), loginUser);
+router.post('/google', authLimiter, googleAuth);
 
 router.post('/forgot-password', authLimiter, forgotPasswordLimiter, validate(forgotPasswordSchema), forgotPassword);
 router.post('/reset-password', authLimiter, validate(resetPasswordSchema), resetPassword);

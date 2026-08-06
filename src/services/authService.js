@@ -260,9 +260,32 @@ const updateAvailability = async (userId, isAvailable) => {
   return updatedUser;
 };
 
+const loginWithGoogle = async ({ email, name, profilePicture, role = 'rider' }) => {
+  if (!email) throw new AppError('Email introuvable dans les données Google.', 400);
+
+  let user = await User.findOne({ email: email.toLowerCase().trim(), isDeleted: { $ne: true } });
+
+  if (!user) {
+    const randomPass = crypto.randomBytes(16).toString('hex');
+    user = await User.create({
+      name: name || 'Utilisateur Google',
+      email: email.toLowerCase().trim(),
+      profilePicture: profilePicture || '',
+      role: role || 'rider',
+      password: randomPass
+    });
+  }
+
+  if (user.isDeleted) throw new AppError('Ce compte a été supprimé.', 403);
+  if (user.isBanned) throw new AppError(`Ce compte est suspendu: ${user.banReason}`, 403);
+
+  return user;
+};
+
 module.exports = {
   register,
   login,
+  loginWithGoogle,
   forgotPassword,
   resetPasswordWithOtp,
   validateSessionForRefresh, 

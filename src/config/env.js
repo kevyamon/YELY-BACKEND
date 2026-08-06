@@ -42,6 +42,8 @@ const envSchema = z.object({
     return strippedKey.replace(/\\n/g, '\n');
   }),
 
+  GOOGLE_CLIENT_ID: z.string().optional().default('874118617681-i438m7c4ti48b584o6u00omffvckhphd.apps.googleusercontent.com'),
+
   BCRYPT_ROUNDS: z.string().transform(Number).optional(),
 
   SENTRY_DSN: z.string().url('SENTRY_DSN doit etre une URL valide').optional(),

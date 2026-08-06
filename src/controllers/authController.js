@@ -201,9 +201,53 @@ const updateFcmToken = async (req, res, next) => {
   }
 };
 
+const googleAuth = async (req, res, next) => {
+  try {
+    const { email, name, profilePicture, role } = req.body;
+    if (!email) {
+      throw new AppError("Email requis pour la connexion Google.", 400);
+    }
+
+    const user = await authService.loginWithGoogle({ email, name, profilePicture, role });
+
+    const accessToken = generateAccessToken(user._id.toString(), user.role);
+    const refreshTokenStr = generateRefreshToken(user._id.toString());
+
+    setRefreshTokenCookie(res, refreshTokenStr);
+
+    const userData = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone || '',
+      profilePicture: user.profilePicture || '',
+      role: user.role,
+      isAvailable: user.isAvailable,
+      rating: user.rating,
+      totalRides: user.totalRides,
+      totalEarnings: user.totalEarnings,
+      subscription: user.subscription,
+      vehicle: user.vehicle,
+      currentLocation: user.currentLocation,
+      address: user.address,
+      verificationStatus: user.verificationStatus
+    };
+
+    return successResponse(res, { 
+      user: userData, 
+      accessToken, 
+      refreshToken: refreshTokenStr 
+    }, 'Connexion Google réussie', 200);
+
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
+  googleAuth,
   logoutUser,
   forgotPassword,
   resetPassword,
