@@ -201,14 +201,45 @@ const updateFcmToken = async (req, res, next) => {
   }
 };
 
+const { OAuth2Client } = require('google-auth-library');
+const googleClient = new OAuth2Client();
+
 const googleAuth = async (req, res, next) => {
   try {
-    const { email, name, profilePicture, role } = req.body;
-    if (!email) {
+    const { idToken, email, name, profilePicture, role } = req.body;
+    let userPayload = { email, name, profilePicture, role };
+
+    if (idToken) {
+      try {
+        const ticket = await googleClient.verifyIdToken({
+          idToken,
+          audience: [
+            process.env.GOOGLE_WEB_CLIENT_ID,
+            process.env.GOOGLE_ANDROID_CLIENT_ID,
+            process.env.GOOGLE_IOS_CLIENT_ID
+          ].filter(Boolean)
+        });
+        const payload = ticket.getPayload();
+        if (payload) {
+          userPayload = {
+            email: payload.email,
+            name: payload.name || payload.given_name || 'Utilisateur Google',
+            profilePicture: payload.picture || profilePicture || '',
+            role: role || 'rider'
+          };
+        }
+      } catch (err) {
+        if (!email) {
+          throw new AppError("Jeton Google invalide ou expiré.", 401);
+        }
+      }
+    }
+
+    if (!userPayload.email) {
       throw new AppError("Email requis pour la connexion Google.", 400);
     }
 
-    const user = await authService.loginWithGoogle({ email, name, profilePicture, role });
+    const user = await authService.loginWithGoogle(userPayload);
 
     const accessToken = generateAccessToken(user._id.toString(), user.role);
     const refreshTokenStr = generateRefreshToken(user._id.toString());

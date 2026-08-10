@@ -126,8 +126,32 @@ app.use(mongoSanitize({
 }));
 app.use(sanitizationMiddleware);
 
-// Route de base
+// Route de base (avec pont de redirection natif pour Google OAuth mobile)
 app.get('/', (req, res) => {
+  const code = req.query.code || '';
+  const token = req.query.access_token || req.query.id_token || '';
+  
+  if (code || token) {
+    const targetUrl = `yely://google-auth?code=${encodeURIComponent(code)}&token=${encodeURIComponent(token)}`;
+    return res.status(200).send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Redirection Yély...</title>
+          <script>
+            window.location.href = "${targetUrl}";
+          </script>
+        </head>
+        <body style="background:#0A0C10;color:#D4AF37;display:flex;flex-direction:column;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0;">
+          <h2 style="margin-bottom:10px;">Connexion Yély réussie !</h2>
+          <p style="color:rgba(255,255,255,0.7);font-size:14px;">Redirection vers l'application en cours...</p>
+          <a href="${targetUrl}" style="margin-top:20px;padding:12px 24px;background:#D4AF37;color:#121418;text-decoration:none;border-radius:20px;font-weight:bold;">Ouvrir Yély</a>
+        </body>
+      </html>
+    `);
+  }
+  
   res.status(200).send('Yely API (Iron Dome) is running');
 });
 
