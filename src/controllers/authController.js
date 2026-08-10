@@ -204,6 +204,8 @@ const updateFcmToken = async (req, res, next) => {
 const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client();
 
+const DEFAULT_WEB_CLIENT_ID = '874118617681-i438m7c4ti48b584o6u00omffvckhphd.apps.googleusercontent.com';
+
 const googleAuth = async (req, res, next) => {
   try {
     const { idToken, email, name, profilePicture, role } = req.body;
@@ -211,13 +213,17 @@ const googleAuth = async (req, res, next) => {
 
     if (idToken) {
       try {
+        const allowedAudiences = Array.from(new Set([
+          DEFAULT_WEB_CLIENT_ID,
+          process.env.GOOGLE_WEB_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_ANDROID_CLIENT_ID,
+          process.env.GOOGLE_IOS_CLIENT_ID
+        ].filter(Boolean)));
+
         const ticket = await googleClient.verifyIdToken({
           idToken,
-          audience: [
-            process.env.GOOGLE_WEB_CLIENT_ID,
-            process.env.GOOGLE_ANDROID_CLIENT_ID,
-            process.env.GOOGLE_IOS_CLIENT_ID
-          ].filter(Boolean)
+          audience: allowedAudiences
         });
         const payload = ticket.getPayload();
         if (payload) {
@@ -229,6 +235,7 @@ const googleAuth = async (req, res, next) => {
           };
         }
       } catch (err) {
+        console.warn("[GoogleAuth] verifyIdToken warning:", err.message);
         if (!email) {
           throw new AppError("Jeton Google invalide ou expiré.", 401);
         }
