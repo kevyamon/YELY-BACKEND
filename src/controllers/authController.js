@@ -208,8 +208,8 @@ const DEFAULT_WEB_CLIENT_ID = '874118617681-i438m7c4ti48b584o6u00omffvckhphd.app
 
 const googleAuth = async (req, res, next) => {
   try {
-    const { idToken, email, name, profilePicture, role } = req.body;
-    let userPayload = { email, name, profilePicture, role };
+    const { idToken, email, name, profilePicture, role, isLoginOnly } = req.body;
+    let userPayload = { email, name, profilePicture, role, isLoginOnly };
 
     if (idToken) {
       try {
@@ -231,7 +231,8 @@ const googleAuth = async (req, res, next) => {
             email: payload.email,
             name: payload.name || payload.given_name || 'Utilisateur Google',
             profilePicture: payload.picture || profilePicture || '',
-            role: role || 'rider'
+            role: role || 'rider',
+            isLoginOnly
           };
         }
       } catch (err) {

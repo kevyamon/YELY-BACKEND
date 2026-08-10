@@ -206,13 +206,16 @@ const updateAvailability = async (userId, isAvailable) => {
   return await User.findByIdAndUpdate(userId, { isAvailable }, { new: true, runValidators: false });
 };
 
-const loginWithGoogle = async ({ email, name, profilePicture, role = 'rider' }) => {
+const loginWithGoogle = async ({ email, name, profilePicture, role = 'rider', isLoginOnly = false }) => {
   if (!email) throw new AppError('Email introuvable dans les données Google.', 400);
 
   const normalizedEmail = email.toLowerCase().trim();
   let user = await User.findOne({ email: normalizedEmail, isDeleted: { $ne: true } });
 
   if (!user) {
+    if (isLoginOnly) {
+      throw new AppError(`Aucun compte Yély n'est associé à l'adresse e-mail ${normalizedEmail}. Veuillez d'abord cliquer sur "Créer un compte".`, 404);
+    }
     const randomPass = crypto.randomBytes(16).toString('hex');
     user = await User.create({
       name: name || 'Utilisateur Google',
