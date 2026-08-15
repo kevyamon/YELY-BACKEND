@@ -48,6 +48,16 @@ const ledgerSchema = new mongoose.Schema({
 // Index composite pour retrouver rapidement les dettes entre un livreur et un vendeur spécifique
 ledgerSchema.index({ driver: 1, seller: 1, status: 1 });
 
+// INDEX TTL PARTIEL : Suppression automatique des dettes réglées après 60 jours (5184000 secondes) pour préserver le stockage de 500Mo
+ledgerSchema.index(
+  { updatedAt: 1 },
+  { 
+    expireAfterSeconds: 5184000, 
+    partialFilterExpression: { status: 'cleared' },
+    name: "resolved_ledger_ttl"
+  }
+);
+
 const Ledger = mongoose.models.Ledger || mongoose.model('Ledger', ledgerSchema);
 
 module.exports = Ledger;

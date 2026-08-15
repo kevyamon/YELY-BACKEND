@@ -5,6 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
+const adminReportController = require('../controllers/adminReportController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const validate = require('../middleware/validationMiddleware');
 const { 
@@ -17,6 +18,8 @@ const {
 } = require('../validations/adminValidation');
 
 const adminSubscriptionsController = require('../controllers/adminSubscriptionsController');
+
+router.get('/reports/operational', protect, authorize('admin', 'superadmin'), adminReportController.generateOperationalReport);
 
 router.get('/stats', protect, authorize('admin', 'superadmin'), adminController.getDashboardStats);
 router.get('/users', protect, authorize('admin', 'superadmin'), adminController.getAllUsers);

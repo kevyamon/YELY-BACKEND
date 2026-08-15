@@ -130,4 +130,13 @@ rideSchema.index(
   }
 );
 
+// INDEX TTL COMPLET : Suppression automatique de toutes les courses (complétées ou autres) après 1 an (31536000 secondes) pour préserver le stockage MongoDB de 500Mo
+rideSchema.index(
+  { createdAt: 1 },
+  {
+    expireAfterSeconds: 31536000,
+    name: "general_ride_ttl"
+  }
+);
+
 module.exports = mongoose.model('Ride', rideSchema);

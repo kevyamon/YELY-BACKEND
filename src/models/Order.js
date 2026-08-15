@@ -122,6 +122,15 @@ orderSchema.index(
   }
 );
 
+// INDEX TTL COMPLET : Suppression automatique de toutes les commandes (livrées ou autres) après 1 an (31536000 secondes) pour préserver le stockage MongoDB de 500Mo
+orderSchema.index(
+  { createdAt: 1 },
+  {
+    expireAfterSeconds: 31536000,
+    name: "general_order_ttl"
+  }
+);
+
 const Order = mongoose.models.Order || mongoose.model('Order', orderSchema);
 
 module.exports = Order;
