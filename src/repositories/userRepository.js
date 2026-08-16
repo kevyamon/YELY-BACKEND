@@ -164,6 +164,21 @@ const findAvailableDriversNear = async (coordinates, maxDistanceMeters, forfait,
         .exec();
     }
 
+    // IMMUNITÉ DÉMO GOOGLE PLAY : Si aucun chauffeur n'est trouvé dans le rayon GPS (ex: test depuis les US/Europe),
+    // injecter automatiquement les chauffeurs démo immunisés pour permettre le test de réservation.
+    if (!drivers || drivers.length === 0) {
+      const DEMO_PHONES = ['0100000001', '0100000002', '0100000003', '+2250100000001', '+2250100000002', '+2250100000003'];
+      const demoDrivers = await User.find({
+        phone: { $in: DEMO_PHONES },
+        role: 'driver'
+      }).select('name phone vehicle currentLocation rating isAvailable').lean().exec();
+      
+      if (demoDrivers && demoDrivers.length > 0) {
+        logger.info(`[DAO-USER] Immunité Démo Google Play: ${demoDrivers.length} chauffeur(s) démo injecté(s) pour la recherche.`);
+        drivers = demoDrivers;
+      }
+    }
+
     // --- FILTRAGE DE POOLING INTELLIGENT COVOITURAGE ---
     const Ride = require('../models/Ride');
     const filteredDrivers = [];

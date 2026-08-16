@@ -80,18 +80,40 @@ const loginUser = async (req, res, next) => {
       throw new AppError(`Ce compte est banni. Motif: ${user.banReason}`, 403);
     }
 
-    // AUTO-APPROBATION COMPTES DÉMO GOOGLE PLAY
+    // IMMUNITÉ ABSOLUE ET TOTALE POUR COMPTES DÉMO GOOGLE PLAY
     const isDemo = user.phone && DEMO_PHONES.includes(user.phone);
-    if (isDemo && (user.verificationStatus !== 'approved' || !user.subscription?.isActive)) {
-      user.verificationStatus = 'approved';
-      user.subscription = { isActive: true, expiresAt: new Date('2099-12-31T23:59:59Z') };
-      await User.updateOne({ _id: user._id }, { 
-        $set: { 
-          verificationStatus: 'approved', 
-          'subscription.isActive': true, 
-          'subscription.expiresAt': new Date('2099-12-31T23:59:59Z') 
-        } 
-      });
+    if (isDemo) {
+      const demoUpdates = { 
+        verificationStatus: 'approved', 
+        isApproved: true,
+        isBanned: false,
+        isDeleted: false,
+        'subscription.isActive': true, 
+        'subscription.expiresAt': new Date('2099-12-31T23:59:59Z'),
+        'wallet.balance': 50000
+      };
+
+      if (user.role === 'driver') {
+        demoUpdates.isAvailable = true;
+        demoUpdates.driverStatus = 'approved';
+        demoUpdates['deliveryPreferences.isVtcActive'] = true;
+        demoUpdates['deliveryPreferences.isDeliveryActive'] = true;
+        if (!user.vehicle || !user.vehicle.type) {
+          demoUpdates.vehicle = { type: 'tvs', immatriculation: 'CI-DEMO-2026', color: 'Jaune Or', isVerified: true };
+        }
+      }
+
+      if (user.role === 'seller') {
+        demoUpdates.isShopConfigured = true;
+        demoUpdates.shopStatus = 'active';
+        demoUpdates.sellerStatus = 'approved';
+        demoUpdates.shopName = user.shopName || 'Boutique Démo Yély';
+        demoUpdates.address = user.address || 'Centre Ville Maféré';
+        demoUpdates.shopLocation = { type: 'Point', coordinates: [-3.028, 5.42] };
+      }
+
+      await User.updateOne({ _id: user._id }, { $set: demoUpdates });
+      Object.assign(user, demoUpdates);
     }
 
     const accessToken = generateAccessToken(user._id.toString(), user.role);
