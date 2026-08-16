@@ -23,7 +23,7 @@ const protect = async (req, res, next) => {
       token = req.query.token;
     }
 
-    if (!token) {
+    if (!token || token === 'undefined' || token === 'null') {
       throw new AppError('Vous n\'êtes pas connecté. Veuillez vous connecter.', 401);
     }
 
