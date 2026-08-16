@@ -461,7 +461,7 @@ exports.generateOperationalReport = async (req, res, next) => {
     </table>
 
     <footer>
-      <p>© ${currentYear} Yély Inc. Tous droits réservés.</p>
+      <p>© ${year} Yély Inc. Tous droits réservés.</p>
       <p>Document officiel certifié conforme pour l'administration fiscale.</p>
     </footer>
 
