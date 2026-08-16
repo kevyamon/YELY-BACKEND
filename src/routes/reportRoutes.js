@@ -5,6 +5,9 @@ const reportController = require('../controllers/reportController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const { uploadReportCaptures, validateFileSignature } = require('../middleware/uploadMiddleware');
 
+// ROUTE PUBLIQUE TÉLÉMÉTRIE CRASH (Accessible même hors session)
+router.post('/crash', reportController.submitCrashReport);
+
 router.use(protect);
 router.post('/submit', uploadReportCaptures, validateFileSignature, reportController.submitReport);
 router.get('/my-reports', reportController.getMyReports);

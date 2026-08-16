@@ -149,4 +149,36 @@ const deleteMyReport = async (req, res) => {
   }
 };
 
-module.exports = { submitReport, getMyReports, getAllReports, resolveReport, deleteReport, deleteMyReport };
+const submitCrashReport = async (req, res) => {
+  try {
+    const { sendCrashReportEmail } = require('../utils/emailService');
+    const { errorName, errorMessage, errorStack, componentStack, user, device, timestamp } = req.body;
+    
+    // Transmission asynchrone sécurisée par Brevo
+    sendCrashReportEmail({
+      errorName: String(errorName || 'Erreur Runtime').slice(0, 150),
+      errorMessage: String(errorMessage || 'Erreur inattendue').slice(0, 500),
+      errorStack: String(errorStack || 'Non disponible').slice(0, 4000),
+      componentStack: String(componentStack || 'Non disponible').slice(0, 2000),
+      user: {
+        id: user?.id || user?._id || 'Anonyme',
+        name: user?.name || 'Visiteur',
+        phone: user?.phone || 'Non renseigné',
+        role: user?.role || 'visiteur'
+      },
+      device: {
+        os: device?.os || 'Mobile',
+        osVersion: device?.osVersion || '',
+        model: device?.model || 'Device',
+        appVersion: device?.appVersion || '1.6.0'
+      },
+      timestamp: timestamp || new Date().toISOString()
+    }).catch(err => console.error('[CRASH EMAIL ASYNC ERROR]:', err));
+
+    return successResponse(res, { received: true }, 'Rapport de crash reçu et transmis à l\'équipe d\'ingénierie.', 200);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+module.exports = { submitReport, getMyReports, getAllReports, resolveReport, deleteReport, deleteMyReport, submitCrashReport };

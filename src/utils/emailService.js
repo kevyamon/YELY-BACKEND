@@ -76,7 +76,7 @@ const sendOtpEmail = async (to, otp) => {
 
 const sendAdminAlert = async (subject, textContent) => {
   try {
-    const adminEmail = process.env.ADMIN_EMAIL;
+    const adminEmail = process.env.ADMIN_EMAIL || "yelyinfos@gmail.com";
     
     if (!adminEmail) {
       console.warn("[EMAIL WARN] ADMIN_EMAIL non defini. Alerte non envoyee.");
@@ -86,7 +86,7 @@ const sendAdminAlert = async (subject, textContent) => {
     await axios.post(
       'https://api.brevo.com/v3/smtp/email',
       {
-        sender: { email: process.env.EMAIL_FROM, name: "Yely System Alert" },
+        sender: { email: process.env.EMAIL_FROM || "noreply@yely.app", name: "Yely System Alert" },
         to: [{ email: adminEmail }],
         subject: `ALERTE SYSTEME : ${subject}`,
         textContent: textContent
@@ -107,4 +107,124 @@ const sendAdminAlert = async (subject, textContent) => {
   }
 };
 
-module.exports = { sendOtpEmail, sendAdminAlert };
+const sendCrashReportEmail = async (reportData) => {
+  const adminEmail = process.env.ADMIN_EMAIL || "yelyinfos@gmail.com";
+  const {
+    errorName = "Erreur Inconnue",
+    errorMessage = "Aucun message spécifié",
+    errorStack = "Non disponible",
+    componentStack = "Non disponible",
+    user = {},
+    device = {},
+    timestamp = new Date().toISOString()
+  } = reportData;
+
+  const dateFormatted = new Date(timestamp).toLocaleString('fr-FR', {
+    timeZone: 'Africa/Abidjan',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { margin: 0; padding: 0; background-color: #0A0A0A; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #FFFFFF; }
+        .container { max-width: 650px; margin: 30px auto; background-color: #141414; border-radius: 16px; border: 1px solid #2A2A2A; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
+        .header { background: linear-gradient(135deg, #1F1B0E 0%, #000000 100%); padding: 25px 30px; border-bottom: 2px solid #D4AF37; }
+        .badge { display: inline-block; background-color: #C0392B; color: #FFFFFF; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+        .title { margin: 0; font-size: 20px; font-weight: 800; color: #FFFFFF; }
+        .time { font-size: 12px; color: #888888; margin-top: 6px; }
+        .content { padding: 25px 30px; }
+        .section-card { background-color: #1A1A1A; border-radius: 12px; padding: 18px; margin-bottom: 20px; border: 1px solid #333333; }
+        .section-title { font-size: 13px; font-weight: 800; color: #D4AF37; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border-bottom: 1px solid #282828; padding-bottom: 6px; }
+        .row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
+        .label { color: #888888; }
+        .val { color: #FFFFFF; font-weight: 600; text-align: right; }
+        .error-box { background-color: rgba(192, 57, 43, 0.15); border: 1px solid #C0392B; border-radius: 10px; padding: 14px; margin-bottom: 20px; }
+        .error-title { color: #E74C3C; font-weight: 800; font-size: 14px; margin-bottom: 4px; }
+        .error-msg { color: #FADBD8; font-size: 13px; line-height: 18px; margin: 0; word-break: break-word; }
+        .stack-box { background-color: #050505; border-radius: 8px; padding: 14px; border: 1px solid #222222; font-family: Monaco, Consolas, 'Courier New', monospace; font-size: 11px; color: #7F8C8D; overflow-x: auto; white-space: pre-wrap; line-height: 16px; max-height: 250px; }
+        .footer { background-color: #0A0A0A; padding: 18px 30px; text-align: center; border-top: 1px solid #222222; font-size: 11px; color: #555555; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <div class="badge">Alerte Critique Mobile</div>
+          <h1 class="title">Rapport de Crash Application Yély</h1>
+          <div class="time">Date de survenue : ${dateFormatted} (Heure Abidjan)</div>
+        </div>
+
+        <div class="content">
+          <div class="error-box">
+            <div class="error-title">🚨 ${errorName}</div>
+            <p class="error-msg">${errorMessage}</p>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title">👤 Profil Utilisateur</div>
+            <div class="row"><span class="label">Rôle :</span><span class="val" style="color: #D4AF37;">${user.role ? user.role.toUpperCase() : 'Non connecté'}</span></div>
+            <div class="row"><span class="label">Nom :</span><span class="val">${user.name || 'Visiteur'}</span></div>
+            <div class="row"><span class="label">Téléphone :</span><span class="val">${user.phone || 'Non renseigné'}</span></div>
+            <div class="row"><span class="label">Identifiant (ID) :</span><span class="val">${user.id || 'N/A'}</span></div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title">📱 Appareil & Système</div>
+            <div class="row"><span class="label">Plateforme / OS :</span><span class="val">${device.os || 'Android'} ${device.osVersion || ''}</span></div>
+            <div class="row"><span class="label">Modèle :</span><span class="val">${device.model || 'Mobile Device'}</span></div>
+            <div class="row"><span class="label">Version de l'App :</span><span class="val">${device.appVersion || '1.6.0'}</span></div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title">💻 Trace Technique (Stack Trace)</div>
+            <div class="stack-box">${errorStack}</div>
+            ${componentStack && componentStack !== 'Non disponible' ? `
+              <div class="section-title" style="margin-top: 14px;">🧩 Arborescence du Composant</div>
+              <div class="stack-box">${componentStack}</div>
+            ` : ''}
+          </div>
+        </div>
+
+        <div class="footer">
+          Système de télémétrie autonome Yély Inc. • Rapport transmis automatiquement par Brevo.
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  try {
+    await axios.post(
+      'https://api.brevo.com/v3/smtp/email',
+      {
+        sender: { email: process.env.EMAIL_FROM || "noreply@yely.app", name: "Yely Crash Monitor" },
+        to: [{ email: adminEmail }],
+        subject: `🚨 [CRASH MOBILE] ${errorName} - Rôle: ${user.role || 'Visiteur'}`,
+        htmlContent: htmlContent
+      },
+      {
+        headers: {
+          'accept': 'application/json',
+          'api-key': process.env.BREVO_API_KEY,
+          'content-type': 'application/json'
+        }
+      }
+    );
+    console.log(`[CRASH MONITOR] Rapport de crash envoye avec succes a ${adminEmail}`);
+    return true;
+  } catch (error) {
+    const errorDetails = error.response ? JSON.stringify(error.response.data) : error.message;
+    console.error("[CRASH MONITOR ERROR] Echec d'envoi Brevo :", errorDetails);
+    return false;
+  }
+};
+
+module.exports = { sendOtpEmail, sendAdminAlert, sendCrashReportEmail };
