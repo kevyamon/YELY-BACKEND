@@ -8,9 +8,25 @@ const { successResponse } = require('../utils/responseHandler');
 const { generateAccessToken, generateRefreshToken, setRefreshTokenCookie, clearRefreshTokenCookie } = require('../utils/tokenService'); 
 const AppError = require('../utils/AppError'); 
 
+const DEMO_PHONES = ['0100000001', '0100000002', '0100000003', '+2250100000001', '+2250100000002', '+2250100000003'];
+
 const registerUser = async (req, res, next) => {
   try {
     const user = await authService.register(req.body);
+
+    // AUTO-APPROBATION COMPTES DÉMO GOOGLE PLAY
+    const isDemo = user.phone && DEMO_PHONES.includes(user.phone);
+    if (isDemo) {
+      user.verificationStatus = 'approved';
+      user.subscription = { isActive: true, expiresAt: new Date('2099-12-31T23:59:59Z') };
+      await User.updateOne({ _id: user._id }, { 
+        $set: { 
+          verificationStatus: 'approved', 
+          'subscription.isActive': true, 
+          'subscription.expiresAt': new Date('2099-12-31T23:59:59Z') 
+        } 
+      });
+    }
 
     const accessToken = generateAccessToken(user._id.toString(), user.role);
     const refreshTokenStr = generateRefreshToken(user._id.toString());
@@ -62,6 +78,20 @@ const loginUser = async (req, res, next) => {
     }
     if (user.isBanned) {
       throw new AppError(`Ce compte est banni. Motif: ${user.banReason}`, 403);
+    }
+
+    // AUTO-APPROBATION COMPTES DÉMO GOOGLE PLAY
+    const isDemo = user.phone && DEMO_PHONES.includes(user.phone);
+    if (isDemo && (user.verificationStatus !== 'approved' || !user.subscription?.isActive)) {
+      user.verificationStatus = 'approved';
+      user.subscription = { isActive: true, expiresAt: new Date('2099-12-31T23:59:59Z') };
+      await User.updateOne({ _id: user._id }, { 
+        $set: { 
+          verificationStatus: 'approved', 
+          'subscription.isActive': true, 
+          'subscription.expiresAt': new Date('2099-12-31T23:59:59Z') 
+        } 
+      });
     }
 
     const accessToken = generateAccessToken(user._id.toString(), user.role);

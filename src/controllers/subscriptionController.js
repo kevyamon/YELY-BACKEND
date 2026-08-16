@@ -76,15 +76,27 @@ const submitProof = async (req, res, next) => {
   }
 };
 
+const DEMO_PHONES = ['0100000001', '0100000002', '0100000003', '+2250100000001', '+2250100000002', '+2250100000003'];
+
 const getStatus = async (req, res, next) => {
   try {
+    const user = await User.findById(req.user._id).select('subscription phone verificationStatus');
+    
+    // COMPTES DÉMO GOOGLE PLAY : Toujours actifs et approuvés
+    if (user?.phone && DEMO_PHONES.includes(user.phone)) {
+      return successResponse(res, {
+        isActive: true,
+        isPending: false,
+        expiresAt: new Date('2099-12-31T23:59:59Z')
+      });
+    }
+
     const isActive = await subscriptionService.checkSubscriptionStatus(req.user._id);
     const pendingTransaction = await Transaction.findOne({ 
       user: req.user._id, 
       status: 'PENDING' 
     });
 
-    const user = await User.findById(req.user._id).select('subscription');
     let exactExpiresAt = user?.subscription?.expiresAt || null;
 
     if (!exactExpiresAt && user?.subscription?.isActive && user?.subscription?.hoursRemaining > 0) {

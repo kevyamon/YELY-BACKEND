@@ -191,10 +191,18 @@ const submitProof = async (userId, data, file) => {
   return transaction;
 };
 
+const DEMO_PHONES = ['0100000001', '0100000002', '0100000003', '+2250100000001', '+2250100000002', '+2250100000003'];
+
 const checkSubscriptionStatus = async (userId) => {
   const user = await User.findById(userId);
-  if (!user || !user.subscription) return false;
+  if (!user) return false;
 
+  // COMPTES DÉMO GOOGLE PLAY : Toujours actifs à vie
+  if (user.phone && DEMO_PHONES.includes(user.phone)) {
+    return true;
+  }
+
+  if (!user.subscription) return false;
   if (!user.subscription.isActive) return false;
 
   if (!user.subscription.expiresAt && user.subscription.hoursRemaining > 0) {
