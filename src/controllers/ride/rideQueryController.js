@@ -70,6 +70,7 @@ const getCurrentRide = async (req, res, next) => {
     const currentRide = await Ride.findOne(query)
       .populate('rider', 'name phone profilePicture')
       .populate('driver', 'name phone vehicle currentLocation profilePicture')
+      .populate('collectionPoints.seller', 'name phone profilePicture address')
       .lean();
 
     if (!currentRide) {
@@ -102,6 +103,7 @@ const getRideById = async (req, res, next) => {
     const ride = await Ride.findById(id)
       .populate('rider', 'name phone profilePicture')
       .populate('driver', 'name phone vehicle currentLocation profilePicture')
+      .populate('collectionPoints.seller', 'name phone profilePicture address')
       .lean();
 
     if (!ride) {
