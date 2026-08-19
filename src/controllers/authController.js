@@ -257,6 +257,7 @@ const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client();
 
 const DEFAULT_WEB_CLIENT_ID = '874118617681-i438m7c4ti48b584o6u00omffvckhphd.apps.googleusercontent.com';
+const FIREBASE_WEB_CLIENT_ID = '874118617681-k2lm3s264crj6910cqhd4e4ehqa6g6mc.apps.googleusercontent.com';
 
 const googleAuth = async (req, res, next) => {
   try {
@@ -267,6 +268,7 @@ const googleAuth = async (req, res, next) => {
       try {
         const allowedAudiences = Array.from(new Set([
           DEFAULT_WEB_CLIENT_ID,
+          FIREBASE_WEB_CLIENT_ID,
           process.env.GOOGLE_WEB_CLIENT_ID,
           process.env.GOOGLE_CLIENT_ID,
           process.env.GOOGLE_ANDROID_CLIENT_ID,
