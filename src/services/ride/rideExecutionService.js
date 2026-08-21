@@ -91,8 +91,8 @@ const startRideSession = async (driverId, rideId, io) => {
       
       notificationService.sendNotification(
         order.customer._id,
-        "Colis récupéré ! 🚴",
-        `Votre livreur ${driver.name || 'Yély'} a récupéré votre commande. Il est en route !`,
+        "Colis récupéré",
+        `Votre livreur ${driver.name || 'Yély'} a récupéré votre commande. Il est en route.`,
         "ORDER_UPDATE",
         { orderId: order._id.toString() }
       ).catch(() => {});

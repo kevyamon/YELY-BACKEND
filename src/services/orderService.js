@@ -25,7 +25,7 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
     await sendNotification(
       order.customer._id, 
       'Commande confirmée', 
-      `${order.seller.name} prépare votre commande.`, 
+      `${order.seller.name} a confirmé votre commande. La préparation est en cours.`, 
       'ORDER_UPDATE', 
       { orderId: order._id }
     );
@@ -36,10 +36,10 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
     
     await sendNotification(
       order.customer._id, 
-      'Recherche de livreur lancée', 
+      'Recherche de livreur', 
       isManualRetry
         ? `${order.seller.name} relance la recherche d'un livreur pour votre commande.`
-        : `Votre commande est prête. Recherche d'un livreur disponible.`, 
+        : 'Votre commande est prête. Recherche d'un livreur disponible.', 
       'ORDER_UPDATE', 
       { orderId: order._id }
     );
@@ -130,11 +130,48 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
       logger.error(`[MARKETPLACE DISPATCH] Erreur lors de la création de la livraison : ${dispatchError.message}`);
     }
   }
+  else if (status === 'picked_up') {
+    order.pickedUpAt = Date.now();
+    await sendNotification(
+      order.customer._id, 
+      'Commande en cours de livraison', 
+      'Votre commande a été récupérée par le livreur et est en route.', 
+      'ORDER_UPDATE', 
+      { orderId: order._id }
+    );
+  }
+  else if (status === 'arrived') {
+    await sendNotification(
+      order.customer._id, 
+      'Livreur arrivé', 
+      'Votre livreur est arrivé à destination avec votre commande.', 
+      'ORDER_UPDATE', 
+      { orderId: order._id }
+    );
+  }
   else if (status === 'rejected') {
     await sendNotification(
       order.customer._id, 
       'Commande refusée', 
-      `${order.seller.name} ne peut pas honorer votre commande : ${comment || 'Indisponible'}`, 
+      `${order.seller.name} ne peut pas honorer votre commande : ${comment || 'Article indisponible'}.`, 
+      'ORDER_UPDATE', 
+      { orderId: order._id }
+    );
+  }
+  else if (status === 'searching_delivery_retry') {
+    await sendNotification(
+      order.customer._id, 
+      'Livraison en attente', 
+      `Aucun livreur disponible pour l'instant. ${order.seller.name} relancera la recherche sous peu.`, 
+      'ORDER_UPDATE', 
+      { orderId: order._id }
+    );
+  }
+  else if (status === 'cancelled_no_driver') {
+    await sendNotification(
+      order.customer._id, 
+      'Recherche expirée', 
+      `Aucun livreur disponible pour cette commande. ${order.seller.name} a été notifié.`, 
       'ORDER_UPDATE', 
       { orderId: order._id }
     );
@@ -160,7 +197,7 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
           order: order._id,
           amount: amount,
           status: 'pending',
-          note: `Création automatique (Manuel) suite à la livraison réussie de la commande`
+          note: 'Création automatique suite à la livraison réussie de la commande'
         });
       }
       await Ledger.create(ledgerEntries);
@@ -203,7 +240,7 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
     await sendNotification(
       order.customer._id, 
       'Commande livrée', 
-      'Votre commande a été livrée. Merci de votre confiance !', 
+      'Votre commande a été livrée avec succès. Merci de votre confiance !', 
       'ORDER_COMPLETE', 
       { orderId: order._id }
     );
@@ -225,24 +262,9 @@ const cancelOrder = async (orderId, customerUser, io) => {
   const order = await Order.findById(orderId);
   if (!order) throw new AppError('Commande introuvable', 404);
 
-  const cancelableStatuses = ['pending', 'searching', 'searching_delivery_retry', 'cancelled_no_driver'];
+  const cancelableStatuses = ['pending'];
   if (!cancelableStatuses.includes(order.status)) {
-    throw new AppError('Impossible d\'annuler une commande déjà prise en charge ou livrée.', 400);
-  }
-
-  if (order.deliveryRideId) {
-    const rideLifecycleService = require('./ride/rideLifecycleService');
-    await rideLifecycleService.cancelRideAction(order.deliveryRideId, customerUser, 'rider', 'Commande annulée par le client', io);
-    
-    const updatedOrder = await Order.findById(orderId).populate('customer seller driver');
-    
-    if (io) {
-      io.to(updatedOrder.seller._id.toString()).emit('order_updated', updatedOrder);
-      io.to(updatedOrder.customer._id.toString()).emit('order_updated', updatedOrder);
-    }
-
-    await sendNotification(updatedOrder.seller._id, 'Commande annulée', `Le client a annulé sa commande #${updatedOrder._id.toString().slice(-6)}`, 'ORDER_CANCELLED');
-    return updatedOrder;
+    throw new AppError('Impossible d\'annuler une commande déjà confirmée par le vendeur.', 400);
   }
 
   order.status = 'cancelled';
@@ -255,7 +277,12 @@ const cancelOrder = async (orderId, customerUser, io) => {
     io.to(order.customer.toString()).emit('order_updated', order);
   }
   
-  await sendNotification(order.seller, 'Commande annulée', `Le client a annulé sa commande #${order._id.toString().slice(-6)}`, 'ORDER_CANCELLED');
+  await sendNotification(
+    order.seller, 
+    'Commande annulée', 
+    `Le client a annulé sa commande #${order._id.toString().slice(-6)}`, 
+    'ORDER_CANCELLED'
+  );
   return order;
 };
 
