@@ -25,6 +25,7 @@ const subscriptionRoutes = require('./routes/subscriptionRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const userRoutes = require('./routes/userRoutes');
 const healthRoutes = require('./routes/healthRoutes');
+const configRoutes = require('./routes/configRoutes');
 const poiRoutes = require('./routes/poiRoutes');
 const agentRoutes = require('./routes/agentRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
@@ -164,6 +165,8 @@ app.get('/shop/:slug', require('./controllers/userShareController').shareSellerS
 const API_V1_PREFIX = '/api/v1';
 
 app.use(`${API_V1_PREFIX}/health`, healthRoutes);
+app.use(`${API_V1_PREFIX}/config`, configRoutes);
+app.use('/api/config', configRoutes); // Alias direct
 app.use(`${API_V1_PREFIX}/auth`, authRoutes);
 app.use(`${API_V1_PREFIX}/users`, userRoutes);
 app.use(`${API_V1_PREFIX}/rides`, rideRoutes);

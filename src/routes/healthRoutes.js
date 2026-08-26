@@ -32,29 +32,53 @@ router.get('/version', (req, res) => {
   });
 });
 
-// NOUVELLE ROUTE PUBLIQUE : Demarrage de l'Application Mobile / PWA
+// ROUTE PUBLIQUE : Demarrage de l'Application Mobile / PWA
 router.get('/config', async (req, res) => {
   try {
     let settings = await Settings.findOne().lean();
     if (!settings) {
       settings = {
-        latestVersion: '1.0.0',
+        latestVersion: '1.7',
         mandatoryUpdate: false,
-        updateUrl: 'https://download-yely.onrender.com',
+        updateUrl: 'https://play.google.com/store/apps/details?id=com.yely.app',
         isOta: false,
         isGlobalFreeAccess: false,
         promoMessage: ''
       };
     }
     
-    // On ne renvoie QUE les informations publiques et non sensibles
+    const latestVersionCode = parseInt(
+      process.env.LATEST_VERSION_CODE || (settings?.latestVersionCode ? String(settings.latestVersionCode) : '19'),
+      10
+    );
+    const minVersionCode = parseInt(
+      process.env.MIN_VERSION_CODE || (settings?.minVersionCode ? String(settings.minVersionCode) : '19'),
+      10
+    );
+    const forceUpdate = process.env.FORCE_UPDATE !== undefined
+      ? process.env.FORCE_UPDATE === 'true'
+      : Boolean(settings.mandatoryUpdate);
+
+    const versioning = {
+      latestVersionCode,
+      minVersionCode,
+      forceUpdate,
+      updateTitle: process.env.UPDATE_TITLE || 'Mise à jour disponible',
+      updateMessage: process.env.UPDATE_MESSAGE || 'Une nouvelle version de Yély est disponible sur le Play Store avec des améliorations importantes.',
+      storeUrl: process.env.STORE_URL || settings.updateUrl || 'https://play.google.com/store/apps/details?id=com.yely.app',
+      latestVersion: settings.latestVersion || process.env.LATEST_VERSION || '1.7',
+      isOta: Boolean(settings.isOta)
+    };
+
+    // Renvoie les champs plats historiques + le bloc versioning moderne
     res.status(CONSTANTS.HTTP_STATUS.OK).json({
-      latestVersion: settings.latestVersion || '1.0.0',
-      mandatoryUpdate: !!settings.mandatoryUpdate,
-      updateUrl: settings.updateUrl || 'https://download-yely.onrender.com',
-      isOta: !!settings.isOta,
-      isGlobalFreeAccess: !!settings.isGlobalFreeAccess,
-      promoMessage: settings.promoMessage || ''
+      latestVersion: settings.latestVersion || '1.7',
+      mandatoryUpdate: forceUpdate,
+      updateUrl: versioning.storeUrl,
+      isOta: Boolean(settings.isOta),
+      isGlobalFreeAccess: Boolean(settings.isGlobalFreeAccess),
+      promoMessage: settings.promoMessage || '',
+      versioning
     });
   } catch (error) {
     logger.error(`[HEALTH CONFIG] Erreur de lecture : ${error.message}`);

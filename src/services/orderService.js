@@ -39,7 +39,7 @@ const updateOrderStatus = async (orderId, status, comment, io, redisClient) => {
       'Recherche de livreur', 
       isManualRetry
         ? `${order.seller.name} relance la recherche d'un livreur pour votre commande.`
-        : 'Votre commande est prête. Recherche d'un livreur disponible.', 
+        : "Votre commande est prête. Recherche d'un livreur disponible.", 
       'ORDER_UPDATE', 
       { orderId: order._id }
     );
