@@ -1,4 +1,7 @@
 // src/services/notificationService.js
+// SERVICE DE NOTIFICATIONS HYBRIDE (DB + FCM PUSH MOBILE/WEB + SOCKET.IO)
+// STANDARD: Industriel / Bank Grade (Strict <= 325 lignes)
+
 const admin = require('../config/firebase');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
@@ -14,22 +17,22 @@ exports.setIo = (socketio) => {
 };
 
 /**
- * @desc Envoie une notification (Push Firebase + Persistance DB)
+ * @desc Envoie une notification (Push Firebase Mobile/Web + Persistance DB + Socket.io)
  */
 exports.sendNotification = async (userId, title, body, type = 'GENERAL', data = {}) => {
   try {
-    // 1. Enregistrement en base de données pour l'historique
+    // 1. Enregistrement en base de données pour l'historique in-app
     const newNotification = await Notification.create({
       recipient: userId,
       title,
       message: body,
       type,
-      metadata: data
+      metadata: data,
     });
 
-    // 2. Récupération du token et envoi Push via Firebase
+    // 2. Récupération du token et envoi Push via Firebase (Mobile + PWA Web)
     const user = await User.findById(userId).select('+fcmToken');
-    
+
     if (user && user.fcmToken) {
       const message = {
         notification: {
@@ -37,31 +40,58 @@ exports.sendNotification = async (userId, title, body, type = 'GENERAL', data = 
           body: body,
         },
         android: {
+          priority: 'high',
           notification: {
             sound: 'push.wav',
             channelId: 'default',
-          }
+            color: '#D4AF37',
+          },
         },
         apns: {
           payload: {
             aps: {
               sound: 'push.wav',
-            }
-          }
+              badge: 1,
+            },
+          },
+        },
+        webpush: {
+          notification: {
+            title: title,
+            body: body,
+            icon: '/favicon.ico',
+            badge: '/favicon.ico',
+          },
+          fcmOptions: {
+            link: '/',
+          },
         },
         data: {
           ...data,
           type,
           notificationId: newNotification._id.toString(),
-          click_action: 'FLUTTER_NOTIFICATION_CLICK', // Standard pour le mobile
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
       };
 
-      await admin.messaging().send(message);
-      logger.info(`[PUSH FIREBASE] Notification envoyee a ${userId}`);
+      try {
+        await admin.messaging().send(message);
+        logger.info(`[PUSH FIREBASE] Notification envoyée avec succès à ${userId}`);
+      } catch (fcmError) {
+        // Auto-nettoyage des tokens expirés ou invalides
+        if (
+          fcmError.code === 'messaging/registration-token-not-registered' ||
+          fcmError.code === 'messaging/invalid-registration-token'
+        ) {
+          logger.warn(`[PUSH] Token expiré ou invalide pour ${userId}, purge du token.`);
+          await User.findByIdAndUpdate(userId, { $unset: { fcmToken: 1 } });
+        } else {
+          logger.error(`[PUSH FIREBASE] Erreur envoi: ${fcmError.message}`);
+        }
+      }
     } else {
-      logger.warn(`[PUSH] Aucun token Firebase valide pour ${userId}, persistance DB seule.`);
+      logger.warn(`[PUSH] Aucun token Firebase pour ${userId}, persistance DB seule.`);
     }
 
     // 3. TEMPS RÉEL (In-App)
@@ -71,12 +101,12 @@ exports.sendNotification = async (userId, title, body, type = 'GENERAL', data = 
 
     return newNotification;
   } catch (error) {
-    logger.error(`[NOTIFICATION SERVICE] Erreur envoi: ${error.message}`);
+    logger.error(`[NOTIFICATION SERVICE] Erreur globale: ${error.message}`);
   }
 };
 
 /**
- * @desc Recupere les notifications d'un utilisateur (Pagination)
+ * @desc Récupère les notifications d'un utilisateur (Pagination)
  */
 exports.getNotificationsForUser = async (userId, page = 1) => {
   const limit = 20;
@@ -96,8 +126,8 @@ exports.getNotificationsForUser = async (userId, page = 1) => {
       total,
       unreadCount,
       page,
-      pages: Math.ceil(total / limit)
-    }
+      pages: Math.ceil(total / limit),
+    },
   };
 };
 
