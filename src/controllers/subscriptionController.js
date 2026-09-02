@@ -1,5 +1,5 @@
 // src/controllers/subscriptionController.js
-// CONTROLEUR ABONNEMENT - Orchestration Passerelle GeniusPay & Webhooks Sécurisés
+// CONTROLEUR ABONNEMENT - Orchestration Passerelle GeniusPay & Webhooks Securises
 // STANDARD: Industriel / Bank Grade (HMAC-SHA256, Idempotence & Zero Client Trust)
 
 const subscriptionService = require('../services/subscriptionService');
@@ -13,9 +13,6 @@ const AppError = require('../utils/AppError');
 
 const DEMO_PHONES = ['0100000001', '0100000002', '0100000003', '+2250100000001', '+2250100000002', '+2250100000003'];
 
-/**
- * Récupère la configuration tarifaire dynamique (Pionnier / Promo / Standard)
- */
 const getConfig = async (req, res, next) => {
   try {
     const userId = req.user ? req.user._id : null;
@@ -28,15 +25,12 @@ const getConfig = async (req, res, next) => {
       promoMessage: settings?.promoMessage || ""
     };
 
-    return successResponse(res, enrichedConfig, "Configuration tarifaire récupérée avec succès.", 200);
+    return successResponse(res, enrichedConfig, "Configuration tarifaire recuperee avec succes.", 200);
   } catch (error) {
     return next(error);
   }
 };
 
-/**
- * Initialise un paiement automatisé auprès de la passerelle GeniusPay
- */
 const initializePayment = async (req, res, next) => {
   try {
     const { planId = 'MONTHLY', platform = 'mobile' } = req.body;
@@ -47,12 +41,12 @@ const initializePayment = async (req, res, next) => {
       platform
     });
 
-    logger.info(`[PAYMENT_INIT] Session générée pour user ${userId} (Ref: ${result.reference})`);
+    logger.info(`[PAYMENT_INIT] Session generee pour user ${userId} (Ref: ${result.reference})`);
 
     return successResponse(
       res,
       result,
-      "Session de paiement initialisée avec succès.",
+      "Session de paiement initialisee avec succes.",
       201
     );
   } catch (error) {
@@ -60,41 +54,31 @@ const initializePayment = async (req, res, next) => {
   }
 };
 
-/**
- * Endpoint Webhook Public GeniusPay - Traitement asynchrone des événements de paiement
- */
 const handleWebhook = async (req, res, next) => {
   const signature = req.headers['x-webhook-signature'] || req.headers['x-signature'];
   const timestamp = req.headers['x-webhook-timestamp'] || req.headers['x-timestamp'];
   const event = req.headers['x-webhook-event'] || req.body?.event;
 
-  // Récupération du raw body buffer ou string
   const rawBody = req.rawBody || JSON.stringify(req.body);
 
-  // VÉRIFICATION DE LA SIGNATURE HMAC-SHA256
   const isValid = geniusPayService.verifyWebhookSignature(signature, timestamp, rawBody);
   
   if (!isValid && process.env.NODE_ENV === 'production') {
-    logger.warn(`[WEBHOOK_SECURITY_ALERT] Signature webhook invalide rejetée depuis IP: ${req.ip}`);
-    return res.status(401).json({ success: false, message: "Signature webhook non autorisée." });
+    logger.warn(`[WEBHOOK_SECURITY_ALERT] Signature webhook invalide rejetee depuis IP: ${req.ip}`);
+    return res.status(401).json({ success: false, message: "Signature webhook non autorisee." });
   }
 
-  // RÉPONSE IMMÉDIATE HTTP 200 (< 2s) requise par GeniusPay pour éviter les timeouts
   res.status(200).json({ received: true });
 
-  // Traitement en arrière-plan (Background Worker)
   try {
     const io = req.app.get('socketio');
     const result = await subscriptionService.processPaymentWebhook(req.body, io);
-    logger.info(`[WEBHOOK_PROCESSED] Résultat: ${JSON.stringify(result)} (Event: ${event})`);
+    logger.info(`[WEBHOOK_PROCESSED] Resultat: ${JSON.stringify(result)} (Event: ${event})`);
   } catch (err) {
-    logger.error(`[WEBHOOK_ASYNC_ERROR] Échec traitement webhook : ${err.message}`);
+    logger.error(`[WEBHOOK_ASYNC_ERROR] Echec traitement webhook : ${err.message}`);
   }
 };
 
-/**
- * Vérification manuelle de secours / synchronisation de paiement
- */
 const verifyPayment = async (req, res, next) => {
   try {
     const { reference } = req.params;
@@ -102,29 +86,29 @@ const verifyPayment = async (req, res, next) => {
     const io = req.app.get('socketio');
 
     const result = await subscriptionService.verifyPaymentStatus(reference, userId, io);
-    return successResponse(res, result, "Statut de la transaction synchronisé avec succès.", 200);
+    return successResponse(res, result, "Statut de la transaction synchronise avec succes.", 200);
   } catch (error) {
     return next(error);
   }
 };
 
-/**
- * Récupère l'état d'abonnement en temps réel du chauffeur/vendeur
- */
 const getStatus = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user._id).select('subscription phone');
-    
-    // Comptes Démo Google Play : Actifs à vie
-    if (user?.phone && DEMO_PHONES.includes(user.phone)) {
+    const user = await User.findById(req.user._id);
+    if (!user) throw new AppError("Utilisateur introuvable.", 404);
+
+    if (user.phone && DEMO_PHONES.includes(user.phone)) {
       return successResponse(res, {
         isActive: true,
         isPending: false,
-        expiresAt: new Date('2099-12-31T23:59:59Z')
+        expiresAt: new Date('2099-12-31T23:59:59Z'),
+        hoursRemaining: 999999
       });
     }
 
     const isActive = await subscriptionService.checkSubscriptionStatus(req.user._id);
+    const updatedUser = await User.findById(req.user._id).select('subscription');
+
     const pendingTransaction = await Transaction.findOne({ 
       user: req.user._id, 
       status: 'PENDING' 
@@ -134,7 +118,8 @@ const getStatus = async (req, res, next) => {
       isActive,
       isPending: !!pendingTransaction,
       pendingReference: pendingTransaction?.paymentReference || null,
-      expiresAt: user?.subscription?.expiresAt || null
+      expiresAt: updatedUser?.subscription?.expiresAt || null,
+      hoursRemaining: updatedUser?.subscription?.hoursRemaining || 0
     });
   } catch (error) {
     return next(error);
