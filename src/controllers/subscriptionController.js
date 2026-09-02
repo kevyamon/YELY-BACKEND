@@ -106,18 +106,33 @@ const getStatus = async (req, res, next) => {
       });
     }
 
+    const pendingTransaction = await Transaction.findOne({ 
+      user: req.user._id, 
+      status: 'PENDING' 
+    }).sort({ createdAt: -1 });
+
+    // Auto-reconciliation proactive : si une transaction est PENDING, interroger directement GeniusPay
+    if (pendingTransaction && pendingTransaction.paymentReference) {
+      try {
+        const io = req.app.get('socketio');
+        await subscriptionService.verifyPaymentStatus(pendingTransaction.paymentReference, req.user._id, io);
+      } catch (checkErr) {
+        logger.warn(`[AUTO_RECONCILE] Verification proactive en attente: ${checkErr.message}`);
+      }
+    }
+
     const isActive = await subscriptionService.checkSubscriptionStatus(req.user._id);
     const updatedUser = await User.findById(req.user._id).select('subscription');
 
-    const pendingTransaction = await Transaction.findOne({ 
+    const remainingPending = await Transaction.findOne({ 
       user: req.user._id, 
       status: 'PENDING' 
     }).sort({ createdAt: -1 });
 
     return successResponse(res, {
       isActive,
-      isPending: !!pendingTransaction,
-      pendingReference: pendingTransaction?.paymentReference || null,
+      isPending: !!remainingPending,
+      pendingReference: remainingPending?.paymentReference || null,
       expiresAt: updatedUser?.subscription?.expiresAt || null,
       hoursRemaining: updatedUser?.subscription?.hoursRemaining || 0
     });
