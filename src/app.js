@@ -55,7 +55,7 @@ const app = express();
 app.disable('x-powered-by');
 
 // Trust Proxy activé globalement pour garantir l'identification IP correcte 
-// derrière Cloudflare/Nginx en dev/staging/prod pour le Rate Limiting.
+// derrière Cloudflare/Nginx/Render en dev/staging/prod pour le Rate Limiting.
 app.set('trust proxy', 1);
 
 app.use(requestIdMiddleware);
@@ -88,7 +88,11 @@ const corsOptions = {
     'Accept', 
     'x-content-type-options', 
     'Origin', 
-    'X-Request-ID'
+    'X-Request-ID',
+    'X-API-Key',
+    'X-Webhook-Signature',
+    'X-Webhook-Timestamp',
+    'X-Webhook-Event'
   ],
 };
 
@@ -112,8 +116,13 @@ app.use(helmet({
 // Application du limiteur de requêtes sur les routes API
 app.use('/api/', apiLimiter);
 
-// Parseurs avec limitation stricte de taille
-app.use(express.json({ limit: '100kb' }));
+// Parseurs avec préservation du Buffer brut (req.rawBody) pour la validation HMAC des Webhooks
+app.use(express.json({ 
+  limit: '100kb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 app.use(cookieParser());
 
@@ -171,9 +180,11 @@ app.use(`${API_V1_PREFIX}/auth`, authRoutes);
 app.use(`${API_V1_PREFIX}/users`, userRoutes);
 app.use(`${API_V1_PREFIX}/rides`, rideRoutes);
 
-// Gestion de la route avec ou sans 's' (Alias)
+// MODULE ABONNEMENTS (Support des alias direct et versionné)
 app.use(`${API_V1_PREFIX}/subscriptions`, subscriptionRoutes);
-app.use(`${API_V1_PREFIX}/subscription`, subscriptionRoutes); 
+app.use(`${API_V1_PREFIX}/subscription`, subscriptionRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/subscription', subscriptionRoutes);
 
 app.use(`${API_V1_PREFIX}/admin`, adminRoutes);
 app.use(`${API_V1_PREFIX}/notifications`, notificationRoutes);
@@ -198,4 +209,3 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 module.exports = app;
-  

@@ -1,18 +1,21 @@
 // src/routes/subscriptionRoutes.js
-// ROUTES SOUSCRIPTION - Blindage & Validation
-// STANDARD: Bank Grade
+// ROUTES SOUSCRIPTION - Paiement Automatisé & Webhooks Forteresse
+// STANDARD: Industriel / Bank Grade
 
 const express = require('express');
 const router = express.Router();
-const { submitProof, getStatus, getConfig } = require('../controllers/subscriptionController');
+const {
+  getConfig,
+  getStatus,
+  initializePayment,
+  handleWebhook,
+  verifyPayment
+} = require('../controllers/subscriptionController');
 const { protect, authorize } = require('../middleware/authMiddleware');
-const { uploadSingle, validateFileSignature } = require('../middleware/uploadMiddleware');
-const validate = require('../middleware/validationMiddleware');
-const { submitProofSchema } = require('../validations/subscriptionValidation');
 
 /**
  * @route   GET /api/v1/subscriptions/config
- * @desc    Recuperation securisee des liens de paiement et des tarifs
+ * @desc    Récupération sécurisée des prix calculés (Pionnier / Promo / Standard)
  */
 router.get(
   '/config',
@@ -22,7 +25,7 @@ router.get(
 
 /**
  * @route   GET /api/v1/subscriptions/status
- * @desc    Recuperation de l'etat actuel de l'abonnement du chauffeur
+ * @desc    Récupération de l'état d'abonnement en temps réel
  */
 router.get(
   '/status',
@@ -31,18 +34,34 @@ router.get(
 );
 
 /**
- * @route   POST /api/v1/subscriptions/submit-proof
- * @desc    Soumission d'une preuve de paiement avec validation multicouche
- * Pipeline : Auth -> Autorisation -> Upload -> Signature File -> Validation Body -> Controller
+ * @route   POST /api/v1/subscriptions/initialize
+ * @desc    Initialisation d'une session de paiement automatique GeniusPay
  */
 router.post(
-  '/submit-proof', 
-  protect, 
-  authorize('driver', 'seller', 'superadmin'), 
-  uploadSingle, 
-  validateFileSignature, 
-  validate(submitProofSchema), 
-  submitProof
+  '/initialize',
+  protect,
+  authorize('driver', 'seller', 'admin', 'superadmin'),
+  initializePayment
+);
+
+/**
+ * @route   GET /api/v1/subscriptions/verify/:reference
+ * @desc    Vérification / Synchronisation active d'une transaction
+ */
+router.get(
+  '/verify/:reference',
+  protect,
+  verifyPayment
+);
+
+/**
+ * @route   POST /api/v1/subscriptions/webhook
+ * @desc    Endpoint public sécurisé recevant les notifications de paiement GeniusPay
+ * Note: Authentifié par signature cryptographique HMAC-SHA256
+ */
+router.post(
+  '/webhook',
+  handleWebhook
 );
 
 module.exports = router;
