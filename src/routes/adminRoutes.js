@@ -1,6 +1,6 @@
 // src/routes/adminRoutes.js
-// ROUTES GOUVERNANCE - Validation & Permissions
-// CSCSM Level: Bank Grade
+// ROUTES GOUVERNANCE - Validation, Permissions & Maintenance
+// STANDARD: Industriel / Bank Grade (Sans Emojis)
 
 const express = require('express');
 const router = express.Router();
@@ -12,8 +12,6 @@ const {
   updateRoleSchema, 
   toggleBanSchema, 
   mapSettingsSchema, 
-  transactionIdParam,
-  rejectTransactionSchema,
   updateAppVersionSchema
 } = require('../validations/adminValidation');
 
@@ -23,37 +21,22 @@ router.get('/reports/operational', protect, authorize('admin', 'superadmin'), ad
 
 router.get('/stats', protect, authorize('admin', 'superadmin'), adminController.getDashboardStats);
 router.get('/users', protect, authorize('admin', 'superadmin'), adminController.getAllUsers);
-router.get('/validations', protect, authorize('admin', 'superadmin'), adminController.getValidationQueue);
 router.get('/drivers/pending', protect, authorize('admin', 'superadmin'), adminController.getPendingDrivers);
 router.post('/drivers/:id/verify', protect, authorize('admin', 'superadmin'), adminController.verifyDriver);
 router.get('/rides', protect, authorize('admin', 'superadmin'), adminController.getAllRides);
 router.put('/rides/:id/archive', protect, authorize('admin', 'superadmin'), adminController.toggleRideArchive);
 router.get('/logs', protect, authorize('admin', 'superadmin'), adminController.getAuditLogs);
 
-router.post('/approve/:id', 
-  protect, 
-  authorize('admin', 'superadmin'), 
-  validate(transactionIdParam, 'params'), 
-  adminController.approveTransaction
-);
-
-router.post('/reject/:id', 
-  protect, 
-  authorize('admin', 'superadmin'), 
-  validate(transactionIdParam, 'params'), 
-  validate(rejectTransactionSchema), 
-  adminController.rejectTransaction
-);
-
-router.get('/finance', protect, authorize('superadmin'), adminController.getFinanceData);
-router.put('/finance/links', protect, authorize('superadmin'), adminController.updateWaveLinks);
+// --- ROUTES CONFIGURATION SYSTEME & MAINTENANCE ---
+router.get('/system-config', protect, authorize('superadmin'), adminController.getSystemConfig);
+router.put('/maintenance/toggle', protect, authorize('superadmin'), adminController.toggleMaintenanceMode);
+router.put('/app-version', protect, authorize('superadmin'), validate(updateAppVersionSchema), adminController.updateAppVersion);
 router.put('/promo/toggle', protect, authorize('superadmin'), adminController.togglePromo);
-
 router.put('/load-reduce/toggle', protect, authorize('superadmin'), adminController.toggleLoadReduce);
 router.put('/free-access/toggle', protect, authorize('superadmin'), adminController.toggleGlobalFreeAccess);
 
-router.get('/system-config', protect, authorize('superadmin'), adminController.getSystemConfig);
-router.put('/app-version', protect, authorize('superadmin'), validate(updateAppVersionSchema), adminController.updateAppVersion);
+router.get('/finance', protect, authorize('superadmin'), adminController.getFinanceData);
+router.put('/finance/links', protect, authorize('superadmin'), adminController.updateWaveLinks);
 
 router.post('/update-role', protect, authorize('superadmin'), validate(updateRoleSchema), adminController.updateAdminStatus);
 router.post('/toggle-ban', protect, authorize('superadmin'), validate(toggleBanSchema), adminController.toggleUserBan);
@@ -64,7 +47,7 @@ router.get('/subscriptions', protect, authorize('admin', 'superadmin'), adminSub
 router.get('/subscriptions/history/:userId', protect, authorize('admin', 'superadmin'), adminSubscriptionsController.getSubscriptionHistory);
 router.post('/subscriptions/toggle-ban', protect, authorize('admin', 'superadmin'), validate(toggleBanSchema), adminSubscriptionsController.toggleSubscriptionBan);
 
-// --- ROUTES DE MODÉRATION ET D'OVERRIDE MARKETPLACE ---
+// --- ROUTES DE MODERATION ET D'OVERRIDE MARKETPLACE ---
 router.get('/marketplace/stats', protect, authorize('admin', 'superadmin'), adminController.getMarketplaceStats);
 router.get('/marketplace/orders', protect, authorize('admin', 'superadmin'), adminController.getMarketplaceOrders);
 router.put('/marketplace/orders/:id/override', protect, authorize('admin', 'superadmin'), adminController.overrideMarketplaceOrder);

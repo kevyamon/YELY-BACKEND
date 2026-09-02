@@ -1,6 +1,6 @@
 // src/controllers/adminConfigController.js
-// SOUS-CONTROLEUR ADMIN - Paramètres globaux, promos, versions et statistiques
-// STANDARD: Industriel / Bank Grade
+// SOUS-CONTROLEUR ADMIN - Parametres globaux, maintenance, promos, versions
+// STANDARD: Industriel / Bank Grade (Modularise < 325 lignes, Sans Emojis)
 
 const adminConfigService = require('../services/adminConfigService');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
@@ -20,6 +20,27 @@ const getFinanceData = async (req, res) => {
   try {
     const data = await adminConfigService.getFinanceData(req.query.period);
     return successResponse(res, data, "Donnees financieres recuperees.");
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+const toggleMaintenanceMode = async (req, res) => {
+  try {
+    const { isMaintenanceMode, maintenanceMessage } = req.body;
+    const io = req.app.get('socketio');
+    const result = await adminConfigService.toggleMaintenanceMode(
+      isMaintenanceMode,
+      maintenanceMessage,
+      req.user._id,
+      req.user.email,
+      io
+    );
+    return successResponse(
+      res,
+      result,
+      `Mode maintenance ${result.isMaintenanceMode ? 'active' : 'desactive'} avec succes.`
+    );
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
@@ -64,7 +85,7 @@ const toggleGlobalFreeAccess = async (req, res) => {
     const { isGlobalFreeAccess, promoMessage } = req.body;
     const io = req.app.get('socketio');
     const result = await adminConfigService.toggleGlobalFreeAccess(isGlobalFreeAccess, promoMessage, req.user._id, req.user.email, io);
-    return successResponse(res, result, `Mode VIP ${result.isGlobalFreeAccess ? 'activé' : 'désactivé'} avec succès.`);
+    return successResponse(res, result, `Mode VIP ${result.isGlobalFreeAccess ? 'active' : 'desactive'} avec succes.`);
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
@@ -76,6 +97,8 @@ const updateAppVersion = async (req, res) => {
     const settings = await adminConfigService.updateAppVersion(req.body, req.user._id, req.user.email, io);
     return successResponse(res, {
       latestVersion: settings.latestVersion,
+      latestVersionCode: settings.latestVersionCode,
+      minVersionCode: settings.minVersionCode,
       mandatoryUpdate: settings.mandatoryUpdate,
       updateUrl: settings.updateUrl,
       isOta: settings.isOta 
@@ -97,6 +120,7 @@ const getSystemConfig = async (req, res) => {
 module.exports = {
   getDashboardStats,
   getFinanceData,
+  toggleMaintenanceMode,
   togglePromo,
   updateWaveLinks,
   toggleLoadReduce,

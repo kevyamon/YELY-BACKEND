@@ -1,6 +1,6 @@
 // src/controllers/adminController.js
 // CONTROLEUR ADMIN - Exposition des Endpoints HTTP d'Administration
-// STANDARD: Industriel / Bank Grade (Délégation active)
+// STANDARD: Industriel / Bank Grade (Delegation active, < 325 lignes, Sans Emojis)
 
 const adminService = require('../services/adminService');
 const Transaction = require('../models/Transaction');
@@ -9,6 +9,7 @@ const AppError = require('../utils/AppError');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const logger = require('../config/logger');
 const notificationService = require('../services/notificationService');
+const User = require('../models/User');
 
 const adminConfigController = require('./adminConfigController');
 const adminMarketplaceController = require('./adminMarketplaceController');
@@ -26,7 +27,7 @@ exports.updateAdminStatus = async (req, res) => {
           io.to(userId.toString()).emit('force_logout', { reason: 'Vos droits administrateur ont ete revoques.' });
         }
       }
-    } catch (e) { logger.warn(`[SOCKET] Echec non-critique: ${e.message}`); }
+    } catch (e) { logger.warn(`[SOCKET] Echec: ${e.message}`); }
 
     logger.warn(`[AUDIT ROLE] ${req.user.email} changed ${result.email} -> ${result.newRole}`);
     return successResponse(res, result, 'Role mis a jour.');
@@ -43,7 +44,7 @@ exports.toggleUserBan = async (req, res) => {
     try {
       const io = req.app.get('socketio');
       if (io) io.to(userId.toString()).emit(user.isBanned ? 'user_banned' : 'user_unbanned', { reason });
-    } catch (e) { logger.warn(`[SOCKET] Echec non-critique: ${e.message}`); }
+    } catch (e) { logger.warn(`[SOCKET] Echec: ${e.message}`); }
 
     logger.warn(`[AUDIT BAN] ${req.user.email} toggled ban on ${user.email}.`);
     return successResponse(res, { isBanned: user.isBanned }, user.isBanned ? 'Utilisateur banni.' : 'Bannissement leve.');
@@ -59,115 +60,6 @@ exports.updateMapSettings = async (req, res) => {
     return successResponse(res, settings, 'Parametres mis a jour.');
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
-  }
-};
-
-exports.approveTransaction = async (req, res) => {
-  try {
-    const result = await adminService.approveTransaction(req.params.id, req.user._id);
-
-    try {
-      const io = req.app.get('socketio');
-      if (io) {
-        io.to(result.driver._id.toString()).emit('subscription_validated', {
-          daysAdded: result.daysToAdd,
-          expiresAt: result.newExpiryDate
-        });
-      }
-      
-      const isSeller = result.driver.role === 'seller';
-      const pushTitle = isSeller ? "Boutique Activée" : "Abonnement Activé";
-      const pushBody = isSeller 
-        ? "Votre preuve de paiement a été validée. Votre boutique est active."
-        : "Votre preuve de paiement a été validée. Vous pouvez reprendre les courses.";
-      const pushType = isSeller ? 'SELLER_SUBSCRIPTION_APPROVED' : 'SUBSCRIPTION_APPROVED';
-
-      notificationService.sendNotification(
-        result.driver._id.toString(),
-        pushTitle,
-        pushBody,
-        pushType,
-        { transactionId: result.transaction._id.toString() }
-      ).catch(notifError => logger.error(`[NON-CRITIQUE] Echec notification: ${notifError.message}`));
-      
-    } catch (notifError) {
-      logger.error(`[NON-CRITIQUE] Echec general notifications: ${notifError.message}`);
-    }
-
-    logger.info(`[AUDIT FINANCE] Transaction ${result.transaction._id} approved by ${req.user.email}`);
-    return successResponse(res, { status: 'APPROVED' }, 'Transaction approuvée avec succès.');
-  } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || 500);
-  }
-};
-
-exports.rejectTransaction = async (req, res) => {
-  try {
-    const { reason } = req.body;
-    const finalReason = reason || "Preuve non conforme ou illisible.";
-    const result = await adminService.rejectTransaction(req.params.id, finalReason, req.user._id);
-
-    try {
-      const io = req.app.get('socketio');
-      if (io) {
-        io.to(result.driver._id.toString()).emit('subscription_rejected', { reason: finalReason });
-      }
-      
-      const isSeller = result.driver?.role === 'seller';
-      const pushTitle = "Paiement Rejeté";
-      const pushBody = `Votre preuve a été refusée: ${finalReason}. Veuillez soumettre une image valide.`;
-      const pushType = isSeller ? 'SELLER_SUBSCRIPTION_REJECTED' : 'SUBSCRIPTION_REJECTED';
-
-      notificationService.sendNotification(
-        result.driver._id.toString(),
-        pushTitle,
-        pushBody,
-        pushType,
-        { transactionId: result.transaction._id.toString() }
-      ).catch(notifError => logger.error(`[NON-CRITIQUE] Echec notification: ${notifError.message}`));
-      
-    } catch (notifError) {
-      logger.error(`[NON-CRITIQUE] Echec general notifications: ${notifError.message}`);
-    }
-
-    logger.info(`[AUDIT FINANCE] Transaction ${result.transaction._id} rejected by ${req.user.email}`);
-    return successResponse(res, { status: 'REJECTED' }, 'Transaction rejetée avec succès.');
-  } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || 500);
-  }
-};
-
-exports.getValidationQueue = async (req, res) => {
-  try {
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = 10;
-    const skip = (page - 1) * limit;
-
-    const filter = { status: 'PENDING' };
-    if (req.user.role !== 'superadmin') {
-      filter.assignedTo = req.user._id;
-    }
-
-    const [transactions, total] = await Promise.all([
-      Transaction.find(filter)
-        .populate('user', 'name phone email currentLocation')
-        .populate('assignedTo', 'name email')
-        .sort({ createdAt: -1 }) // CORRECTION: les nouvelles soumissions s'affichent en haut de la liste (tri décroissant)
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      Transaction.countDocuments(filter)
-    ]);
-
-    const data = {
-      transactions,
-      pagination: { page, total, pages: Math.ceil(total / limit) }
-    };
-
-    return successResponse(res, data, "File d'attente recuperee.");
-  } catch (error) {
-    logger.error(`[VALIDATION QUEUE ERROR]: ${error.message}`);
-    return errorResponse(res, "Erreur lors de la recuperation des dossiers.", 500);
   }
 };
 
@@ -207,9 +99,95 @@ exports.getAuditLogs = async (req, res) => {
   }
 };
 
+exports.getPendingDrivers = async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = 10;
+    const skip = (page - 1) * limit;
+    const query = { role: 'driver', verificationStatus: 'pending' };
+
+    const [drivers, total] = await Promise.all([
+      User.find(query)
+        .select('name phone email vehicle documents verificationStatus createdAt')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      User.countDocuments(query)
+    ]);
+
+    return successResponse(res, {
+      drivers,
+      pagination: { page, total, pages: Math.ceil(total / limit) }
+    }, "Chauffeurs en attente recuperes avec succes.");
+  } catch (error) {
+    logger.error(`[PENDING DRIVERS ERROR] ${error.message}`);
+    return next(new AppError("Erreur lors de la recuperation des validations d'identite.", 500));
+  }
+};
+
+exports.verifyDriver = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { decision, reason } = req.body;
+
+    if (!['approved', 'rejected'].includes(decision)) {
+      throw new AppError('Decision invalide. Doit etre approved ou rejected.', 400);
+    }
+
+    const driver = await User.findById(id);
+    if (!driver || driver.role !== 'driver') {
+      throw new AppError('Chauffeur introuvable.', 404);
+    }
+
+    driver.verificationStatus = decision;
+    driver.isAvailable = false;
+    driver.rejectionReason = decision === 'rejected' ? (reason || "Documents non conformes.") : "";
+    await driver.save();
+
+    await AuditLog.create({
+      actor: req.user._id,
+      action: decision === 'approved' ? 'APPROVE_DRIVER_IDENTITY' : 'REJECT_DRIVER_IDENTITY',
+      target: driver._id,
+      details: decision === 'approved' ? 'Identite approuvee' : `Rejet: ${reason}`
+    }).catch(() => {});
+
+    try {
+      const io = req.app.get('socketio');
+      if (io) {
+        io.to(driver._id.toString()).emit('identity_verification_update', {
+          status: decision,
+          reason: driver.rejectionReason
+        });
+        io.to(driver._id.toString()).emit('force_availability_offline');
+      }
+
+      const pushTitle = decision === 'approved' ? "Identite Validee" : "Verification Refusee";
+      const pushBody = decision === 'approved'
+        ? "Votre identite a ete validee par l'administration."
+        : `Votre dossier de verification a ete refuse : ${driver.rejectionReason}`;
+
+      notificationService.sendNotification(
+        driver._id.toString(),
+        pushTitle,
+        pushBody,
+        decision === 'approved' ? 'IDENTITY_APPROVED' : 'IDENTITY_REJECTED',
+        { status: decision }
+      ).catch(() => {});
+    } catch (e) {
+      logger.error(`[NOTIF ERROR] verifyDriver: ${e.message}`);
+    }
+
+    return successResponse(res, { verificationStatus: driver.verificationStatus }, `Dossier chauffeur traite avec succes (${decision}).`);
+  } catch (error) {
+    return next(error);
+  }
+};
+
 // --- DELEGATION CONFIGURATION ENDPOINTS ---
 exports.getDashboardStats = adminConfigController.getDashboardStats;
 exports.getFinanceData = adminConfigController.getFinanceData;
+exports.toggleMaintenanceMode = adminConfigController.toggleMaintenanceMode;
 exports.togglePromo = adminConfigController.togglePromo;
 exports.updateWaveLinks = adminConfigController.updateWaveLinks;
 exports.toggleLoadReduce = adminConfigController.toggleLoadReduce;
@@ -225,137 +203,3 @@ exports.getMarketplaceLedgers = adminMarketplaceController.getMarketplaceLedgers
 exports.forceClearLedger = adminMarketplaceController.forceClearLedger;
 exports.getAllRides = adminMarketplaceController.getAllRides;
 exports.toggleRideArchive = adminMarketplaceController.toggleRideArchive;
-
-// Helper pour extraire le Public ID Cloudinary
-const extractCloudinaryPublicId = (url) => {
-  if (!url || !url.includes('cloudinary.com')) return null;
-  const match = url.match(/\/upload\/v\d+\/(.+)\.[a-z0-9]+$/i);
-  return match ? match[1] : null;
-};
-
-// Helper pour supprimer un fichier Cloudinary
-const deleteCloudinaryFile = async (url) => {
-  try {
-    const publicId = extractCloudinaryPublicId(url);
-    if (publicId) {
-      const cloudinary = require('../config/cloudinary');
-      await cloudinary.uploader.destroy(publicId);
-      logger.info(`[Cloudinary] Image détruite : ${publicId}`);
-    }
-  } catch (err) {
-    logger.error(`[Cloudinary ERROR] Echec de suppression : ${err.message}`);
-  }
-};
-
-exports.getPendingDrivers = async (req, res, next) => {
-  try {
-    const User = require('../models/User');
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = 10;
-    const skip = (page - 1) * limit;
-
-    const query = { role: 'driver', verificationStatus: 'pending' };
-
-    const [drivers, total] = await Promise.all([
-      User.find(query)
-        .select('name phone email vehicle documents verificationStatus createdAt')
-        .sort({ createdAt: -1 }) // CORRECTION: nouvelles validations d'identité en haut (tri décroissant)
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      User.countDocuments(query)
-    ]);
-
-    const data = {
-      drivers,
-      pagination: { page, total, pages: Math.ceil(total / limit) }
-    };
-
-    return successResponse(res, data, "Chauffeurs en attente récupérés avec succès.");
-  } catch (error) {
-    logger.error(`[PENDING DRIVERS ERROR] ${error.message}`);
-    return next(new AppError("Erreur lors de la récupération des validations d'identité.", 500));
-  }
-};
-
-exports.verifyDriver = async (req, res, next) => {
-  try {
-    const User = require('../models/User');
-    const { id } = req.params;
-    const { decision, reason } = req.body;
-
-    if (!['approved', 'rejected'].includes(decision)) {
-      throw new AppError('Décision invalide. Doit être approved ou rejected.', 400);
-    }
-
-    const driver = await User.findById(id);
-    if (!driver || driver.role !== 'driver') {
-      throw new AppError('Chauffeur introuvable.', 404);
-    }
-
-    const previousFrontUrl = driver.documents?.idCardFront;
-    const previousBackUrl = driver.documents?.idCardBack;
-
-    driver.verificationStatus = decision;
-    driver.isAvailable = false; // Par sécurité, forcer hors ligne
-
-    if (decision === 'rejected') {
-      driver.rejectionReason = reason || "Documents non conformes.";
-    } else {
-      driver.rejectionReason = "";
-    }
-
-    // RGPD & Libération de l'espace Cloudinary : Supprimer les images d'identité après décision
-    if (previousFrontUrl) {
-      await deleteCloudinaryFile(previousFrontUrl);
-      driver.documents.idCardFront = "";
-    }
-    if (previousBackUrl) {
-      await deleteCloudinaryFile(previousBackUrl);
-      driver.documents.idCardBack = "";
-    }
-    driver.documents.idCard = ""; // Nettoyer l'ancienne clé brute si présente
-
-    await driver.save();
-
-    // Journal d'audit
-    await AuditLog.create({
-      actor: req.user._id,
-      action: decision === 'approved' ? 'APPROVE_DRIVER_IDENTITY' : 'REJECT_DRIVER_IDENTITY',
-      target: driver._id,
-      details: decision === 'approved' ? 'Identité approuvée' : `Rejet: ${reason}`
-    }).catch(() => {});
-
-    // Notifications temps réel et push
-    try {
-      const io = req.app.get('socketio');
-      if (io) {
-        io.to(driver._id.toString()).emit('identity_verification_update', {
-          status: decision,
-          reason: driver.rejectionReason
-        });
-        io.to(driver._id.toString()).emit('force_availability_offline');
-      }
-
-      const pushTitle = decision === 'approved' ? "Identité Validée ✅" : "Vérification Refusée ❌";
-      const pushBody = decision === 'approved'
-        ? "Votre identité et votre modèle de tricycle ont été validés par l'administration !"
-        : `Votre dossier de vérification a été refusé : ${driver.rejectionReason}`;
-
-      notificationService.sendNotification(
-        driver._id.toString(),
-        pushTitle,
-        pushBody,
-        decision === 'approved' ? 'IDENTITY_APPROVED' : 'IDENTITY_REJECTED',
-        { status: decision }
-      ).catch(() => {});
-
-    } catch (e) {
-      logger.error(`[NOTIF ERROR] verifyDriver: ${e.message}`);
-    }
-
-    return successResponse(res, { verificationStatus: driver.verificationStatus }, `Dossier chauffeur traité avec succès (${decision}).`);
-  } catch (error) {
-    return next(error);
-  }
-};
