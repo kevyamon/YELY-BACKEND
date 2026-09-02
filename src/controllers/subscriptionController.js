@@ -131,8 +131,8 @@ const getStatus = async (req, res, next) => {
 
     return successResponse(res, {
       isActive,
-      isPending: !!remainingPending,
-      pendingReference: remainingPending?.paymentReference || null,
+      isPending: !isActive && !!remainingPending,
+      pendingReference: !isActive && remainingPending ? remainingPending.paymentReference : null,
       expiresAt: updatedUser?.subscription?.expiresAt || null,
       hoursRemaining: updatedUser?.subscription?.hoursRemaining || 0
     });

@@ -195,15 +195,35 @@ const verifyPaymentStatus = async (reference, userId, io = null) => {
   if (!transaction) throw new AppError("Transaction introuvable.", 404);
 
   if (transaction.status === 'COMPLETED' || transaction.status === 'APPROVED') {
-    return { status: 'COMPLETED', isActive: true };
+    const user = await User.findById(userId).select('subscription');
+    return { 
+      status: 'COMPLETED', 
+      isActive: true, 
+      expiresAt: user?.subscription?.expiresAt || null 
+    };
   }
 
-  const remoteData = await geniusPayService.checkPaymentStatus(reference);
+  // Double vérification : par référence Yély puis par ID transaction passerelle
+  let remoteData = await geniusPayService.checkPaymentStatus(reference);
+  if (!remoteData && transaction.gatewayTransactionId) {
+    remoteData = await geniusPayService.checkPaymentStatus(transaction.gatewayTransactionId);
+  }
+
   if (remoteData) {
-    const remoteStatus = (remoteData.status || '').toLowerCase();
-    if (remoteStatus === 'success' || remoteStatus === 'completed' || remoteStatus === 'paid') {
-      await processPaymentWebhook({ reference, status: 'success', data: remoteData }, io);
-      return { status: 'COMPLETED', isActive: true };
+    const remoteStatus = (remoteData.status || remoteData.data?.status || '').toLowerCase();
+    if (['success', 'completed', 'paid', 'approved'].includes(remoteStatus)) {
+      const webhookRes = await processPaymentWebhook({ 
+        reference: transaction.paymentReference, 
+        status: 'success', 
+        data: remoteData 
+      }, io);
+      
+      const user = await User.findById(userId).select('subscription');
+      return { 
+        status: 'COMPLETED', 
+        isActive: true, 
+        expiresAt: user?.subscription?.expiresAt || null 
+      };
     }
   }
 
