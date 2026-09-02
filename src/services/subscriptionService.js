@@ -62,9 +62,8 @@ const initializeAutomatedPayment = async (userId, { planId = PLAN_TYPES.MONTHLY,
 
   const reference = `YELY-SUB-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-  const returnUrl = platform === 'pwa'
-    ? (process.env.PWA_RETURN_URL || 'https://yely-amber.vercel.app')
-    : (process.env.MOBILE_RETURN_URL || 'yely://subscription');
+  // Utilisation d'une URL HTTPS valide et certifiee pour eviter le fallback GeniusPay
+  const returnUrl = process.env.APP_RETURN_URL || process.env.PWA_RETURN_URL || 'https://yely-amber.vercel.app';
 
   const session = await geniusPayService.createPaymentSession({
     amount,
@@ -218,7 +217,6 @@ const checkSubscriptionStatus = async (userId) => {
   if (user.phone && DEMO_PHONES.includes(user.phone)) return true;
   if (!user.subscription) return false;
 
-  // Calcul dynamique et synchronisation atomique selon la date d'expiration reelle
   if (user.subscription.expiresAt) {
     const now = new Date();
     const expiry = new Date(user.subscription.expiresAt);
