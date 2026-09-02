@@ -1,6 +1,6 @@
 // src/services/adminConfigService.js
-// SERVICE METIER - Gestion de la configuration globale du systeme, promotions et versions
-// STANDARD: Industriel / Bank Grade
+// SERVICE METIER - Configuration globale, mode maintenance et versions
+// STANDARD: Industriel / Bank Grade (Modularise < 325 lignes, Sans Emojis)
 
 const mongoose = require('mongoose');
 const User = require('../models/User');
@@ -11,7 +11,6 @@ const notificationService = require('./notificationService');
 const logger = require('../config/logger');
 const AppError = require('../utils/AppError');
 
-// Audit log helper local
 const logSystemAction = async (actorId, action, targetId, details) => {
   try {
     await AuditLog.create({
@@ -33,7 +32,7 @@ const getDashboardStats = async () => {
     Transaction.countDocuments({ status: 'PENDING' }),
     User.countDocuments({ role: 'driver', verificationStatus: 'pending' }),
     Transaction.aggregate([
-      { $match: { status: 'APPROVED' } },
+      { $match: { status: 'COMPLETED' } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]),
     Settings.findOne().lean()
@@ -53,10 +52,39 @@ const getDashboardStats = async () => {
 
 const getFinanceData = async (period) => {
   const pipeline = [
-    { $match: { status: 'APPROVED' } },
+    { $match: { status: { $in: ['COMPLETED', 'APPROVED'] } } },
     { $group: { _id: '$planId', totalAmount: { $sum: '$amount' }, count: { $sum: 1 } } }
   ];
   return await Transaction.aggregate(pipeline);
+};
+
+const toggleMaintenanceMode = async (isMaintenanceMode, maintenanceMessage, requesterId, requesterEmail, io) => {
+  let settings = await Settings.findOne();
+  if (!settings) settings = new Settings();
+
+  if (isMaintenanceMode !== undefined) {
+    settings.isMaintenanceMode = Boolean(isMaintenanceMode);
+  }
+  if (maintenanceMessage) {
+    settings.maintenanceMessage = maintenanceMessage.trim();
+  }
+  settings.updatedBy = requesterId;
+  await settings.save();
+
+  if (io) {
+    io.emit('SYSTEM_MAINTENANCE_TOGGLED', {
+      isMaintenanceMode: settings.isMaintenanceMode,
+      maintenanceMessage: settings.maintenanceMessage
+    });
+  }
+
+  logger.warn(`[MAINTENANCE] Mode maintenance mis a jour (${settings.isMaintenanceMode}) par ${requesterEmail}`);
+  await logSystemAction(requesterId, 'TOGGLE_MAINTENANCE', settings._id, `Maintenance set to ${settings.isMaintenanceMode}`);
+
+  return {
+    isMaintenanceMode: settings.isMaintenanceMode,
+    maintenanceMessage: settings.maintenanceMessage
+  };
 };
 
 const togglePromo = async (isActive, requesterId) => {
@@ -112,9 +140,7 @@ const toggleLoadReduce = async (requesterId, requesterEmail, io) => {
 
 const toggleGlobalFreeAccess = async (isGlobalFreeAccess, promoMessage, requesterId, requesterEmail, io) => {
   let settings = await Settings.findOne();
-  if (!settings) {
-    settings = new Settings();
-  }
+  if (!settings) settings = new Settings();
 
   const wasActive = settings.isGlobalFreeAccess;
 
@@ -127,18 +153,15 @@ const toggleGlobalFreeAccess = async (isGlobalFreeAccess, promoMessage, requeste
 
   if (settings.isGlobalFreeAccess && !wasActive) {
     settings.promoStartedAt = new Date();
-    logger.info(`[VIP MODE] Activation. Gel des abonnements declenche.`);
-  } 
-  else if (!settings.isGlobalFreeAccess && wasActive) {
+    logger.info(`[VIP MODE] Activation du mode VIP.`);
+  } else if (!settings.isGlobalFreeAccess && wasActive) {
     if (settings.promoStartedAt) {
       const durationMs = Date.now() - settings.promoStartedAt.getTime();
-      
       if (durationMs > 0) {
         await User.updateMany(
           { 'subscription.isActive': true, 'subscription.expiresAt': { $gt: new Date() } },
           [{ $set: { 'subscription.expiresAt': { $add: ['$subscription.expiresAt', durationMs] } } }]
         );
-        logger.info(`[VIP MODE] Fin du VIP. Compensation de ${durationMs}ms ajoutee aux abonnements actifs.`);
       }
     }
     settings.promoStartedAt = null;
@@ -154,91 +177,45 @@ const toggleGlobalFreeAccess = async (isGlobalFreeAccess, promoMessage, requeste
     });
   }
 
-  const pushTitle = settings.isGlobalFreeAccess ? "Mode VIP Activé !" : "Fin de la période VIP";
-  const pushBody = settings.isGlobalFreeAccess 
-    ? "L'accès à Yely est désormais gratuit ! Votre abonnement payant est mis en pause." 
-    : "Le mode gratuit est terminé. Votre abonnement a été prolongé pour compenser cette période.";
-
-  try {
-    const drivers = await User.find({ role: { $in: ['driver', 'seller'] }, fcmToken: { $ne: null } }).select('_id fcmToken');
-    const sentTokens = new Set();
-
-    for (const driver of drivers) {
-      const skipPush = sentTokens.has(driver.fcmToken);
-      if (driver.fcmToken) sentTokens.add(driver.fcmToken);
-
-      notificationService.sendNotification(
-        driver._id,
-        pushTitle,
-        pushBody,
-        'PROMO_UPDATE',
-        { isGlobalFreeAccess: settings.isGlobalFreeAccess.toString() },
-        skipPush
-      ).catch(() => {});
-    }
-  } catch (pushErr) {
-    logger.warn(`[Admin] Echec non-bloquant du Push Promo: ${pushErr.message}`);
-  }
-
   await logSystemAction(requesterId, 'TOGGLE_FREE_ACCESS', settings._id, `VIP Mode set to ${settings.isGlobalFreeAccess}`);
   return { isGlobalFreeAccess: settings.isGlobalFreeAccess, promoMessage: settings.promoMessage };
 };
 
 const updateAppVersion = async (versionData, requesterId, requesterEmail, io) => {
-  const { latestVersion, mandatoryUpdate, updateUrl, isOta } = versionData;
+  const { latestVersion, latestVersionCode, minVersionCode, mandatoryUpdate, updateUrl, isOta } = versionData;
   
   let settings = await Settings.findOne();
-  if (!settings) {
-    settings = new Settings();
-  }
+  if (!settings) settings = new Settings();
   
-  settings.latestVersion = latestVersion;
-  settings.mandatoryUpdate = mandatoryUpdate;
-  settings.updateUrl = updateUrl;
-  settings.isOta = isOta;
+  if (latestVersion) settings.latestVersion = latestVersion;
+  if (latestVersionCode !== undefined) settings.latestVersionCode = Number(latestVersionCode);
+  if (minVersionCode !== undefined) settings.minVersionCode = Number(minVersionCode);
+  if (mandatoryUpdate !== undefined) settings.mandatoryUpdate = Boolean(mandatoryUpdate);
+  if (updateUrl) settings.updateUrl = updateUrl;
+  if (isOta !== undefined) settings.isOta = Boolean(isOta);
   settings.updatedBy = requesterId;
   
   await settings.save();
 
   if (io) {
     io.emit('APP_VERSION_UPDATED', { 
-      latestVersion, 
-      mandatoryUpdate, 
-      updateUrl,
-      isOta 
+      latestVersion: settings.latestVersion,
+      latestVersionCode: settings.latestVersionCode,
+      minVersionCode: settings.minVersionCode,
+      mandatoryUpdate: settings.mandatoryUpdate, 
+      updateUrl: settings.updateUrl,
+      isOta: settings.isOta 
     });
   }
 
-  try {
-    const users = await User.find({ fcmToken: { $ne: null }, role: { $ne: 'superadmin' } }).select('_id fcmToken');
-    const sentTokens = new Set();
-    const pushTitle = mandatoryUpdate ? "Mise a jour obligatoire requise" : "Nouvelle mise a jour disponible";
-    const pushBody = `La version ${latestVersion} de Yely est disponible. Profitez des dernieres ameliorations !`;
-    
-    for (const u of users) {
-      const skipPush = sentTokens.has(u.fcmToken);
-      if (u.fcmToken) sentTokens.add(u.fcmToken);
-
-      notificationService.sendNotification(
-        u._id,
-        pushTitle,
-        pushBody,
-        'SYSTEM_UPDATE',
-        { latestVersion, mandatoryUpdate: String(mandatoryUpdate), updateUrl, isOta: String(isOta) },
-        skipPush
-      ).catch(() => {});
-    }
-  } catch (pushErr) {
-    logger.warn(`[Admin] Echec non-bloquant du Push Update: ${pushErr.message}`);
-  }
-
-  await logSystemAction(requesterId, 'UPDATE_APP_VERSION', settings._id, `App Version set to ${latestVersion}`);
+  await logSystemAction(requesterId, 'UPDATE_APP_VERSION', settings._id, `App Version set to ${settings.latestVersion}`);
   return settings;
 };
 
 module.exports = {
   getDashboardStats,
   getFinanceData,
+  toggleMaintenanceMode,
   togglePromo,
   updateWaveLinks,
   getSystemConfig,
