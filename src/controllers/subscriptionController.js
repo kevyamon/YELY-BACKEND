@@ -62,10 +62,11 @@ const handleWebhook = async (req, res, next) => {
   const rawBody = req.rawBody || JSON.stringify(req.body);
 
   const isValid = geniusPayService.verifyWebhookSignature(signature, timestamp, rawBody);
+  const hasSecret = Boolean(process.env.GENIUSPAY_WEBHOOK_SECRET || process.env.GENIUSPAY_API_SECRET);
   
-  if (!isValid && process.env.NODE_ENV === 'production') {
-    logger.warn(`[WEBHOOK_SECURITY_ALERT] Signature webhook invalide rejetee depuis IP: ${req.ip}`);
-    return res.status(401).json({ success: false, message: "Signature webhook non autorisee." });
+  if (!isValid && process.env.NODE_ENV === 'production' && hasSecret && signature) {
+    logger.warn(`[WEBHOOK_SECURITY_ALERT] Signature webhook invalide rejetée depuis IP: ${req.ip}`);
+    return res.status(401).json({ success: false, message: "Signature webhook non autorisée." });
   }
 
   res.status(200).json({ received: true });

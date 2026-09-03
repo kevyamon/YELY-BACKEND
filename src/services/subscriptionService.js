@@ -107,25 +107,30 @@ const initializeAutomatedPayment = async (userId, { planId = PLAN_TYPES.MONTHLY,
 };
 
 const processPaymentWebhook = async (payload, io = null) => {
-  const reference = payload.reference || payload.data?.reference || payload.order_id;
-  const eventType = payload.event || payload.type || 'payment.success';
+  const reference = payload.reference || payload.data?.reference || payload.order_id || payload.data?.order_id;
+  const eventType = payload.event || payload.type || payload.data?.event || 'payment.success';
   const status = (payload.status || payload.data?.status || '').toLowerCase();
   const operator = payload.operator || payload.gateway || payload.data?.operator || 'GENIUSPAY';
-  const gatewayTxId = payload.id || payload.transaction_id || payload.data?.id;
+  const gatewayTxId = payload.id || payload.transaction_id || payload.data?.id || payload.data?.transaction_id;
 
-  if (!reference) {
-    logger.warn('[WEBHOOK] Reference manquante dans le payload GeniusPay.');
-    return { success: false, message: 'Reference manquante.' };
+  const searchCriteria = [];
+  if (reference) searchCriteria.push({ paymentReference: reference }, { gatewayTransactionId: reference });
+  if (gatewayTxId) searchCriteria.push({ gatewayTransactionId: gatewayTxId }, { paymentReference: gatewayTxId });
+  if (payload.reference) searchCriteria.push({ paymentReference: payload.reference });
+  if (payload.data?.reference) searchCriteria.push({ paymentReference: payload.data.reference }, { gatewayTransactionId: payload.data.reference });
+
+  let transaction = null;
+  if (searchCriteria.length > 0) {
+    transaction = await Transaction.findOne({ $or: searchCriteria }).sort({ createdAt: -1 });
   }
 
-  const transaction = await Transaction.findOne({ paymentReference: reference });
   if (!transaction) {
-    logger.error(`[WEBHOOK_ERROR] Aucune transaction trouvee pour la reference ${reference}`);
+    logger.warn(`[WEBHOOK_WARN] Aucune transaction trouvée pour ref: ${reference || gatewayTxId}`);
     return { success: false, message: 'Transaction inconnue.' };
   }
 
   if (transaction.status === 'COMPLETED' || transaction.status === 'APPROVED') {
-    logger.info(`[WEBHOOK_IDEMPOTENT] Transaction ${reference} deja validee precedemment.`);
+    logger.info(`[WEBHOOK_IDEMPOTENT] Transaction ${transaction.paymentReference} déjà validée.`);
     return { success: true, alreadyProcessed: true, transaction };
   }
 
@@ -138,7 +143,7 @@ const processPaymentWebhook = async (payload, io = null) => {
     if (gatewayTxId) transaction.gatewayTransactionId = gatewayTxId;
     transaction.auditLog.push({
       action: 'PAYMENT_SUCCESS',
-      note: `Paiement valide avec succes via ${operator}.`
+      note: `Paiement validé avec succès via ${operator}.`
     });
     await transaction.save();
 
@@ -159,13 +164,13 @@ const processPaymentWebhook = async (payload, io = null) => {
       };
       await user.save({ validateBeforeSave: false });
 
-      logger.info(`[SUBSCRIPTION_ACTIVATED] Compte ${user._id} active jusqu'au ${newExpiry.toISOString()}`);
+      logger.info(`[SUBSCRIPTION_ACTIVATED] Compte ${user._id} activé jusqu'au ${newExpiry.toISOString()}`);
 
       if (io) {
         io.to(user._id.toString()).emit('subscription_updated', {
           isActive: true,
           expiresAt: newExpiry,
-          reference: reference
+          reference: transaction.paymentReference
         });
       }
     }
@@ -175,14 +180,14 @@ const processPaymentWebhook = async (payload, io = null) => {
     transaction.status = 'FAILED';
     transaction.auditLog.push({
       action: 'PAYMENT_FAILED',
-      note: `Paiement echoue ou annule (${eventType} - ${status})`
+      note: `Paiement échoué ou annulé (${eventType} - ${status})`
     });
     await transaction.save();
 
     if (io) {
       io.to(transaction.user.toString()).emit('subscription_failed', {
-        reference: reference,
-        reason: 'Paiement non complete.'
+        reference: transaction.paymentReference,
+        reason: 'Paiement non complété.'
       });
     }
 
@@ -191,7 +196,18 @@ const processPaymentWebhook = async (payload, io = null) => {
 };
 
 const verifyPaymentStatus = async (reference, userId, io = null) => {
-  const transaction = await Transaction.findOne({ paymentReference: reference, user: userId });
+  let transaction = await Transaction.findOne({
+    $or: [
+      { paymentReference: reference },
+      { gatewayTransactionId: reference }
+    ],
+    user: userId
+  }).sort({ createdAt: -1 });
+
+  if (!transaction) {
+    transaction = await Transaction.findOne({ user: userId, status: 'PENDING' }).sort({ createdAt: -1 });
+  }
+
   if (!transaction) throw new AppError("Transaction introuvable.", 404);
 
   if (transaction.status === 'COMPLETED' || transaction.status === 'APPROVED') {
@@ -203,8 +219,8 @@ const verifyPaymentStatus = async (reference, userId, io = null) => {
     };
   }
 
-  // Double vérification : par référence Yély puis par ID transaction passerelle
-  let remoteData = await geniusPayService.checkPaymentStatus(reference);
+  // Interrogation par référence Yély puis par ID transaction passerelle
+  let remoteData = await geniusPayService.checkPaymentStatus(transaction.paymentReference);
   if (!remoteData && transaction.gatewayTransactionId) {
     remoteData = await geniusPayService.checkPaymentStatus(transaction.gatewayTransactionId);
   }
@@ -212,7 +228,7 @@ const verifyPaymentStatus = async (reference, userId, io = null) => {
   if (remoteData) {
     const remoteStatus = (remoteData.status || remoteData.data?.status || '').toLowerCase();
     if (['success', 'completed', 'paid', 'approved'].includes(remoteStatus)) {
-      const webhookRes = await processPaymentWebhook({ 
+      await processPaymentWebhook({ 
         reference: transaction.paymentReference, 
         status: 'success', 
         data: remoteData 
