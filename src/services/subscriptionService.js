@@ -83,7 +83,10 @@ const initializeAutomatedPayment = async (userId, { planId = PLAN_TYPES.MONTHLY,
   const amount = pricingConfig.monthly.price;
 
   const reference = `YELY-SUB-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
-  const returnUrl = process.env.APP_RETURN_URL || process.env.PWA_RETURN_URL || 'https://yely-amber.vercel.app';
+  const configuredUrl = process.env.MOBILE_RETURN_URL || process.env.APP_RETURN_URL || process.env.PWA_RETURN_URL;
+  const returnUrl = (configuredUrl && configuredUrl.startsWith('http'))
+    ? configuredUrl
+    : 'https://yely-amber.vercel.app';
 
   const session = await geniusPayService.createPaymentSession({
     amount,
@@ -226,9 +229,7 @@ const processPaymentWebhook = async (payload, io = null) => {
 
 const verifyPaymentStatus = async (reference, userId, io = null) => {
   const searchCriteria = [];
-  if (reference) {
-    searchCriteria.push({ paymentReference: reference }, { gatewayTransactionId: reference });
-  }
+  if (reference) searchCriteria.push({ paymentReference: reference }, { gatewayTransactionId: reference });
 
   let transaction = searchCriteria.length > 0
     ? await Transaction.findOne({ $or: searchCriteria, user: userId }).sort({ createdAt: -1 })
@@ -237,16 +238,11 @@ const verifyPaymentStatus = async (reference, userId, io = null) => {
   if (!transaction) {
     transaction = await Transaction.findOne({ user: userId, status: 'PENDING' }).sort({ createdAt: -1 });
   }
-
   if (!transaction) throw new AppError("Transaction introuvable.", 404);
 
   if (transaction.status === 'COMPLETED' || transaction.status === 'APPROVED') {
     const user = await User.findById(userId).select('subscription');
-    return { 
-      status: 'COMPLETED', 
-      isActive: true, 
-      expiresAt: user?.subscription?.expiresAt || null 
-    };
+    return { status: 'COMPLETED', isActive: true, expiresAt: user?.subscription?.expiresAt || null };
   }
 
   // Interrogation de GeniusPay: tester tous les identifiants disponibles
