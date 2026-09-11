@@ -24,6 +24,12 @@ const settingsSchema = new mongoose.Schema({
   isGlobalFreeAccess: { type: Boolean, default: false },
   promoMessage: { type: String, default: "Yely Regal ! Pour feter notre lancement, Yely vous offre l'acces VIP. Roulez sans abonnement !" },
   promoStartedAt: { type: Date, default: null },
+
+  // --- PROGRAMME PIONNIERS ---
+  isPioneerProgramActive: { type: Boolean, default: false },
+  pioneerProgramStartedAt: { type: Date, default: null },
+  pioneerMaxMonths: { type: Number, default: 4 },
+  pioneerLimitCount: { type: Number, default: 20 },
   
   // --- VERSIONING & MISES A JOUR PLAY STORE / OTA ---
   latestVersion: { type: String, default: "1.7.0", trim: true },

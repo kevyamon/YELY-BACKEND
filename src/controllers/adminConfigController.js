@@ -117,6 +117,20 @@ const getSystemConfig = async (req, res) => {
   }
 };
 
+const togglePioneerProgram = async (req, res) => {
+  try {
+    const result = await adminConfigService.togglePioneerProgram(req.body.isActive, req.user._id);
+    try {
+      const io = req.app.get('socketio');
+      if (io) io.emit('pioneer_program_updated', { isPioneerProgramActive: result.isPioneerProgramActive });
+    } catch (socketError) { logger.error(`[SOCKET PIONEER] Echec: ${socketError.message}`); }
+
+    return successResponse(res, result, `Programme pionniers ${result.isPioneerProgramActive ? 'active' : 'desactive'}.`);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getFinanceData,
@@ -126,5 +140,6 @@ module.exports = {
   toggleLoadReduce,
   toggleGlobalFreeAccess,
   updateAppVersion,
-  getSystemConfig
+  getSystemConfig,
+  togglePioneerProgram
 };

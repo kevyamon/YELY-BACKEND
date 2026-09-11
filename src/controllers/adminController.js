@@ -194,6 +194,7 @@ exports.toggleLoadReduce = adminConfigController.toggleLoadReduce;
 exports.toggleGlobalFreeAccess = adminConfigController.toggleGlobalFreeAccess;
 exports.updateAppVersion = adminConfigController.updateAppVersion;
 exports.getSystemConfig = adminConfigController.getSystemConfig;
+exports.togglePioneerProgram = adminConfigController.togglePioneerProgram;
 
 // --- DELEGATION MARKETPLACE ENDPOINTS ---
 exports.getMarketplaceStats = adminMarketplaceController.getMarketplaceStats;

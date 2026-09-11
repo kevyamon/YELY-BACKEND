@@ -32,6 +32,7 @@ router.get('/system-config', protect, authorize('superadmin'), adminController.g
 router.put('/maintenance/toggle', protect, authorize('superadmin'), adminController.toggleMaintenanceMode);
 router.put('/app-version', protect, authorize('superadmin'), validate(updateAppVersionSchema), adminController.updateAppVersion);
 router.put('/promo/toggle', protect, authorize('superadmin'), adminController.togglePromo);
+router.put('/pioneer/toggle', protect, authorize('superadmin'), adminController.togglePioneerProgram);
 router.put('/load-reduce/toggle', protect, authorize('superadmin'), adminController.toggleLoadReduce);
 router.put('/free-access/toggle', protect, authorize('superadmin'), adminController.toggleGlobalFreeAccess);
 

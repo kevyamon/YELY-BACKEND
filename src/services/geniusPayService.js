@@ -9,7 +9,8 @@ const AppError = require('../utils/AppError');
 
 class GeniusPayService {
   constructor() {
-    this.baseUrl = process.env.GENIUSPAY_BASE_URL || 'https://geniuspay.ci/api/v1/merchant';
+    this.baseUrl = process.env.GENIUSPAY_BASE_URL || 'https://pay.genius.ci/api/v1/merchant';
+    this.fallbackUrl = 'https://geniuspay.ci/api/v1/merchant';
     this.apiKey = process.env.GENIUSPAY_API_KEY || '';
     this.apiSecret = process.env.GENIUSPAY_API_SECRET || '';
     this.webhookSecret = process.env.GENIUSPAY_WEBHOOK_SECRET || this.apiSecret;
@@ -19,12 +20,18 @@ class GeniusPayService {
    * Retourne les en-têtes HTTP authentifiés pour GeniusPay
    */
   _getHeaders() {
-    return {
+    const headers = {
       'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      'X-API-Key': this.apiKey,
-      'Authorization': `Bearer ${this.apiKey}`
+      'Accept': 'application/json'
     };
+    if (this.apiKey) {
+      headers['X-API-Key'] = this.apiKey;
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+    if (this.apiSecret) {
+      headers['X-API-Secret'] = this.apiSecret;
+    }
+    return headers;
   }
 
   /**
@@ -60,10 +67,23 @@ class GeniusPayService {
     try {
       logger.info(`[GENIUSPAY] Initialisation paiement pour ref: ${reference} (${amount} XOF)`);
       
-      const response = await axios.post(`${this.baseUrl}/payments`, payload, {
-        headers: this._getHeaders(),
-        timeout: 15000 // 15 secondes max
-      });
+      let response;
+      try {
+        response = await axios.post(`${this.baseUrl}/payments`, payload, {
+          headers: this._getHeaders(),
+          timeout: 15000
+        });
+      } catch (primaryErr) {
+        if (this.baseUrl !== this.fallbackUrl) {
+          logger.warn(`[GENIUSPAY] Échec sur endpoint primaire (${this.baseUrl}), tentative fallback (${this.fallbackUrl})`);
+          response = await axios.post(`${this.fallbackUrl}/payments`, payload, {
+            headers: this._getHeaders(),
+            timeout: 15000
+          });
+        } else {
+          throw primaryErr;
+        }
+      }
 
       const data = response.data?.data || response.data;
       
@@ -75,10 +95,15 @@ class GeniusPayService {
         throw new AppError('Impossible de générer le lien de paiement.', 502);
       }
 
+      // Extraction universelle de l'identifiant transaction généré par GeniusPay (data.reference, MTX-..., etc.)
+      const gatewayTransactionId = data.reference || data.payment_id || data.id || data.transaction_id || data.payment?.reference || data.payment?.id || null;
+
+      logger.info(`[GENIUSPAY] Session OK - Ref Yely: ${reference}, Ref Passerelle: ${gatewayTransactionId || 'Non précisée'}`);
+
       return {
         paymentUrl,
         reference: reference,
-        gatewayTransactionId: data.id || data.transaction_id || null,
+        gatewayTransactionId,
         raw: data
       };
     } catch (error) {
@@ -137,16 +162,30 @@ class GeniusPayService {
    * @param {string} referenceOrId - Référence Yély ou ID transaction GeniusPay
    */
   async checkPaymentStatus(referenceOrId) {
-    try {
-      const response = await axios.get(`${this.baseUrl}/payments/${referenceOrId}`, {
-        headers: this._getHeaders(),
-        timeout: 10000
-      });
-      return response.data?.data || response.data;
-    } catch (error) {
-      logger.error(`[GENIUSPAY_CHECK_ERROR] Échec interrogation statut (${referenceOrId}): ${error.message}`);
-      return null;
+    if (!referenceOrId) return null;
+
+    const urlsToTry = [
+      `${this.baseUrl}/payments/${referenceOrId}`,
+      `${this.fallbackUrl}/payments/${referenceOrId}`
+    ];
+
+    for (const url of urlsToTry) {
+      try {
+        const response = await axios.get(url, {
+          headers: this._getHeaders(),
+          timeout: 10000
+        });
+        const resData = response.data?.data || response.data;
+        if (resData) return resData;
+      } catch (error) {
+        // Continue vers la prochaine URL si 404
+        if (error.response?.status !== 404) {
+          logger.warn(`[GENIUSPAY_CHECK_WARN] Échec interrogation statut (${url}): ${error.message}`);
+        }
+      }
     }
+
+    return null;
   }
 }
 

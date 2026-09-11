@@ -212,6 +212,24 @@ const updateAppVersion = async (versionData, requesterId, requesterEmail, io) =>
   return settings;
 };
 
+const togglePioneerProgram = async (isActive, requesterId) => {
+  let settings = await Settings.findOne();
+  if (!settings) settings = new Settings();
+
+  settings.isPioneerProgramActive = Boolean(isActive);
+  if (settings.isPioneerProgramActive && !settings.pioneerProgramStartedAt) {
+    settings.pioneerProgramStartedAt = new Date();
+  }
+  settings.updatedBy = requesterId;
+  await settings.save();
+
+  await logSystemAction(requesterId, 'TOGGLE_PIONEER_PROGRAM', settings._id, `Programme pionnier: ${isActive}`);
+  return { 
+    isPioneerProgramActive: settings.isPioneerProgramActive,
+    pioneerProgramStartedAt: settings.pioneerProgramStartedAt
+  };
+};
+
 module.exports = {
   getDashboardStats,
   getFinanceData,
@@ -221,5 +239,6 @@ module.exports = {
   getSystemConfig,
   toggleLoadReduce,
   toggleGlobalFreeAccess,
-  updateAppVersion
+  updateAppVersion,
+  togglePioneerProgram
 };

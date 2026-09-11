@@ -134,7 +134,8 @@ const userSchema = new mongoose.Schema({
     isActive: { type: Boolean, default: false, index: true },
     hoursRemaining: { type: Number, default: 0 },
     expiresAt: { type: Date, default: null }, 
-    lastCheckTime: { type: Date, default: Date.now }
+    lastCheckTime: { type: Date, default: Date.now },
+    pioneerMonthsUsed: { type: Number, default: 0 }
   },
   
   documents: {

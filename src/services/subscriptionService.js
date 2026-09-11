@@ -19,15 +19,36 @@ const DEMO_PHONES = ['0100000001', '0100000002', '0100000003', '+2250100000001',
 
 const checkIsPioneer = async (userIdOrUser) => {
   if (!userIdOrUser) return false;
+  
+  const settings = await Settings.findOne();
+  if (!settings || !settings.isPioneerProgramActive || !settings.pioneerProgramStartedAt) {
+    return false;
+  }
+
   let user = userIdOrUser.role ? userIdOrUser : await User.findById(userIdOrUser);
   if (!user || (user.role !== 'driver' && user.role !== 'seller')) return false;
 
-  const olderUsersCount = await User.countDocuments({
+  // Les comptes crees avant l'activation du bouton pionnier par l'admin sont exclus
+  if (new Date(user.createdAt) < new Date(settings.pioneerProgramStartedAt)) {
+    return false;
+  }
+
+  // Limitation stricte aux 4 premiers mois d'abonnement au tarif pionnier
+  const monthsUsed = user.subscription?.pioneerMonthsUsed || 0;
+  if (monthsUsed >= (settings.pioneerMaxMonths || 4)) {
+    return false;
+  }
+
+  const limit = settings.pioneerLimitCount || 20;
+  const olderPioneersCount = await User.countDocuments({
     role: user.role,
-    createdAt: { $lt: user.createdAt }
+    createdAt: { 
+      $gte: settings.pioneerProgramStartedAt,
+      $lt: user.createdAt 
+    }
   });
 
-  return olderUsersCount < 20;
+  return olderPioneersCount < limit;
 };
 
 const getSubscriptionPricing = async (userId = null) => {
@@ -36,16 +57,17 @@ const getSubscriptionPricing = async (userId = null) => {
   const isPioneer = await checkIsPioneer(userId);
   const baseMonthlyPrice = 2000; 
 
-  let monthlyPrice;
-  if (isPioneer) {
-    monthlyPrice = isPromo ? 700 : 1000;
-  } else {
-    monthlyPrice = isPromo ? 1500 : baseMonthlyPrice;
-  }
+  let user = userId ? await User.findById(userId).select('subscription') : null;
+  const monthsUsed = user?.subscription?.pioneerMonthsUsed || 0;
+  const maxMonths = settings.pioneerMaxMonths || 4;
+
+  const monthlyPrice = isPioneer ? (isPromo ? 700 : 1000) : (isPromo ? 1500 : baseMonthlyPrice);
   
   return {
     isPromoActive: isPromo,
     isPioneer: isPioneer,
+    pioneerMonthsUsed: monthsUsed,
+    pioneerMonthsRemaining: Math.max(0, maxMonths - monthsUsed),
     monthly: {
       price: monthlyPrice,
       originalPrice: baseMonthlyPrice
@@ -61,8 +83,6 @@ const initializeAutomatedPayment = async (userId, { planId = PLAN_TYPES.MONTHLY,
   const amount = pricingConfig.monthly.price;
 
   const reference = `YELY-SUB-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
-
-  // Utilisation d'une URL HTTPS valide et certifiee pour eviter le fallback GeniusPay
   const returnUrl = process.env.APP_RETURN_URL || process.env.PWA_RETURN_URL || 'https://yely-amber.vercel.app';
 
   const session = await geniusPayService.createPaymentSession({
@@ -89,18 +109,19 @@ const initializeAutomatedPayment = async (userId, { planId = PLAN_TYPES.MONTHLY,
     status: 'PENDING',
     paymentReference: reference,
     gateway: 'GENIUSPAY',
-    gatewayTransactionId: session.gatewayTransactionId,
+    gatewayTransactionId: session.gatewayTransactionId || null,
     customerPhone: user.phone || '',
     paymentUrl: session.paymentUrl,
     auditLog: [{
       action: 'INITIALIZED',
-      note: `Session de paiement creee pour ${amount} FCFA (${pricingConfig.isPioneer ? 'Pionnier' : 'Standard'})`
+      note: `Session pour ${amount} FCFA (${pricingConfig.isPioneer ? `Pionnier ${pricingConfig.pioneerMonthsUsed + 1}/4` : 'Standard'}). Ref: ${session.gatewayTransactionId || 'N/A'}`
     }]
   });
 
   return {
     paymentUrl: session.paymentUrl,
     reference: reference,
+    gatewayReference: session.gatewayTransactionId || null,
     amount: amount,
     transactionId: transaction._id
   };
@@ -111,17 +132,21 @@ const processPaymentWebhook = async (payload, io = null) => {
   const eventType = payload.event || payload.type || payload.data?.event || 'payment.success';
   const status = (payload.status || payload.data?.status || '').toLowerCase();
   const operator = payload.operator || payload.gateway || payload.data?.operator || 'GENIUSPAY';
-  const gatewayTxId = payload.id || payload.transaction_id || payload.data?.id || payload.data?.transaction_id;
+  const gatewayTxId = payload.id || payload.transaction_id || payload.payment_id || payload.data?.id || payload.data?.transaction_id || payload.data?.payment_id;
+  const metaUserId = payload.metadata?.userId || payload.data?.metadata?.userId;
 
   const searchCriteria = [];
   if (reference) searchCriteria.push({ paymentReference: reference }, { gatewayTransactionId: reference });
   if (gatewayTxId) searchCriteria.push({ gatewayTransactionId: gatewayTxId }, { paymentReference: gatewayTxId });
-  if (payload.reference) searchCriteria.push({ paymentReference: payload.reference });
-  if (payload.data?.reference) searchCriteria.push({ paymentReference: payload.data.reference }, { gatewayTransactionId: payload.data.reference });
 
   let transaction = null;
   if (searchCriteria.length > 0) {
     transaction = await Transaction.findOne({ $or: searchCriteria }).sort({ createdAt: -1 });
+  }
+
+  // Securite de repli: Si l'identifiant webhook diverge, associer via metadata.userId
+  if (!transaction && metaUserId) {
+    transaction = await Transaction.findOne({ user: metaUserId, status: 'PENDING' }).sort({ createdAt: -1 });
   }
 
   if (!transaction) {
@@ -134,16 +159,16 @@ const processPaymentWebhook = async (payload, io = null) => {
     return { success: true, alreadyProcessed: true, transaction };
   }
 
-  const isSuccess = eventType === 'payment.success' || status === 'success' || status === 'completed' || status === 'paid';
+  const isSuccess = ['payment.success', 'payment.completed'].includes(eventType) || ['success', 'completed', 'paid', 'approved'].includes(status);
 
   if (isSuccess) {
     transaction.status = 'COMPLETED';
     transaction.completedAt = new Date();
     transaction.operator = operator.toUpperCase();
-    if (gatewayTxId) transaction.gatewayTransactionId = gatewayTxId;
+    if (gatewayTxId && !transaction.gatewayTransactionId) transaction.gatewayTransactionId = gatewayTxId;
     transaction.auditLog.push({
       action: 'PAYMENT_SUCCESS',
-      note: `Paiement validé avec succès via ${operator}.`
+      note: `Paiement validé avec succès via ${operator} (${gatewayTxId || reference || 'N/A'}).`
     });
     await transaction.save();
 
@@ -155,16 +180,20 @@ const processPaymentWebhook = async (payload, io = null) => {
         : now;
 
       const newExpiry = new Date(currentExpiry.getTime() + 30 * 24 * 60 * 60 * 1000);
+      const isPioneerTx = transaction.auditLog?.some(l => l.note?.includes('Pionnier')) || false;
+      const prevMonths = user.subscription?.pioneerMonthsUsed || 0;
+      const pioneerMonthsUsed = isPioneerTx ? prevMonths + 1 : prevMonths;
 
       user.subscription = {
         isActive: true,
         plan: PLAN_TYPES.MONTHLY,
         expiresAt: newExpiry,
-        hoursRemaining: Math.ceil((newExpiry - now) / (1000 * 60 * 60))
+        hoursRemaining: Math.ceil((newExpiry - now) / (1000 * 60 * 60)),
+        pioneerMonthsUsed
       };
       await user.save({ validateBeforeSave: false });
 
-      logger.info(`[SUBSCRIPTION_ACTIVATED] Compte ${user._id} activé jusqu'au ${newExpiry.toISOString()}`);
+      logger.info(`[SUBSCRIPTION_ACTIVATED] Compte ${user._id} activé (Pionnier mois ${pioneerMonthsUsed}/4) jusqu'au ${newExpiry.toISOString()}`);
 
       if (io) {
         io.to(user._id.toString()).emit('subscription_updated', {
@@ -196,13 +225,14 @@ const processPaymentWebhook = async (payload, io = null) => {
 };
 
 const verifyPaymentStatus = async (reference, userId, io = null) => {
-  let transaction = await Transaction.findOne({
-    $or: [
-      { paymentReference: reference },
-      { gatewayTransactionId: reference }
-    ],
-    user: userId
-  }).sort({ createdAt: -1 });
+  const searchCriteria = [];
+  if (reference) {
+    searchCriteria.push({ paymentReference: reference }, { gatewayTransactionId: reference });
+  }
+
+  let transaction = searchCriteria.length > 0
+    ? await Transaction.findOne({ $or: searchCriteria, user: userId }).sort({ createdAt: -1 })
+    : null;
 
   if (!transaction) {
     transaction = await Transaction.findOne({ user: userId, status: 'PENDING' }).sort({ createdAt: -1 });
@@ -219,15 +249,28 @@ const verifyPaymentStatus = async (reference, userId, io = null) => {
     };
   }
 
-  // Interrogation par référence Yély puis par ID transaction passerelle
-  let remoteData = await geniusPayService.checkPaymentStatus(transaction.paymentReference);
-  if (!remoteData && transaction.gatewayTransactionId) {
-    remoteData = await geniusPayService.checkPaymentStatus(transaction.gatewayTransactionId);
+  // Interrogation de GeniusPay: tester tous les identifiants disponibles
+  const candidateRefs = [
+    transaction.gatewayTransactionId,
+    transaction.paymentReference,
+    reference
+  ].filter(Boolean);
+
+  let remoteData = null;
+  for (const ref of [...new Set(candidateRefs)]) {
+    remoteData = await geniusPayService.checkPaymentStatus(ref);
+    if (remoteData) break;
   }
 
   if (remoteData) {
     const remoteStatus = (remoteData.status || remoteData.data?.status || '').toLowerCase();
     if (['success', 'completed', 'paid', 'approved'].includes(remoteStatus)) {
+      const gTxId = remoteData.reference || remoteData.payment_id || remoteData.id || remoteData.data?.reference || remoteData.data?.payment_id;
+      if (gTxId && !transaction.gatewayTransactionId) {
+        transaction.gatewayTransactionId = gTxId;
+        await transaction.save();
+      }
+
       await processPaymentWebhook({ 
         reference: transaction.paymentReference, 
         status: 'success', 
@@ -256,22 +299,15 @@ const checkSubscriptionStatus = async (userId) => {
   if (user.subscription.expiresAt) {
     const now = new Date();
     const expiry = new Date(user.subscription.expiresAt);
-    if (now < expiry) {
-      const hoursLeft = Math.max(0, Math.ceil((expiry - now) / (1000 * 60 * 60)));
-      if (!user.subscription.isActive || user.subscription.hoursRemaining !== hoursLeft) {
-        user.subscription.isActive = true;
-        user.subscription.hoursRemaining = hoursLeft;
-        await user.save({ validateBeforeSave: false });
-      }
-      return true;
-    } else {
-      if (user.subscription.isActive || user.subscription.hoursRemaining > 0) {
-        user.subscription.isActive = false;
-        user.subscription.hoursRemaining = 0;
-        await user.save({ validateBeforeSave: false });
-      }
-      return false;
+    const isValid = now < expiry;
+    const hoursLeft = isValid ? Math.max(0, Math.ceil((expiry - now) / (1000 * 60 * 60))) : 0;
+
+    if (user.subscription.isActive !== isValid || user.subscription.hoursRemaining !== hoursLeft) {
+      user.subscription.isActive = isValid;
+      user.subscription.hoursRemaining = hoursLeft;
+      await user.save({ validateBeforeSave: false });
     }
+    return isValid;
   }
 
   return Boolean(user.subscription.isActive);
