@@ -45,6 +45,8 @@ class GeniusPayService {
       throw new AppError('Configuration du service de paiement indisponible.', 500);
     }
 
+    const webhookEndpoint = callbackUrl || `${process.env.BACKEND_URL || 'https://yely-backend-yzw4.onrender.com'}/api/subscriptions/webhook`;
+
     const payload = {
       amount: Number(amount),
       currency: 'XOF',
@@ -56,10 +58,17 @@ class GeniusPayService {
         phone: customer?.phone || ''
       },
       return_url: returnUrl,
-      callback_url: callbackUrl || `${process.env.BACKEND_URL || 'https://yely-backend-yzw4.onrender.com'}/api/subscriptions/webhook`,
+      redirect_url: returnUrl,
+      success_url: returnUrl,
+      cancel_url: returnUrl,
+      error_url: returnUrl,
+      callback_url: webhookEndpoint,
+      notify_url: webhookEndpoint,
+      webhook_url: webhookEndpoint,
       metadata: {
         ...metadata,
-        platform: 'YELY_APP',
+        platform: metadata?.platform || 'YELY_APP',
+        reference: reference,
         timestamp: Date.now()
       }
     };

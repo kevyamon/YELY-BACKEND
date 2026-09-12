@@ -83,10 +83,12 @@ const initializeAutomatedPayment = async (userId, { planId = PLAN_TYPES.MONTHLY,
   const amount = pricingConfig.monthly.price;
 
   const reference = `YELY-SUB-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
-  const configuredUrl = process.env.MOBILE_RETURN_URL || process.env.APP_RETURN_URL || process.env.PWA_RETURN_URL;
-  const returnUrl = (configuredUrl && configuredUrl.startsWith('http'))
-    ? configuredUrl
-    : 'https://yely-amber.vercel.app';
+  const baseReturnUrl = platform === 'mobile'
+    ? (process.env.MOBILE_RETURN_URL || process.env.APP_RETURN_URL || process.env.PWA_RETURN_URL || 'https://yely-amber.vercel.app')
+    : (process.env.PWA_RETURN_URL || process.env.APP_RETURN_URL || process.env.MOBILE_RETURN_URL || 'https://yely-amber.vercel.app');
+
+  const delimiter = baseReturnUrl.includes('?') ? '&' : '?';
+  const returnUrl = `${baseReturnUrl}${delimiter}reference=${encodeURIComponent(reference)}&platform=${encodeURIComponent(platform)}`;
 
   const session = await geniusPayService.createPaymentSession({
     amount,
@@ -101,7 +103,8 @@ const initializeAutomatedPayment = async (userId, { planId = PLAN_TYPES.MONTHLY,
     metadata: {
       userId: user._id.toString(),
       userRole: user.role,
-      isPioneer: pricingConfig.isPioneer
+      isPioneer: pricingConfig.isPioneer,
+      platform: platform
     }
   });
 
