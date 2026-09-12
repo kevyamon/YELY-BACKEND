@@ -32,6 +32,18 @@ const poiSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    type: {
+      type: String,
+      enum: ['LANDMARK', 'SHOP'],
+      default: 'LANDMARK',
+      index: true,
+    },
+    sellerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
     isSuggested: {
       type: Boolean,
       default: false,

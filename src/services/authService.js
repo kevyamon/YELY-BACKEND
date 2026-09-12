@@ -68,8 +68,11 @@ const register = async (userData) => {
     throw new AppError('Action non autorisee.', 403);
   }
 
+  const shopNameTrimmed = userData.shopName ? String(userData.shopName).trim() : '';
+
   return await User.create({
     name: userData.name,
+    shopName: shopNameTrimmed,
     email: userData.email,
     phone: userData.phone,
     password: userData.password,

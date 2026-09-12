@@ -51,6 +51,12 @@ const userSchema = new mongoose.Schema({
     type: String, 
     default: '' 
   },
+  shopName: {
+    type: String,
+    trim: true,
+    default: '',
+    maxlength: [100, 'Le nom de boutique ne peut dépasser 100 caractères']
+  },
   shopSlug: {
     type: String,
     unique: true,

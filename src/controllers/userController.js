@@ -122,16 +122,18 @@ const updateShopLocation = async (req, res, next) => {
         address: address.trim()
       },
       { new: true, runValidators: true }
-    ).select('name email role currentLocation address');
+    ).select('name email role currentLocation address shopName shopSlug');
 
-    // AUTOMATISATION : Saisie communautaire automatique du commerce en POI
-    const poiName = user.name;
+    // AUTOMATISATION : Enregistrement de la boutique sur la carte en tant que POI de type SHOP
+    const poiName = user.shopName || user.name || 'Boutique Yely';
     await POI.findOneAndUpdate(
-      { name: poiName },
+      { sellerId: user._id },
       {
         name: poiName,
         latitude: latitude,
         longitude: longitude,
+        type: 'SHOP',
+        sellerId: user._id,
         icon: 'Ionicons/storefront', // Icône boutique dédiée
         iconColor: '#9b59b6', // Couleur violette distincte
         isActive: true

@@ -10,6 +10,25 @@ const AppError = require('../utils/AppError');
 
 const DEMO_PHONES = ['0100000001', '0100000002', '0100000003', '+2250100000001', '+2250100000002', '+2250100000003'];
 
+const formatAuthUser = (user) => ({
+  _id: user._id,
+  name: user.name,
+  shopName: user.shopName || '',
+  email: user.email,
+  phone: user.phone || '',
+  profilePicture: user.profilePicture || '',
+  role: user.role,
+  isAvailable: user.isAvailable,
+  rating: user.rating,
+  totalRides: user.totalRides,
+  totalEarnings: user.totalEarnings,
+  subscription: user.subscription,
+  vehicle: user.vehicle,
+  currentLocation: user.currentLocation,
+  address: user.address,
+  verificationStatus: user.verificationStatus
+});
+
 const registerUser = async (req, res, next) => {
   try {
     const user = await authService.register(req.body);
@@ -33,26 +52,8 @@ const registerUser = async (req, res, next) => {
 
     setRefreshTokenCookie(res, refreshTokenStr);
 
-    const userData = {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      profilePicture: user.profilePicture,
-      role: user.role,
-      isAvailable: user.isAvailable,
-      rating: user.rating,
-      totalRides: user.totalRides,
-      totalEarnings: user.totalEarnings,
-      subscription: user.subscription,
-      vehicle: user.vehicle,
-      currentLocation: user.currentLocation,
-      address: user.address,
-      verificationStatus: user.verificationStatus
-    };
-
     return successResponse(res, { 
-      user: userData, 
+      user: formatAuthUser(user), 
       accessToken, 
       refreshToken: refreshTokenStr 
     }, 'Compte créé avec succès', 201);
@@ -121,26 +122,8 @@ const loginUser = async (req, res, next) => {
 
     setRefreshTokenCookie(res, refreshTokenStr);
 
-    const userData = {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      profilePicture: user.profilePicture,
-      role: user.role,
-      isAvailable: user.isAvailable,
-      rating: user.rating,
-      totalRides: user.totalRides,
-      totalEarnings: user.totalEarnings,
-      subscription: user.subscription,
-      vehicle: user.vehicle,
-      currentLocation: user.currentLocation,
-      address: user.address,
-      verificationStatus: user.verificationStatus
-    };
-
     return successResponse(res, { 
-      user: userData, 
+      user: formatAuthUser(user), 
       accessToken, 
       refreshToken: refreshTokenStr 
     }, 'Connexion réussie', 200);
@@ -203,26 +186,8 @@ const refreshToken = async (req, res, next) => {
 
     setRefreshTokenCookie(res, newRefreshToken);
 
-    const userData = {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      profilePicture: user.profilePicture,
-      role: user.role,
-      isAvailable: user.isAvailable,
-      rating: user.rating,
-      totalRides: user.totalRides,
-      totalEarnings: user.totalEarnings,
-      subscription: user.subscription,
-      vehicle: user.vehicle,
-      currentLocation: user.currentLocation,
-      address: user.address,
-      verificationStatus: user.verificationStatus
-    };
-
     return successResponse(res, { 
-      user: userData,
+      user: formatAuthUser(user),
       accessToken: newAccessToken, 
       refreshToken: newRefreshToken 
     }, "Session rafraîchie", 200);
@@ -308,26 +273,8 @@ const googleAuth = async (req, res, next) => {
 
     setRefreshTokenCookie(res, refreshTokenStr);
 
-    const userData = {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone || '',
-      profilePicture: user.profilePicture || '',
-      role: user.role,
-      isAvailable: user.isAvailable,
-      rating: user.rating,
-      totalRides: user.totalRides,
-      totalEarnings: user.totalEarnings,
-      subscription: user.subscription,
-      vehicle: user.vehicle,
-      currentLocation: user.currentLocation,
-      address: user.address,
-      verificationStatus: user.verificationStatus
-    };
-
     return successResponse(res, { 
-      user: userData, 
+      user: formatAuthUser(user), 
       accessToken, 
       refreshToken: refreshTokenStr 
     }, 'Connexion Google réussie', 200);
