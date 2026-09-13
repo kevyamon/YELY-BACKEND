@@ -9,6 +9,7 @@ const {
   getStatus,
   initializePayment,
   handleWebhook,
+  handlePaymentReturn,
   verifyPayment
 } = require('../controllers/subscriptionController');
 const { protect, authorize } = require('../middleware/authMiddleware');
@@ -52,6 +53,15 @@ router.get(
   '/verify/:reference',
   protect,
   verifyPayment
+);
+
+/**
+ * @route   GET /api/v1/subscriptions/return
+ * @desc    Trampoline HTTPS de retour de paiement (redirection universelle Deep Link / PWA)
+ */
+router.get(
+  '/return',
+  handlePaymentReturn
 );
 
 /**

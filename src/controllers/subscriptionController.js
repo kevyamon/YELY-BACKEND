@@ -80,6 +80,53 @@ const handleWebhook = async (req, res, next) => {
   }
 };
 
+const handlePaymentReturn = async (req, res, next) => {
+  try {
+    const reference = req.query.reference || req.query.transaction_id || req.query.id || '';
+    const platform = req.query.platform || 'mobile';
+
+    const deepLinkUrl = `yely://subscription?reference=${encodeURIComponent(reference)}&status=success`;
+    const webUrl = `https://yely-amber.vercel.app/subscription?reference=${encodeURIComponent(reference)}`;
+    const redirectTarget = platform === 'mobile' ? deepLinkUrl : webUrl;
+
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yély — Redirection Paiement</title>
+  <style>
+    body { background-color: #121418; color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
+    .card { background: #1E222B; border: 1px solid rgba(212, 175, 55, 0.3); border-radius: 20px; padding: 32px 24px; max-width: 380px; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .spinner { width: 44px; height: 44px; border: 4px solid rgba(212, 175, 55, 0.2); border-top-color: #D4AF37; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    h2 { color: #D4AF37; font-size: 20px; margin: 0 0 10px; }
+    p { color: #A0AEC0; font-size: 14px; margin: 0 0 24px; line-height: 1.5; }
+    .btn { display: inline-block; background: #D4AF37; color: #121418; font-weight: bold; padding: 14px 28px; border-radius: 12px; text-decoration: none; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="spinner"></div>
+    <h2>Paiement en cours de validation</h2>
+    <p>Votre abonnement est en cours de synchronisation. Redirection vers votre application Yély...</p>
+    <a href="${redirectTarget}" class="btn">Ouvrir Yély</a>
+  </div>
+  <script>
+    setTimeout(function() {
+      window.location.href = "${redirectTarget}";
+    }, 400);
+  </script>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.status(200).send(html);
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const verifyPayment = async (req, res, next) => {
   try {
     const { reference } = req.params;
@@ -112,7 +159,6 @@ const getStatus = async (req, res, next) => {
       status: 'PENDING' 
     }).sort({ createdAt: -1 });
 
-    // Auto-reconciliation proactive : si une transaction est PENDING, interroger directement GeniusPay
     if (pendingTransaction) {
       const refToCheck = pendingTransaction.gatewayTransactionId || pendingTransaction.paymentReference;
       if (refToCheck) {
@@ -150,6 +196,7 @@ module.exports = {
   getConfig,
   initializePayment,
   handleWebhook,
+  handlePaymentReturn,
   verifyPayment,
   getStatus
 };
