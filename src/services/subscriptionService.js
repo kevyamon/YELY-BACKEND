@@ -84,8 +84,8 @@ const initializeAutomatedPayment = async (userId, { planId = PLAN_TYPES.MONTHLY,
 
   const reference = `YELY-SUB-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
   const baseReturnUrl = platform === 'mobile'
-    ? (process.env.MOBILE_RETURN_URL || process.env.APP_RETURN_URL || process.env.PWA_RETURN_URL || 'https://yely-amber.vercel.app')
-    : (process.env.PWA_RETURN_URL || process.env.APP_RETURN_URL || process.env.MOBILE_RETURN_URL || 'https://yely-amber.vercel.app');
+    ? (process.env.MOBILE_RETURN_URL || 'yely://subscription')
+    : (process.env.PWA_RETURN_URL || process.env.APP_RETURN_URL || 'https://yely-amber.vercel.app');
 
   const delimiter = baseReturnUrl.includes('?') ? '&' : '?';
   const returnUrl = `${baseReturnUrl}${delimiter}reference=${encodeURIComponent(reference)}&platform=${encodeURIComponent(platform)}`;
