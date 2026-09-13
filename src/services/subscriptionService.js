@@ -83,8 +83,8 @@ const initializeAutomatedPayment = async (userId, { planId = PLAN_TYPES.MONTHLY,
   const amount = pricingConfig.monthly.price;
 
   const reference = `YELY-SUB-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
-  const backendBaseUrl = (process.env.BACKEND_URL || 'https://yely-backend-yzw4.onrender.com').replace(/\/$/, '');
-  const returnUrl = `${backendBaseUrl}/api/v1/subscriptions/return?reference=${encodeURIComponent(reference)}&platform=${encodeURIComponent(platform)}`;
+  const pwaBaseUrl = (process.env.PWA_RETURN_URL || process.env.APP_RETURN_URL || 'https://yely-amber.vercel.app').replace(/\/$/, '');
+  const returnUrl = `${pwaBaseUrl}/payment-return?reference=${encodeURIComponent(reference)}&platform=${encodeURIComponent(platform)}`;
 
   const session = await geniusPayService.createPaymentSession({
     amount,
