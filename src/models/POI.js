@@ -1,6 +1,6 @@
 // src/models/POI.js
-// MODÈLE DE BASE DE DONNÉES - Points d'Intérêt (Lieux)
-// CSCSM Level: Bank Grade
+// MODÈLE DE BASE DE DONNÉES - Points d'Intérêt & Boutiques (Support Multi-Boutiques / Immeubles)
+// CSCSM Level: Bank Grade (Modularisé < 325 lignes, Sans Emojis)
 
 const mongoose = require('mongoose');
 
@@ -10,7 +10,7 @@ const poiSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Un lieu doit avoir un nom'],
       trim: true,
-      unique: true,
+      index: true,
     },
     latitude: {
       type: Number,
@@ -22,7 +22,7 @@ const poiSchema = new mongoose.Schema(
     },
     icon: {
       type: String,
-      default: 'Ionicons/location', // CORRECTION : Mise au format universel par défaut
+      default: 'Ionicons/location',
     },
     iconColor: {
       type: String,
@@ -31,6 +31,7 @@ const poiSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+      index: true,
     },
     type: {
       type: String,
@@ -67,6 +68,8 @@ const poiSchema = new mongoose.Schema(
     timestamps: true, 
   }
 );
+
+poiSchema.index({ latitude: 1, longitude: 1 });
 
 const POI = mongoose.model('POI', poiSchema);
 
