@@ -27,7 +27,11 @@ const getOrCreateSellerSlug = async (seller) => {
   const randomHex = crypto.randomBytes(3).toString('hex');
   const uniqueSlug = `${baseSlug}-${randomHex}`;
   seller.shopSlug = uniqueSlug;
-  await seller.save({ validateBeforeSave: false });
+  if (typeof seller.save === 'function') {
+    await seller.save({ validateBeforeSave: false });
+  } else if (seller._id) {
+    await User.updateOne({ _id: seller._id }, { $set: { shopSlug: uniqueSlug } });
+  }
   return uniqueSlug;
 };
 
