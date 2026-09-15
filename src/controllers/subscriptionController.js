@@ -145,10 +145,15 @@ const getStatus = async (req, res, next) => {
     const user = await User.findById(req.user._id);
     if (!user) throw new AppError("Utilisateur introuvable.", 404);
 
-    if (user.phone && DEMO_PHONES.includes(user.phone)) {
+    const settings = await Settings.findOne();
+    const isGlobalFreeAccess = settings?.isGlobalFreeAccess || false;
+    const isDemo = (user.phone && DEMO_PHONES.includes(user.phone)) || user.phone === '+2250000000';
+
+    if (isDemo || isGlobalFreeAccess) {
       return successResponse(res, {
         isActive: true,
         isPending: false,
+        isGlobalFreeAccess: isGlobalFreeAccess,
         expiresAt: new Date('2099-12-31T23:59:59Z'),
         hoursRemaining: 999999
       });
@@ -182,6 +187,7 @@ const getStatus = async (req, res, next) => {
     return successResponse(res, {
       isActive,
       isPending: !isActive && !!remainingPending,
+      isGlobalFreeAccess: false,
       pendingReference: !isActive && remainingPending ? remainingPending.paymentReference : null,
       gatewayReference: !isActive && remainingPending ? remainingPending.gatewayTransactionId : null,
       expiresAt: updatedUser?.subscription?.expiresAt || null,

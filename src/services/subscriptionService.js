@@ -19,35 +19,21 @@ const DEMO_PHONES = ['0100000001', '0100000002', '0100000003', '+2250100000001',
 
 const checkIsPioneer = async (userIdOrUser) => {
   if (!userIdOrUser) return false;
-  
   const settings = await Settings.findOne();
-  if (!settings || !settings.isPioneerProgramActive || !settings.pioneerProgramStartedAt) {
-    return false;
-  }
+  if (!settings || !settings.isPioneerProgramActive || !settings.pioneerProgramStartedAt) return false;
 
   let user = userIdOrUser.role ? userIdOrUser : await User.findById(userIdOrUser);
   if (!user || (user.role !== 'driver' && user.role !== 'seller')) return false;
+  if (new Date(user.createdAt) < new Date(settings.pioneerProgramStartedAt)) return false;
 
-  // Les comptes crees avant l'activation du bouton pionnier par l'admin sont exclus
-  if (new Date(user.createdAt) < new Date(settings.pioneerProgramStartedAt)) {
-    return false;
-  }
-
-  // Limitation stricte aux 4 premiers mois d'abonnement au tarif pionnier
   const monthsUsed = user.subscription?.pioneerMonthsUsed || 0;
-  if (monthsUsed >= (settings.pioneerMaxMonths || 4)) {
-    return false;
-  }
+  if (monthsUsed >= (settings.pioneerMaxMonths || 4)) return false;
 
   const limit = settings.pioneerLimitCount || 20;
   const olderPioneersCount = await User.countDocuments({
     role: user.role,
-    createdAt: { 
-      $gte: settings.pioneerProgramStartedAt,
-      $lt: user.createdAt 
-    }
+    createdAt: { $gte: settings.pioneerProgramStartedAt, $lt: user.createdAt }
   });
-
   return olderPioneersCount < limit;
 };
 
@@ -60,7 +46,6 @@ const getSubscriptionPricing = async (userId = null) => {
   let user = userId ? await User.findById(userId).select('subscription') : null;
   const monthsUsed = user?.subscription?.pioneerMonthsUsed || 0;
   const maxMonths = settings.pioneerMaxMonths || 4;
-
   const monthlyPrice = isPioneer ? (isPromo ? 700 : 1000) : (isPromo ? 1500 : baseMonthlyPrice);
   
   return {
@@ -292,7 +277,11 @@ const checkSubscriptionStatus = async (userId) => {
   const user = await User.findById(userId);
   if (!user) return false;
 
-  if (user.phone && DEMO_PHONES.includes(user.phone)) return true;
+  const isDemo = (user.phone && DEMO_PHONES.includes(user.phone)) || user.phone === '+2250000000';
+  if (isDemo) return true;
+
+  const settings = await Settings.findOne();
+  if (settings?.isGlobalFreeAccess) return true;
   if (!user.subscription) return false;
 
   if (user.subscription.expiresAt) {

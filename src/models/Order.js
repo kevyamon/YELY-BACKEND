@@ -122,12 +122,12 @@ orderSchema.index(
   }
 );
 
-// INDEX TTL COMPLET : Suppression automatique de toutes les commandes (livrées ou autres) après 1 an (31536000 secondes) pour préserver le stockage MongoDB de 500Mo
+// INDEX TTL PARTIEL : Suppression automatique des commandes livrees apres 30 jours (2592000 secondes) pour preserver l'espace disque MongoDB
 orderSchema.index(
-  { createdAt: 1 },
-  {
-    expireAfterSeconds: 31536000,
-    name: "general_order_ttl"
+  { deliveredAt: 1 },
+  { 
+    expireAfterSeconds: 2592000, 
+    partialFilterExpression: { status: 'delivered' } 
   }
 );
 

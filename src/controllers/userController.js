@@ -216,7 +216,7 @@ const updatePassword = async (req, res, next) => {
 const verifyIdentity = async (req, res, next) => {
   try {
     const userId = req.user._id;
-    const { vehicleType } = req.body;
+    const { vehicleType, vehicleModel, vehiclePlate, model, plate } = req.body;
 
     if (req.user.role !== 'driver') {
       throw new AppError('Seuls les chauffeurs peuvent soumettre une vérification d\'identité.', 403);
@@ -230,9 +230,9 @@ const verifyIdentity = async (req, res, next) => {
     if (!user) throw new AppError('Utilisateur introuvable.', 404);
 
     const updateData = {};
-    if (vehicleType) {
-      updateData['vehicle.type'] = vehicleType;
-    }
+    if (vehicleType) updateData['vehicle.type'] = vehicleType;
+    if (vehicleModel || model) updateData['vehicle.model'] = String(vehicleModel || model).trim();
+    if (vehiclePlate || plate) updateData['vehicle.plate'] = String(vehiclePlate || plate).trim();
 
     // Upload sur Cloudinary si des fichiers sont fournis
     if (req.files) {
@@ -260,7 +260,6 @@ const verifyIdentity = async (req, res, next) => {
       }
     }
 
-    // Si on a à la fois le recto, le verso et le type de véhicule, le statut passe en pending
     const finalFront = updateData['documents.idCardFront'] || user.documents?.idCardFront;
     const finalBack = updateData['documents.idCardBack'] || user.documents?.idCardBack;
     const finalType = updateData['vehicle.type'] || user.vehicle?.type;
@@ -274,6 +273,27 @@ const verifyIdentity = async (req, res, next) => {
       { $set: updateData },
       { new: true, runValidators: true, select: '-password -__v' }
     );
+
+    if (updateData.verificationStatus === 'pending') {
+      try {
+        const notificationService = require('../services/notificationService');
+        const emailService = require('../services/emailService');
+        const admins = await User.find({ role: { $in: ['superadmin', 'admin'] } }).select('email name');
+        for (const admin of admins) {
+          notificationService.sendNotification(
+            admin._id.toString(),
+            'Nouvelle Demande de Vérification',
+            `${updatedUser.name || 'Un chauffeur'} a soumis ses documents d'identité pour validation.`,
+            'IDENTITY_SUBMITTED',
+            { driverId: updatedUser._id.toString() }
+          ).catch(() => {});
+
+          if (admin.email) {
+            emailService.sendIdentitySubmittedToAdmin(admin.email, admin.name, updatedUser).catch(() => {});
+          }
+        }
+      } catch (_) {}
+    }
 
     return successResponse(res, updatedUser, 'Demande de vérification enregistrée avec succès.');
   } catch (error) {

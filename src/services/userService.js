@@ -8,18 +8,14 @@ const AppError = require('../utils/AppError');
 const cloudinary = require('../config/cloudinary');
 const fs = require('fs');
 
+const authService = require('./authService');
+
 const getUserProfile = async (userId) => {
-  // CORRECTION SENIOR: Retrait de .populate() qui est inutile sur un objet imbriqué
   const user = await User.findById(userId).select('-password -__v');
-    
   if (!user) throw new AppError('Utilisateur introuvable.', 404);
 
-  // CORRECTION SENIOR: Synchronisation du temps au moment de fetch le profil
-  if (typeof user.syncSubscription === 'function' && user.syncSubscription()) {
-    await User.updateOne(
-      { _id: user._id }, 
-      { $set: { subscription: user.subscription } }
-    );
+  if (user.role === 'driver' || user.role === 'seller') {
+    return await authService.resolveUserSubscription(user);
   }
 
   return user;

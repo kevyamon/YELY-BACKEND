@@ -162,10 +162,10 @@ exports.verifyDriver = async (req, res, next) => {
         io.to(driver._id.toString()).emit('force_availability_offline');
       }
 
-      const pushTitle = decision === 'approved' ? "Identite Validee" : "Verification Refusee";
+      const pushTitle = decision === 'approved' ? 'Identité Validée' : 'Vérification Refusée';
       const pushBody = decision === 'approved'
-        ? "Votre identite a ete validee par l'administration."
-        : `Votre dossier de verification a ete refuse : ${driver.rejectionReason}`;
+        ? "Votre identité a été validée par l'administration."
+        : `Votre dossier de vérification a été refusé : ${driver.rejectionReason}`;
 
       notificationService.sendNotification(
         driver._id.toString(),
@@ -174,11 +174,21 @@ exports.verifyDriver = async (req, res, next) => {
         decision === 'approved' ? 'IDENTITY_APPROVED' : 'IDENTITY_REJECTED',
         { status: decision }
       ).catch(() => {});
+
+      const emailService = require('../services/emailService');
+      if (driver.email) {
+        emailService.sendIdentityDecisionToDriver(
+          driver.email,
+          driver.name,
+          decision,
+          driver.rejectionReason
+        ).catch(() => {});
+      }
     } catch (e) {
       logger.error(`[NOTIF ERROR] verifyDriver: ${e.message}`);
     }
 
-    return successResponse(res, { verificationStatus: driver.verificationStatus }, `Dossier chauffeur traite avec succes (${decision}).`);
+    return successResponse(res, { verificationStatus: driver.verificationStatus }, `Dossier chauffeur traité avec succès (${decision}).`);
   } catch (error) {
     return next(error);
   }

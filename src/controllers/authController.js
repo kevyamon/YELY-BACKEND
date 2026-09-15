@@ -14,6 +14,7 @@ const formatAuthUser = (user) => ({
   _id: user._id,
   name: user.name,
   shopName: user.shopName || '',
+  shopSlug: user.shopSlug || '',
   email: user.email,
   phone: user.phone || '',
   profilePicture: user.profilePicture || '',

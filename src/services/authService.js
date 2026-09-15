@@ -16,18 +16,20 @@ const MAX_ATTEMPTS = SECURITY_CONSTANTS?.MAX_LOGIN_ATTEMPTS || 5;
 const LOCK_WINDOW = SECURITY_CONSTANTS?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000;
 const STORE_TESTER_PHONE = '+2250000000';
 
-const resolveDriverSubscription = async (user) => {
+const resolveUserSubscription = async (user) => {
   const settings = await Settings.findOne();
   const isGlobalFreeAccess = settings?.isGlobalFreeAccess || false;
 
-  if (user.phone === STORE_TESTER_PHONE || isGlobalFreeAccess) {
+  const isDemo = (user.phone && DEMO_PHONES.includes(user.phone)) || user.phone === STORE_TESTER_PHONE;
+
+  if (isDemo || isGlobalFreeAccess) {
     const sub = {
       isActive: true,
       expiresAt: new Date('2099-12-31T23:59:59Z'),
       hoursRemaining: 999999,
       plan: 'MONTHLY'
     };
-    if (user.phone === STORE_TESTER_PHONE) {
+    if (isDemo) {
       await User.updateOne({ _id: user._id }, { subscription: sub });
     }
     const userObj = user.toObject ? user.toObject() : { ...user };
@@ -70,7 +72,7 @@ const register = async (userData) => {
 
   const shopNameTrimmed = userData.shopName ? String(userData.shopName).trim() : '';
 
-  return await User.create({
+  const newUser = await User.create({
     name: userData.name,
     shopName: shopNameTrimmed,
     email: userData.email,
@@ -78,6 +80,11 @@ const register = async (userData) => {
     password: userData.password,
     role: userData.role || 'rider'
   });
+
+  if (newUser.role === 'driver' || newUser.role === 'seller') {
+    return await resolveUserSubscription(newUser);
+  }
+  return newUser.toObject();
 };
 
 const login = async (identifier, password, clientPlatform) => {
@@ -130,8 +137,8 @@ const login = async (identifier, password, clientPlatform) => {
     await User.updateOne({ _id: user._id }, { loginAttempts: 0, $unset: { lockUntil: 1 } });
   }
 
-  if (user.role === 'driver') {
-    return await resolveDriverSubscription(user);
+  if (user.role === 'driver' || user.role === 'seller') {
+    return await resolveUserSubscription(user);
   }
   return user.toObject();
 };
@@ -187,8 +194,8 @@ const validateSessionForRefresh = async (token, clientPlatform) => {
     if (user.isDeleted) throw new AppError('Session invalide, ce compte est supprime.', 403);
     if (user.isBanned) throw new AppError(`Session revoquee. Compte suspendu: ${user.banReason}`, 403);
 
-    if (user.role === 'driver') {
-      return await resolveDriverSubscription(user);
+    if (user.role === 'driver' || user.role === 'seller') {
+      return await resolveUserSubscription(user);
     }
     return user.toObject();
   } catch (error) {
@@ -232,10 +239,14 @@ const loginWithGoogle = async ({ email, name, profilePicture, role = 'rider', is
   if (user.isDeleted) throw new AppError('Ce compte a été supprimé.', 403);
   if (user.isBanned) throw new AppError(`Ce compte est suspendu: ${user.banReason}`, 403);
 
-  return user;
+  if (user.role === 'driver' || user.role === 'seller') {
+    return await resolveUserSubscription(user);
+  }
+  return user.toObject ? user.toObject() : user;
 };
 
 module.exports = {
+  resolveUserSubscription,
   register,
   login,
   loginWithGoogle,
